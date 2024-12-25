@@ -1,12 +1,14 @@
 # core/data/uploader.py
 
+import datetime
 from pathlib import Path
 import shutil
 from core.data.processor import (
     process_breeding_record_file,
     process_cow_data_file,
     process_bull_data_file,
-    process_body_conformation_file
+    process_body_conformation_file,
+    process_genomic_data_file
 )
 import pandas as pd
 import logging
@@ -248,4 +250,54 @@ def upload_and_standardize_body_data(input_files: list[Path], project_path: Path
         raise ValueError("标准化后的体型外貌数据文件未生成，请检查标准化逻辑。")
 
     logging.info(f"体型外貌数据已标准化并保存至: {final_path}")
+    return final_path
+
+def upload_and_standardize_genomic_data(input_files: list[Path], project_path: Path, progress_callback=None) -> Path:
+    """
+    处理上传的基因组检测数据并进行标准化。
+
+    参数:
+        input_files (list[Path]): 要上传的基因组检测数据文件列表。
+        project_path (Path): 当前项目的路径。
+        progress_callback (callable, optional): 进度回调函数，用于更新进度条或显示信息。
+
+    返回:
+        Path: 标准化后的基因组检测数据文件路径。
+    """
+    logging.info("开始上传并标准化基因组检测数据")
+
+    if not project_path.is_dir():
+        logging.error(f"项目路径不存在或无效: {project_path}")
+        raise ValueError(f"项目路径不存在或无效: {project_path}")
+
+    raw_data_path = project_path / "raw_data" / "genomic_data"
+    standardized_path = project_path / "standardized_data"
+    raw_data_path.mkdir(parents=True, exist_ok=True)
+    standardized_path.mkdir(parents=True, exist_ok=True)
+
+    # 为每个上传的文件添加序号并保存到 raw_data
+    renamed_files = []
+    for idx, source_file in enumerate(input_files, start=1):
+        if not source_file.exists():
+            logging.error(f"输入文件不存在: {source_file}")
+            raise FileNotFoundError(f"输入文件不存在: {source_file}")
+
+        # 创建带有序号的文件名，例如 genomic_data_1.xlsx
+        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        target_file = raw_data_path / f"genomic_data_{timestamp}_{idx}{source_file.suffix}"
+        shutil.copy2(source_file, target_file)
+        logging.info(f"已上传并重命名基因组检测数据文件至: {target_file}")
+        renamed_files.append(target_file)
+
+    # 处理基因组检测数据
+    final_path = process_genomic_data_file(
+        renamed_files,
+        project_path,
+        progress_callback=progress_callback
+    )
+    if final_path is None or not final_path.exists():
+        logging.error("标准化后的基因组检测数据文件未生成，请检查标准化逻辑。")
+        raise ValueError("标准化后的基因组检测数据文件未生成，请检查标准化逻辑。")
+
+    logging.info(f"基因组检测数据已标准化并保存至: {final_path}")
     return final_path

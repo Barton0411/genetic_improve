@@ -67,7 +67,7 @@ from core.data.uploader import (
     upload_and_standardize_cow_data
 )
 
-from gui.worker import CowDataWorker
+from gui.worker import CowDataWorker, GenomicDataWorker
 from gui.progress import ProgressDialog
 
 class DragDropArea(QFrame):
@@ -120,7 +120,7 @@ class MainWindow(QMainWindow):
 
     def setup_ui(self):
         self.setWindowTitle("奶牛育种智选报告专家")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 1600, 900)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -432,10 +432,11 @@ class MainWindow(QMainWindow):
             ("母牛数据", "cow_template.xlsx"),
             ("配种记录", "breeding_record_template.xlsx"),
             ("体型外貌数据", "body_conformation_template.xlsx"),
-            ("备选公牛数据", "candidate_bull_template.xlsx")
+            ("备选公牛数据", "candidate_bull_template.xlsx"),
+            ("基因组检测数据", "genomic_data_template.xlsx") 
         ]
 
-        positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
+        positions = [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0)]
         for (row, col), (display_name, template_file) in zip(positions, upload_items):
             cell_widget = self.create_upload_cell(display_name, template_file)
             cell_widget.setProperty("display_name", display_name)  # 设置 display_name 属性
@@ -443,7 +444,7 @@ class MainWindow(QMainWindow):
 
         self.content_stack.addWidget(page)
     
-    #在MainWindow中增加一个处理文件的通用函数
+    # 在 handle_file_upload 方法中添加对基因组检测数据的处理逻辑
     def handle_file_upload(self, file_paths: list[Path], display_name: str):
         """根据上传类型选择不同的处理方法"""
         if self.selected_project_path is None:
@@ -476,6 +477,27 @@ class MainWindow(QMainWindow):
                 self.worker.error.connect(self.on_worker_error)
 
                 self.thread.start()
+            elif display_name == "基因组检测数据":
+                # 处理基因组检测数据
+                self.progress_dialog = ProgressDialog(self)
+                self.progress_dialog.set_task_info("上传并处理基因组检测数据", 0, 100)
+                self.progress_dialog.show()
+
+                self.genomic_thread = QThread()
+                self.genomic_worker = GenomicDataWorker(file_paths, self.selected_project_path)
+                self.genomic_worker.moveToThread(self.genomic_thread)
+
+                # 连接信号与槽
+                self.genomic_thread.started.connect(self.genomic_worker.run)
+                self.genomic_worker.progress.connect(self.progress_dialog.update_progress)
+                self.genomic_worker.message.connect(self.progress_dialog.update_info)
+                self.genomic_worker.finished.connect(self.on_genomic_worker_finished)
+                self.genomic_worker.finished.connect(self.genomic_thread.quit)
+                self.genomic_worker.finished.connect(self.genomic_worker.deleteLater)
+                self.genomic_thread.finished.connect(self.genomic_thread.deleteLater)
+                self.genomic_worker.error.connect(self.on_worker_error)
+
+                self.genomic_thread.start()
             else:
                 # 其他数据类型直接处理
                 final_path = None
@@ -495,6 +517,12 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "功能未实现", str(nie))
         except Exception as e:
             QMessageBox.critical(self, "错误", f"文件上传或标准化时发生错误：{str(e)}")
+
+    # 添加一个新的处理函数 for genomic data
+    def on_genomic_worker_finished(self, final_path: Path):
+        """处理 Genomic Worker 完成的信号"""
+        self.progress_dialog.close()
+        QMessageBox.information(self, "成功", f"基因组检测数据已成功上传并标准化，标准化文件路径：{final_path}")
 
     def on_worker_finished(self, final_path: Path):
         """处理 Worker 完成的信号"""
@@ -517,10 +545,13 @@ class MainWindow(QMainWindow):
 
         # 拖拽区域
         drag_area = DragDropArea(frame)
-        drag_area.setMinimumHeight(250)  # 根据需要调整拖拽区域的高度
+        drag_area.setMinimumHeight(200)  # 根据需要调整拖拽区域的高度
         
-        # 拖拽完成后调用相同的处理逻辑
-        drag_area.dropped.connect(lambda file_path: self.handle_file_upload([file_path], display_name))
+        # 拖拽完成后调用不同的处理逻辑
+        if display_name == "基因组检测数据":
+            drag_area.dropped.connect(lambda file_path: self.handle_file_upload([file_path], display_name))
+        else:
+            drag_area.dropped.connect(lambda file_path: self.handle_file_upload([file_path], display_name))
 
         v_layout.addWidget(drag_area, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -539,7 +570,6 @@ class MainWindow(QMainWindow):
             background-color: #2980b9;
         }
         """
-                # 调整按钮样式，使其更大、更醒目
         button_style_down = """
         QPushButton {
             background-color: #6f7f91;
@@ -570,6 +600,7 @@ class MainWindow(QMainWindow):
         v_layout.addWidget(upload_btn, alignment=Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
 
         return frame
+
 
     def download_template(self, template_file: str):
         """下载模板文件"""
