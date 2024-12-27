@@ -153,7 +153,7 @@ class TraitsCalculationWorker(QObject):
                 return
             
             # 核心计算逻辑
-            success, message = self.key_traits_page.perform_traits_calculation(
+            success, message = self.key_traits_page.perform_cow_traits_calculation(
                 parent,  # 传递找到的主窗口
                 progress_callback=lambda p: self.update_progress(1, p),
                 task_info_callback=self.task_info.emit

@@ -1,4 +1,4 @@
-# core/breeding_calc/traits_calc.py
+# core/breeding_calc/cow_traits_calc.py
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, 
     QListWidget, QListWidgetItem, QAbstractItemView, QMessageBox    # 添加 QListWidgetItem
@@ -40,7 +40,7 @@ TRAITS_TRANSLATION = {
     'Eval Date': '数据日期'
 }
 
-class KeyTraitsPage(QWidget):
+class CowKeyTraitsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         
@@ -93,7 +93,7 @@ class KeyTraitsPage(QWidget):
         reset_button = QPushButton("恢复默认")
         reset_button.clicked.connect(self.reset_traits)
         confirm_button = QPushButton("确认")  # 添加确认按钮
-        confirm_button.clicked.connect(self.start_traits_calculation)  # 添加点击事件处理
+        confirm_button.clicked.connect(self.start_cow_traits_calculation)  # 添加点击事件处理
         
         button_layout.addStretch()
         button_layout.addWidget(add_button)
@@ -171,11 +171,67 @@ class KeyTraitsPage(QWidget):
         return [self.selected_traits_list.item(i).data(Qt.ItemDataRole.UserRole) 
                 for i in range(self.selected_traits_list.count())]
 
-    # 在 KeyTraitsPage 类中添加新的方法
+    # 在 CowKeyTraitsPage 类中添加新的方法
 
+    def start_cow_traits_calculation(self):
+        """开始关键性状计算流程"""
+        print("开始关键性状计算流程...")
+        
+        # 获取主窗口实例
+        parent = self.parent()
+        while parent and not isinstance(parent, QMainWindow):
+            parent = parent.parent()
+        main_window = parent
+        
+        if not main_window:
+            QMessageBox.warning(self, "警告", "无法获取主窗口")
+            return
+        
+        if not hasattr(main_window, 'selected_project_path') or not main_window.selected_project_path:
+            QMessageBox.warning(self, "警告", "请先选择一个项目")
+            return
 
+        try:
+            # 创建进度对话框
+            self.progress_dialog = ProgressDialog(self)
+            self.progress_dialog.show()
 
-    def process_key_traits_by_year(self, detail_path, progress_callback=None):
+            # 设置文件路径
+            detail_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_detail.xlsx"
+            yearly_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_mean_by_year.xlsx"
+            pedigree_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pidgree.xlsx"
+            genomic_data_path = main_window.selected_project_path / "standardized_data" / "processed_genomic_data.xlsx"
+
+            # 创建工作线程和worker
+            self.thread = QThread()
+            self.worker = TraitsCalculationWorker(
+                self,
+                detail_output_path,
+                yearly_output_path,
+                pedigree_output_path,
+                genomic_data_path if genomic_data_path.exists() else None
+            )
+            self.worker.moveToThread(self.thread)
+
+            # 连接信号
+            self.thread.started.connect(self.worker.run)
+            self.worker.progress.connect(self.progress_dialog.update_progress)
+            self.worker.task_info.connect(self.progress_dialog.set_task_info)
+            self.worker.speed_info.connect(self.progress_dialog.update_info)
+            self.worker.finished.connect(self.on_calculation_finished)
+            self.worker.error.connect(self.on_calculation_error)
+            self.worker.finished.connect(self.thread.quit)
+            self.worker.finished.connect(self.worker.deleteLater)
+            self.thread.finished.connect(self.thread.deleteLater)
+
+            # 启动线程
+            self.thread.start()
+
+        except Exception as e:
+            print(f"发生错误: {str(e)}")
+            QMessageBox.critical(self, "错误", f"处理过程中发生错误：{str(e)}")
+
+    def process_cow_key_traits_by_year(self, detail_path, progress_callback=None):
         """处理年度关键性状数据"""
         print("开始处理年度关键性状数据...")
         
@@ -310,7 +366,7 @@ class KeyTraitsPage(QWidget):
             print(f"处理年度关键性状数据时发生错误: {str(e)}")
             raise
 
-    def perform_traits_calculation(self, main_window, progress_callback=None, task_info_callback=None):
+    def perform_cow_traits_calculation(self, main_window, progress_callback=None, task_info_callback=None):
         """执行关键性状计算的核心逻辑"""
         try:
             # 1. 获取所选性状列表
@@ -413,12 +469,12 @@ class KeyTraitsPage(QWidget):
             
             # 7. 处理年度平均值和回归分析
             yearly_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_mean_by_year.xlsx"
-            if not self.process_key_traits_by_year(detail_output_path):
+            if not self.process_cow_key_traits_by_year(detail_output_path):
                 return False, "用户取消了年度数据保存操作"
 
             # 8. 计算关键性状得分
             pedigree_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pidgree.xlsx"
-            if not self.calculate_key_traits_scores(detail_output_path, yearly_output_path):
+            if not self.calculate_cow_key_traits_scores(detail_output_path, yearly_output_path):
                 return False, "用户取消了得分计算操作"
             
             # 9. 用基因组数据更新关键性状得分
@@ -434,65 +490,6 @@ class KeyTraitsPage(QWidget):
         except Exception as e:
             return False, str(e)
 
-    def start_traits_calculation(self):
-        """开始关键性状计算流程"""
-        print("开始关键性状计算流程...")
-        
-        # 获取主窗口实例
-        parent = self.parent()
-        while parent and not isinstance(parent, QMainWindow):
-            parent = parent.parent()
-        main_window = parent
-        
-        if not main_window:
-            QMessageBox.warning(self, "警告", "无法获取主窗口")
-            return
-        
-        if not hasattr(main_window, 'selected_project_path') or not main_window.selected_project_path:
-            QMessageBox.warning(self, "警告", "请先选择一个项目")
-            return
-
-        try:
-            # 创建进度对话框
-            self.progress_dialog = ProgressDialog(self)
-            self.progress_dialog.show()
-
-            # 设置文件路径
-            detail_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_detail.xlsx"
-            yearly_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_mean_by_year.xlsx"
-            pedigree_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pidgree.xlsx"
-            genomic_data_path = main_window.selected_project_path / "standardized_data" / "processed_genomic_data.xlsx"
-
-            # 创建工作线程和worker
-            self.thread = QThread()
-            self.worker = TraitsCalculationWorker(
-                self,
-                detail_output_path,
-                yearly_output_path,
-                pedigree_output_path,
-                genomic_data_path if genomic_data_path.exists() else None
-            )
-            self.worker.moveToThread(self.thread)
-
-            # 连接信号
-            self.thread.started.connect(self.worker.run)
-            self.worker.progress.connect(self.progress_dialog.update_progress)
-            self.worker.task_info.connect(self.progress_dialog.set_task_info)
-            self.worker.speed_info.connect(self.progress_dialog.update_info)
-            self.worker.finished.connect(self.on_calculation_finished)
-            self.worker.error.connect(self.on_calculation_error)
-            self.worker.finished.connect(self.thread.quit)
-            self.worker.finished.connect(self.worker.deleteLater)
-            self.thread.finished.connect(self.thread.deleteLater)
-
-            # 启动线程
-            self.thread.start()
-
-        except Exception as e:
-            print(f"发生错误: {str(e)}")
-            QMessageBox.critical(self, "错误", f"处理过程中发生错误：{str(e)}")
-
-
     def on_calculation_finished(self):
         """计算完成的处理"""
         self.progress_dialog.close()
@@ -503,8 +500,7 @@ class KeyTraitsPage(QWidget):
         self.progress_dialog.close()
         QMessageBox.critical(self, "错误", f"处理过程中发生错误：{error_message}")
 
-
-    def calculate_key_traits_scores(self, detail_path, yearly_path, progress_callback=None):
+    def calculate_cow_key_traits_scores(self, detail_path, yearly_path, progress_callback=None):
         """计算母牛关键性状得分"""
         print("开始计算母牛关键性状得分...")
         
@@ -721,7 +717,6 @@ class KeyTraitsPage(QWidget):
         except Exception as e:
             print(f"更新基因组数据时发生错误: {str(e)}")
             raise
-
 
     def save_results_with_retry(self, df, output_path):
         """尝试保存结果，如果文件被占用提示用户并重试"""

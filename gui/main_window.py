@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from config.settings import Settings
-from core.breeding_calc.traits_calc import KeyTraitsPage
+from core.breeding_calc.cow_traits_calc import CowKeyTraitsPage
 from utils.file_manager import FileManager
 from core.data.uploader import (
     upload_and_standardize_bull_data,
@@ -28,6 +28,8 @@ from core.data.uploader import (
 from gui.worker import CowDataWorker, GenomicDataWorker
 from gui.progress import ProgressDialog
 from gui.db_update_worker import DBUpdateWorker
+from core.breeding_calc.bull_traits_calc import BullKeyTraitsPage  
+
 
 # 修改 sys.path（如果必要，确保只做一次）
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -118,9 +120,13 @@ class MainWindow(QMainWindow):
         nav_items = [
             ("育种项目管理", "folder", []),
             ("数据上传", "upload", []),
-            ("牛群排名", "chart", [
+            ("母牛遗传数据分析", "chart", [
                 "在群母牛关键性状计算",
                 "在群母牛指数计算及排名"
+            ]),
+            ("备选公牛遗传数据分析", "chart", [  # 新添加的导航项
+                "备选公牛关键性状计算",
+                "备选公牛指数计算及排名"
             ]),
             ("配种记录分析", "analysis", []),
             ("体型外貌评定", "body", []),
@@ -180,8 +186,12 @@ class MainWindow(QMainWindow):
         self.create_upload_page() 
 
         # 创建"关键性状计算"页面
-        self.key_traits_page = KeyTraitsPage(parent=self)
+        self.key_traits_page = CowKeyTraitsPage(parent=self)
         self.content_stack.addWidget(self.key_traits_page)
+
+        # 创建"备选公牛关键性状计算"页面  # 新添加的页面
+        self.bull_key_traits_page = BullKeyTraitsPage(parent=self)
+        self.content_stack.addWidget(self.bull_key_traits_page)
 
         # TODO: 创建其他页面...
         
@@ -405,6 +415,11 @@ class MainWindow(QMainWindow):
                     self.content_stack.setCurrentWidget(self.key_traits_page)
                 elif text == "在群母牛指数计算及排名":
                     # TODO: 处理在群母牛指数计算及排名
+                    pass
+                elif text == "备选公牛关键性状计算":  # 新添加的处理
+                    self.content_stack.setCurrentWidget(self.bull_key_traits_page)
+                elif text == "备选公牛指数计算及排名":  # 新添加的处理
+                    # TODO: 处理备选公牛指数计算及排名
                     pass
             else:  # 主导航项
                 self.content_stack.setCurrentIndex(index)
@@ -673,7 +688,7 @@ class MainWindow(QMainWindow):
     def handle_sub_nav_click(self, text):
         """处理子导航项点击事件"""
         if text == "在群母牛关键性状计算":
-            # TODO: 连接到 traits_calc.py 的功能
+            # TODO: 连接到 cow_traits_calc.py 的功能
             pass
         elif text == "在群母牛指数计算及排名":
             # TODO: 连接到 index_calc.py 的功能
