@@ -84,9 +84,9 @@ class TraitsCalculationWorker(QObject):
     finished = pyqtSignal()          # 处理完成
     error = pyqtSignal(str)          # 发生错误
 
-    def __init__(self, key_traits_page, detail_path, yearly_path, pedigree_path, genomic_path=None):
+    def __init__(self, cow_key_traits_page, detail_path, yearly_path, pedigree_path, genomic_path=None):
         super().__init__()
-        self.key_traits_page = key_traits_page
+        self.cow_key_traits_page = cow_key_traits_page
         self.detail_path = detail_path
         self.yearly_path = yearly_path
         self.pedigree_path = pedigree_path
@@ -144,7 +144,7 @@ class TraitsCalculationWorker(QObject):
             self.start_time = time.time()
             
             # 获取主窗口实例
-            parent = self.key_traits_page.parent()
+            parent = self.cow_key_traits_page.parent()
             while parent and not isinstance(parent, QMainWindow):
                 parent = parent.parent()
             
@@ -153,7 +153,7 @@ class TraitsCalculationWorker(QObject):
                 return
             
             # 核心计算逻辑
-            success, message = self.key_traits_page.perform_cow_traits_calculation(
+            success, message = self.cow_key_traits_page.perform_cow_traits_calculation(
                 parent,  # 传递找到的主窗口
                 progress_callback=lambda p: self.update_progress(1, p),
                 task_info_callback=self.task_info.emit

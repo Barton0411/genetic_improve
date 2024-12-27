@@ -81,7 +81,8 @@ class MainWindow(QMainWindow):
         self.content_stack = QStackedWidget()  # 提前创建 content_stack
         self.selected_project_path = None   # 用于记录当前选择的项目路径
         self.templates_path = Path(__file__).parent.parent / "templates"  # 模板存放路径 
-        self.key_traits_page = None 
+        self.cow_key_traits_page = None 
+        self.bull_key_traits_page = None 
         self.setup_ui()
         self.check_and_update_database_on_startup()
         self.sub_nav_menu = None  # 添加子导航菜单属性
@@ -186,8 +187,8 @@ class MainWindow(QMainWindow):
         self.create_upload_page() 
 
         # 创建"关键性状计算"页面
-        self.key_traits_page = CowKeyTraitsPage(parent=self)
-        self.content_stack.addWidget(self.key_traits_page)
+        self.cow_key_traits_page = CowKeyTraitsPage(parent=self)
+        self.content_stack.addWidget(self.cow_key_traits_page)
 
         # 创建"备选公牛关键性状计算"页面  # 新添加的页面
         self.bull_key_traits_page = BullKeyTraitsPage(parent=self)
@@ -412,7 +413,7 @@ class MainWindow(QMainWindow):
             if indent_level == 1:  # 子导航项
                 if text == "在群母牛关键性状计算":
                     # 切换到关键性状计算页面
-                    self.content_stack.setCurrentWidget(self.key_traits_page)
+                    self.content_stack.setCurrentWidget(self.cow_key_traits_page)
                 elif text == "在群母牛指数计算及排名":
                     # TODO: 处理在群母牛指数计算及排名
                     pass
