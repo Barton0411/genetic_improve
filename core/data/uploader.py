@@ -119,32 +119,32 @@ def upload_and_standardize_cow_data(input_files: list[Path], project_path: Path,
 
     logging.info(f"母牛数据已标准化并保存至: {final_path}")
 
-    # 自动重新处理配种记录以映射父号
-    raw_breeding_records_file = raw_data_path / "breeding_records.xlsx"
-    if raw_breeding_records_file.exists():
+    # 检查是否存在标准化后的配种记录文件
+    breeding_records_file = standardized_path / "processed_breeding_data.xlsx"
+    if breeding_records_file.exists():
         try:
             logging.info("开始重新处理配种记录以映射父号")
             # 读取标准化后的母牛数据
             cow_df = pd.read_excel(final_path, dtype={'cow_id': str, 'sire': str})
-            logging.info("已读取标准化后的母牛数据")
-            # 重新处理配种记录
-            process_breeding_record_file(
-                raw_breeding_records_file,
-                project_path,
-                cow_df=cow_df,  # 传递 cow_df
-                progress_callback=progress_callback
-            )
-            if progress_callback:
-                progress_callback("配种记录中的父号映射已完成。")
-            logging.info("配种记录中的父号映射已完成")
+            # 读取原始配种记录文件
+            raw_breeding_records_file = raw_data_path / "breeding_records.xlsx"
+            if raw_breeding_records_file.exists():
+                # 重新处理配种记录
+                process_breeding_record_file(
+                    raw_breeding_records_file,
+                    project_path,
+                    cow_df=cow_df,
+                    progress_callback=progress_callback
+                )
+                if progress_callback:
+                    progress_callback("配种记录中的父号映射已完成。")
+                logging.info("配种记录中的父号映射已完成")
+            else:
+                logging.warning("未找到原始配种记录文件，无法重新映射父号")
         except Exception as e:
             logging.error(f"重新映射配种记录父号时发生错误: {e}")
             if progress_callback:
                 progress_callback(f"重新映射配种记录父号时发生错误: {e}")
-            # 可以选择是否抛出异常或记录日志
-            pass
-    else:
-        logging.warning(f"{raw_breeding_records_file} 文件不存在，无法重新映射父号")
 
     return final_path
 

@@ -1313,17 +1313,27 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
     # 填充 NaN 为 ''
     df_cleaned.fillna('', inplace=True)
 
+    # 如果没有提供cow_df，尝试从标准化文件中读取
+    if cow_df is None:
+        cow_data_file = standardized_path / "processed_cow_data.xlsx"
+        if cow_data_file.exists():
+            try:
+                cow_df = pd.read_excel(cow_data_file, dtype={'cow_id': str, 'sire': str})
+            except Exception as e:
+                print(f"读取母牛数据文件失败: {e}")
+
     # 添加父号列
     if cow_df is not None:
         # 确保 'cow_id' 和 'sire' 列存在
-        if 'cow_id' not in cow_df.columns or 'sire' not in cow_df.columns:
-            raise ValueError("母牛数据缺少 'cow_id' 或 'sire' 列。")
-        cow_df['cow_id'] = cow_df['cow_id'].astype(str)
-        sire_dict = dict(zip(cow_df['cow_id'], cow_df['sire']))
-        # 将耳号转换为字符串类型
-        df_cleaned['耳号'] = df_cleaned['耳号'].astype(str)
-        # 添加父号列
-        df_cleaned['父号'] = df_cleaned['耳号'].map(sire_dict).fillna('')
+        if 'cow_id' in cow_df.columns and 'sire' in cow_df.columns:
+            cow_df['cow_id'] = cow_df['cow_id'].astype(str)
+            sire_dict = dict(zip(cow_df['cow_id'], cow_df['sire']))
+            # 将耳号转换为字符串类型
+            df_cleaned['耳号'] = df_cleaned['耳号'].astype(str)
+            # 添加父号列
+            df_cleaned['父号'] = df_cleaned['耳号'].map(sire_dict).fillna('')
+        else:
+            df_cleaned['父号'] = ''
     else:
         # 如果没有提供 cow_df，添加空的父号列
         df_cleaned['父号'] = ''
@@ -1337,10 +1347,6 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
         df_cleaned.to_excel(output_file, index=False)
     except Exception as e:
         raise ValueError(f"保存配种记录数据文件失败: {e}")
-
-    # 确保文件存在
-    if not output_file.exists():
-        raise ValueError("标准化后的配种记录数据文件未生成。")
 
     return output_file
 
@@ -1513,7 +1519,7 @@ def process_genomic_data_file(input_files: list[Path], project_path: Path, progr
             final_df = final_df.loc[:, ~final_df.columns.duplicated()]
             # 可以进一步验证列名是否唯一，避免潜在问题
             if final_df.columns.duplicated().any():
-                raise ValueError("现有汇总文件中存在重复的列名。请检查并清理汇总文件。")
+                raise ValueError("现有汇总文件中存在重复列名。请检查并清理汇总文件。")
 
             # 读取并合并新处理的文件
             for temp_file in processed_files:

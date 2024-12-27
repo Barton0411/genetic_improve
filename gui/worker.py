@@ -8,6 +8,7 @@ import datetime
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine, text
+from PyQt6.QtWidgets import QMainWindow
 
 from core.data.update_manager import (
     LOCAL_DB_PATH,
@@ -142,23 +143,26 @@ class TraitsCalculationWorker(QObject):
         try:
             self.start_time = time.time()
             
-            # 1. 处理年度平均值和回归分析
-            self.task_info.emit("处理年度平均值和回归分析", 1, self.total_steps)
-            if not self.key_traits_page.process_key_traits_by_year(self.detail_path, progress_callback=lambda p: self.update_progress(1, p)):
+            # 获取主窗口实例
+            parent = self.key_traits_page.parent()
+            while parent and not isinstance(parent, QMainWindow):
+                parent = parent.parent()
+            
+            if not parent:
+                self.error.emit("无法获取主窗口")
                 return
-
-            # 2. 计算关键性状得分
-            self.task_info.emit("计算关键性状得分", 2, self.total_steps)
-            if not self.key_traits_page.calculate_key_traits_scores(self.detail_path, self.yearly_path, progress_callback=lambda p: self.update_progress(2, p)):
-                return
-
-            # 3. 如果有基因组数据，进行更新
-            if self.genomic_path:
-                self.task_info.emit("更新基因组数据", 3, self.total_steps)
-                if not self.key_traits_page.update_with_genomic_data(self.pedigree_path, self.genomic_path, progress_callback=lambda p: self.update_progress(3, p)):
-                    return
-
-            self.finished.emit()
+            
+            # 核心计算逻辑
+            success, message = self.key_traits_page.perform_traits_calculation(
+                parent,  # 传递找到的主窗口
+                progress_callback=lambda p: self.update_progress(1, p),
+                task_info_callback=self.task_info.emit
+            )
+            
+            if success:
+                self.finished.emit()
+            else:
+                self.error.emit(message)
 
         except Exception as e:
             error_trace = traceback.format_exc()

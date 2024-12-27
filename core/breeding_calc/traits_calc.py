@@ -310,44 +310,20 @@ class KeyTraitsPage(QWidget):
             print(f"处理年度关键性状数据时发生错误: {str(e)}")
             raise
 
-    def start_traits_calculation(self):
-        """开始关键性状计算流程"""
-        print("开始关键性状计算流程...")
-        
-        # 获取主窗口实例
-        parent = self.parent()
-        while parent and not isinstance(parent, QMainWindow):
-            parent = parent.parent()
-        main_window = parent
-        
-        print(f"获取到主窗口: {main_window}")
-        
-        if not main_window:
-            print("未找到主窗口")
-            QMessageBox.warning(self, "警告", "无法获取主窗口")
-            return
-            
-        if not hasattr(main_window, 'selected_project_path') or not main_window.selected_project_path:
-            print("未选择项目")
-            QMessageBox.warning(self, "警告", "请先选择一个项目")
-            return
-        
-        print(f"选择的项目路径: {main_window.selected_project_path}")
-            
-        cow_data_path = main_window.selected_project_path / "standardized_data" / "processed_cow_data.xlsx"
-        print(f"母牛数据文件路径: {cow_data_path}")
-        
-        if not cow_data_path.exists():
-            print("母牛数据文件不存在")
-            QMessageBox.warning(self, "警告", "请先上传并处理母牛数据")
-            return
-            
+    def perform_traits_calculation(self, main_window, progress_callback=None, task_info_callback=None):
+        """执行关键性状计算的核心逻辑"""
         try:
             # 1. 获取所选性状列表
             selected_traits = self.get_selected_traits()
             print(f"获取到所选性状: {selected_traits}")
 
             # 2. 读取母牛数据，获取公牛列表
+            cow_data_path = main_window.selected_project_path / "standardized_data" / "processed_cow_data.xlsx"
+            print(f"母牛数据文件路径: {cow_data_path}")
+            
+            if not cow_data_path.exists():
+                raise FileNotFoundError("请先上传并处理母牛数据")
+            
             print("开始读取母牛数据...")
             cow_df = pd.read_excel(cow_data_path)
             
@@ -363,7 +339,7 @@ class KeyTraitsPage(QWidget):
                 if col in cow_df.columns:
                     bull_ids.update(cow_df[col].dropna().unique())
             print(f"提取到的公牛ID数量: {len(bull_ids)}")
-                    
+            
             # 3. 检查数据库中的公牛,并提取所选性状数据
             print("开始检查数据库中的公牛...")
             engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
@@ -433,38 +409,49 @@ class KeyTraitsPage(QWidget):
             # 6. 保存详细结果
             detail_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_detail.xlsx"
             if not self.save_results_with_retry(cow_df, detail_output_path):
-                print("用户取消了保存操作")
-                return
+                return False, "用户取消了保存操作"
             
             # 7. 处理年度平均值和回归分析
             yearly_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_mean_by_year.xlsx"
             if not self.process_key_traits_by_year(detail_output_path):
-                print("用户取消了年度数据保存操作")
-                return
+                return False, "用户取消了年度数据保存操作"
 
             # 8. 计算关键性状得分
             pedigree_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pidgree.xlsx"
             if not self.calculate_key_traits_scores(detail_output_path, yearly_output_path):
-                print("用户取消了得分计算操作")
-                return
+                return False, "用户取消了得分计算操作"
             
             # 9. 用基因组数据更新关键性状得分
             genomic_data_path = main_window.selected_project_path / "standardized_data" / "processed_genomic_data.xlsx"
             if genomic_data_path.exists():
                 if not self.update_with_genomic_data(pedigree_output_path, genomic_data_path):
-                    print("用户取消了基因组数据更新操作")
-                    return
+                    return False, "用户取消了基因组数据更新操作"
             else:
                 print("未找到基因组数据文件，跳过基因组数据更新")
 
-            # 10. 显示完成消息
-            QMessageBox.information(self, "完成", "关键性状计算流程已完成")
-            
-            print("关键性状计算流程完成")
-            
+            return True, "计算完成"
+
         except Exception as e:
-            print(f"发生错误: {str(e)}")
-            QMessageBox.critical(self, "错误", f"处理过程中发生错误���{str(e)}")
+            return False, str(e)
+
+    def start_traits_calculation(self):
+        """开始关键性状计算流程"""
+        print("开始关键性状计算流程...")
+        
+        # 获取主窗口实例
+        parent = self.parent()
+        while parent and not isinstance(parent, QMainWindow):
+            parent = parent.parent()
+        main_window = parent
+        
+        if not main_window:
+            QMessageBox.warning(self, "警告", "无法获取主窗口")
+            return
+        
+        if not hasattr(main_window, 'selected_project_path') or not main_window.selected_project_path:
+            QMessageBox.warning(self, "警告", "请先选择一个项目")
+            return
+
         try:
             # 创建进度对话框
             self.progress_dialog = ProgressDialog(self)
@@ -737,7 +724,7 @@ class KeyTraitsPage(QWidget):
 
 
     def save_results_with_retry(self, df, output_path):
-        """尝试保存结果，如果文件被占用���提示用户并重试"""
+        """尝试保存结果，如果文件被占用提示用户并重试"""
         while True:
             try:
                 df.to_excel(output_path, index=False)
