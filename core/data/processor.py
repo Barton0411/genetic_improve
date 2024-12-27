@@ -19,6 +19,867 @@ BREED_CORRECTIONS = {
 # 允许的品种代码集合，包括单字母和双字母
 ALLOWED_BREED_CODES = set(BREED_CORRECTIONS.values()) | {'H', 'J', 'B', 'W', 'X', 'A', 'M', 'G'}
 
+
+# 标准基因组检测数据列名
+STANDARD_GENOMIC_COLUMNS = [
+    "Genomic Sire_NAAB",
+    "Genomic Sire_NAAB_1",
+    "Genomic mgs_reg",
+    "Genomic mgs_NAAB",
+    "MAST",
+    "JNS",
+    "Jersey %",
+    "Inactive",
+    "DA",
+    "Weaver",
+    "UD",
+    "Udder Health",
+    "UC",
+    "TL",
+    "Telstar",
+    "SG",
+    "ST",
+    "SMA",
+    "Sire Submitted",
+    "Sire Status",
+    "SDM",
+    "Sample ID",
+    "UW",
+    "UH",
+    "RW",
+    "RT",
+    "RA",
+    "RP",
+    "LS",
+    "LR",
+    "Results Last Updated",
+    "PTAT",
+    "PROT",
+    "PROT%",
+    "Horn/Polled",
+    "NM$ % RANK",
+    "NM$ Reliability",
+    "MGS Status",
+    "MFV",
+    "MET",
+    "KET",
+    "Kappa Casein I (ABE)",
+    "TPI",
+    "Hoof Health",
+    "Holstein %",
+    "HLiv",
+    "CVM",
+    "Guernsey %",
+    "FI",
+    "Genomic_SIRE REG",
+    "Genomic Dam",
+    "FU",
+    "FT",
+    "FA",
+    "First Evaluation Date",
+    "FS",
+    "FAT",
+    "FAT %",
+    "cow_id",
+    "Purebred/Crossbred Evaluation",
+    "Dominant Red",
+    "DF",
+    "Dam Submitted",
+    "Dam Status",
+    "Recessive Red",
+    "Caustv Polled",
+    "Caust CVM",
+    "Caust Brachy",
+    "Categories",
+    "BVDV Results",
+    "Brown Swiss %",
+    "BLH",
+    "BLE",
+    "birth_date",
+    "Beta Lactoglobulin",
+    "BD",
+    "Ayrshire %",
+    "Alpha S-1 Casein",
+    "Beta Casein A2",
+    "MILK",
+    "GIB",
+    "FIB",
+    "breed",
+    "Barcode",
+    "Z_TWIN",
+    "Z_RETP",
+    "Z_RESP",
+    "Z_MFV",
+    "Z_METR",
+    "Z_MAST",
+    "Z_LAME",
+    "Z_KETO",
+    "Z_DA",
+    "Z_CYST",
+    "Z_Calf_Scours",
+    "Z_Calf_Resp",
+    "Z_Calf_LIV",
+    "Z_ABRT",
+    "WT$",
+    "UDC",
+    "UD Reliability",
+    "SSB",
+    "SSB Reliability",
+    "sex",
+    "SCS",
+    "SCS Reliability",
+    "SCE",
+    "SCE Reliability",
+    "RFI",
+    "Result Type",
+    "Prot Reliability",
+    "Prot % Reliability",
+    "PL",
+    "PL Reliability",
+    "Official ID",
+    "NM$",
+    "Mulefoot",
+    "Milk Reliability",
+    "LIV",
+    "Kappa Casein II",
+    "HH6",
+    "HH5",
+    "HH4",
+    "HH3",
+    "HH2",
+    "HH1",
+    "HCR",
+    "HCR Reliability",
+    "HCD",
+    "GM$",
+    "GL",
+    "FS-Type  Reliability",
+    "FM$",
+    "FLS",
+    "FLC",
+    "FE",
+    "Fat Reliability",
+    "Fat % Reliability",
+    "Factor XI",
+    "Evaluation Date",
+    "EFC",
+    "DWP$",
+    "DWP % RANK",
+    "DUMPS",
+    "DSB",
+    "DSB Reliability",
+    "DPR",
+    "DPR Reliability",
+    "DCE",
+    "DCE Reliability",
+    "CW$",
+    "CM$",
+    "Citrullinemia",
+    "Chondrodysplasia",
+    "CCR",
+    "CCR Reliability",
+    "CA$",
+    "Brachyspina",
+    "BLAD",
+    "Beta Casein A/B",
+    "BDC",
+    "At Lab Date",
+    "BVDV Confirmation Results"
+]
+
+# 方案示例：为每一种检测报告定义独立的映射字典
+GENOMIC_COLUMN_MAPPING_TYPE1 = {
+    "Z_TWIN":"Z_TWIN",
+    "Z_RETP":"Z_RETP",
+    "Z_RESP":"Z_RESP",
+    "Z_MFV":"Z_MFV",
+    "Z_METR":"Z_METR",
+    "Z_MAST":"Z_MAST",
+    "Z_LAME":"Z_LAME",
+    "Z_KETO":"Z_KETO",
+    "Z_DA":"Z_DA",
+    "Z_CYST":"Z_CYST",
+    "Z_Calf_Scours":"Z_Calf_Scours",
+    "Z_Calf_Resp":"Z_Calf_Resp",
+    "Z_Calf_LIV":"Z_Calf_LIV",
+    "Z_ABRT":"Z_ABRT",
+    "WT$":"WT$",
+    "Weaver":"Weaver",
+    "UW":"UW",
+    "UH":"UH",
+    "Udder Health":"Udder Health",
+    "UDC":"UDC",
+    "UD Reliability":"UD Reliability",
+    "UD":"UD",
+    "UC":"UC",
+    "TPI":"TPI",
+    "TL":"TL",
+    "Telstar":"Telstar",
+    "ST":"ST",
+    "SSB Reliability":"SSB Reliability",
+    "SSB":"SSB",
+    "SMA":"SMA",
+    "Sire Submitted":"Sire Submitted",
+    "Sire Status":"Sire Status",
+    "Sire NAAB":"Genomic Sire_NAAB",
+    "Sire":"Genomic_SIRE REG",
+    "SG":"SG",
+    "Sex":"sex",
+    "SDM":"SDM",
+    "SCS Reliability":"SCS Reliability",
+    "SCS":"SCS",
+    "SCE Reliability":"SCE Reliability",
+    "SCE":"SCE",
+    "Sample ID":"Sample ID",
+    "RW":"RW",
+    "RT":"RT",
+    "RP":"RP",
+    "RFI":"RFI",
+    "Results Last Updated":"Results Last Updated",
+    "Result Type":"Result Type",
+    "Recessive Red":"Recessive Red",
+    "RA":"RA",
+    "Purebred/Crossbred Evaluation":"Purebred/Crossbred Evaluation",
+    "PTAT":"PTAT",
+    "PROT%":"PROT%",
+    "Prot Reliability":"Prot Reliability",
+    "Prot % Reliability":"Prot % Reliability",
+    "PROT":"PROT",
+    "PL Reliability":"PL Reliability",
+    "PL":"PL",
+    "Official ID":"Official ID",
+    "NM$ Reliability":"NM$ Reliability",
+    "NM$ % RANK":"NM$ % RANK",
+    "NM$":"NM$",
+    "Mulefoot":"Mulefoot",
+    "Milk Reliability":"Milk Reliability",
+    "MILK":"MILK",
+    "MGS Status":"MGS Status",
+    "MGS REG":"Genomic mgs_reg",
+    "MGS NAAB":"Genomic mgs_NAAB",
+    "MFV":"MFV",
+    "MET":"MET",
+    "MAST":"MAST",
+    "LS":"LS",
+    "LR":"LR",
+    "LIV":"LIV",
+    "KET":"KET",
+    "Kappa Casein II":"Kappa Casein II",
+    "Kappa Casein I (ABE)":"Kappa Casein I (ABE)",
+    "JNS":"JNS",
+    "Jersey %":"Jersey %",
+    "IND INBRD":"GIB",
+    "Inactive":"Inactive",
+    "Horn/Polled":"Horn/Polled",
+    "Hoof Health":"Hoof Health",
+    "Holstein %":"Holstein %",
+    "HLiv":"HLiv",
+    "HH6":"HH6",
+    "HH5":"HH5",
+    "HH4":"HH4",
+    "HH3":"HH3",
+    "HH2":"HH2",
+    "HH1":"HH1",
+    "HCR Reliability":"HCR Reliability",
+    "HCR":"HCR",
+    "HCD":"HCD",
+    "Guernsey %":"Guernsey %",
+    "GM$":"GM$",
+    "GL":"GL",
+    "FUT INBRD":"FIB",
+    "FU":"FU",
+    "FT":"FT",
+    "FS-Type  Reliability":"FS-Type  Reliability",
+    "FS ":"FS",
+    "FM$":"FM$",
+    "FLS":"FLS",
+    "FLC":"FLC",
+    "First Evaluation Date":"First Evaluation Date",
+    "FI":"FI",
+    "FE":"FE",
+    "Fat Reliability":"Fat Reliability",
+    "Fat % Reliability":"Fat % Reliability",
+    "FAT %":"FAT %",
+    "FAT":"FAT",
+    "Farm ID":"cow_id",
+    "Factor XI":"Factor XI",
+    "FA":"FA",
+    "Evaluation Date":"Evaluation Date",
+    "EFC":"EFC",
+    "DWP$":"DWP$",
+    "DWP % RANK":"DWP % RANK",
+    "DUMPS":"DUMPS",
+    "DSB Reliability":"DSB Reliability",
+    "DSB":"DSB",
+    "DPR Reliability":"DPR Reliability",
+    "DPR":"DPR",
+    "Dominant Red":"Dominant Red",
+    "DF":"DF",
+    "DCE Reliability":"DCE Reliability",
+    "DCE":"DCE",
+    "Dam Submitted":"Dam Submitted",
+    "Dam Status":"Dam Status",
+    "Dam":"Genomic Dam",
+    "DA":"DA",
+    "CW$":"CW$",
+    "CVM":"CVM",
+    "CM$":"CM$",
+    "Citrullinemia":"Citrullinemia",
+    "Chondrodysplasia":"Chondrodysplasia",
+    "CCR Reliability":"CCR Reliability",
+    "CCR":"CCR",
+    "Caustv Polled":"Caustv Polled",
+    "Caust CVM":"Caust CVM",
+    "Caust Brachy":"Caust Brachy",
+    "Categories":"Categories",
+    "CA$":"CA$",
+    "BVDV Results":"BVDV Results",
+    "BVDV Confirmation Results":"BVDV Confirmation Results",
+    "Brown Swiss %":"Brown Swiss %",
+    "Breed":"breed",
+    "Brachyspina":"Brachyspina",
+    "BLH":"BLH",
+    "BLE":"BLE",
+    "BLAD":"BLAD",
+    "Birth":"birth_date",
+    "Beta Lactoglobulin":"Beta Lactoglobulin",
+    "Beta Casein A2":"Beta Casein A2",
+    "Beta Casein A/B":"Beta Casein A/B",
+    "BDC":"BDC",
+    "BD":"BD",
+    "Barcode":"Barcode",
+    "Ayrshire %":"Ayrshire %",
+    "At Lab Date":"At Lab Date",
+    "Alpha S-1 Casein":"Alpha S-1 Casein"
+}
+
+GENOMIC_COLUMN_MAPPING_TYPE2 = {
+    "Weaver":"Weaver",
+    "UD":"UD",
+    "Udder Health":"Udder Health",
+    "UDC":"UDC",
+    "UC":"UC",
+    "TL":"TL",
+    "Telstar":"Telstar",
+    "SG":"SG",
+    "ST":"ST",
+    "SSB":"SSB",
+    "SMA":"SMA",
+    "Sire Submitted":"Sire Submitted",
+    "Sire Status":"Sire Status",
+    "Sire NAAB":"Genomic Sire_NAAB",
+    "Sex":"sex",
+    "SDM":"SDM",
+    "SCS":"SCS",
+    "SCE":"SCE",
+    "Sample ID":"Sample ID",
+    "UW":"UW",
+    "UH":"UH",
+    "RW":"RW",
+    "RT":"RT",
+    "RA":"RA",
+    "RP":"RP",
+    "LS":"LS",
+    "LR":"LR",
+    "Results Last Updated":"Results Last Updated",
+    "Evaluation Date":"Evaluation Date",
+    "Result Type":"Result Type",
+    "PTAT":"PTAT",
+    "PROT":"PROT",
+    "PROT%":"PROT%",
+    "Horn/Polled":"Horn/Polled",
+    "PL":"PL",
+    "Official ID":"Official ID",
+    "NM$ % RANK":"NM$ % RANK",
+    "NM$":"NM$",
+    "NM$ Reliability":"NM$ Reliability",
+    "Mulefoot":"Mulefoot",
+    "MILK":"MILK",
+    "MGS Status":"MGS Status",
+    "MFV":"MFV",
+    "MET":"MET",
+    "MGS REG":"Genomic mgs_reg",
+    "MAST":"MAST",
+    "LIV":"LIV",
+    "KET":"KET",
+    "Kappa Casein I (ABE)":"Kappa Casein I (ABE)",
+    "JNS":"JNS",
+    "Jersey %":"Jersey %",
+    "TPI":"TPI",
+    "Inactive":"Inactive",
+    "Hoof Health":"Hoof Health",
+    "Holstein %":"Holstein %",
+    "HLiv":"HLiv",
+    "HCR":"HCR",
+    "HCD":"HCD",
+    "HH1":"HH1",
+    "CVM":"CVM",
+    "Guernsey %":"Guernsey %",
+    "GM$":"GM$",
+    "GL":"GL",
+    "FI":"FI",
+    "Sire":"Genomic_SIRE REG",
+    "Dam":"Genomic Dam",
+    "FU":"FU",
+    "FT":"FT",
+    "FA":"FA",
+    "FM$":"FM$",
+    "FLS":"FLS",
+    "FLC":"FLC",
+    "First Evaluation Date":"First Evaluation Date",
+    "FS ":"FS",
+    "FAT":"FAT",
+    "FAT %":"FAT %",
+    "Farm ID":"cow_id",
+    "Purebred/Crossbred Evaluation":"Purebred/Crossbred Evaluation",
+    "EFC":"EFC",
+    "DUMPS":"DUMPS",
+    "DSB":"DSB",
+    "DPR":"DPR",
+    "Dominant Red":"Dominant Red",
+    "DF":"DF",
+    "DCE":"DCE",
+    "Dam Submitted":"Dam Submitted",
+    "Dam Status":"Dam Status",
+    "DA":"DA",
+    "Recessive Red":"Recessive Red",
+    "CM$":"CM$",
+    "CCR":"CCR",
+    "Caustv Polled":"Caustv Polled",
+    "Caust CVM":"Caust CVM",
+    "Caust Brachy":"Caust Brachy",
+    "Categories":"Categories",
+    "BVDV Results":"BVDV Results",
+    "Brown Swiss %":"Brown Swiss %",
+    "Breed":"breed",
+    "Brachyspina":"Brachyspina",
+    "BLH":"BLH",
+    "BLE":"BLE",
+    "BLAD":"BLAD",
+    "Birth":"birth_date",
+    "Beta Lactoglobulin":"Beta Lactoglobulin",
+    "BD":"BD",
+    "Ayrshire %":"Ayrshire %",
+    "Alpha S-1 Casein":"Alpha S-1 Casein",
+    "Beta Casein A2":"Beta Casein A2"
+}
+
+GENOMIC_COLUMN_MAPPING_TYPE3 = { 
+    "UW":"UW",
+    "UH":"UH",
+    "UDC":"UDC",
+    "UD":"UD",
+    "UC":"UC",
+    "Type-FS":"PTAT",
+    "TPI":"TPI",
+    "TL":"TL",
+    "ST":"ST",
+    "SSB":"SSB",
+    "Sire NAAB Code":"Genomic Sire_NAAB",
+    "Sire":"Genomic_SIRE REG",
+    "SG":"SG",
+    "Sex":"sex",
+    "SCS":"SCS",
+    "SCE":"SCE",
+    "RW":"RW",
+    "RT":"RT",
+    "RFI":"RFI",
+    "Result Type":"Result Type",
+    "Recessive Red ":"Recessive Red",
+    "RA":"RA",
+    "Purebred/Crossbred Evaluation":"Purebred/Crossbred Evaluation",
+    "Prot %":"PROT%",
+    "Prot":"PROT",
+    "PL":"PL",
+    "On-farm ID (Herd Management #)":"cow_id",
+    "Official ID":"Official ID",
+    "NM$ % Rank":"NM$ % RANK",
+    "NM$":"NM$",
+    "Mulefoot":"Mulefoot",
+    "Milk":"MILK",
+    "MGS NAAB Code":"Genomic mgs_NAAB",
+    "Maternal Grandsire (MGS)":"Genomic mgs_reg",
+    "LS":"LS",
+    "LR":"LR",
+    "LIV":"LIV",
+    "Kappa Casein I (ABE)":"Kappa Casein I (ABE)",
+    "Ind  Inbrd":"GIB",
+    "Horn/Polled":"Horn/Polled",
+    "HH6":"HH6",
+    "HH5":"HH5",
+    "HH4":"HH4",
+    "HH3":"HH3",
+    "HH2":"HH2",
+    "HH1":"HH1",
+    "HCR":"HCR",
+    "HCD":"HCD",
+    "GM$":"GM$",
+    "GL":"GL",
+    "Fut Inbrd":"FIB",
+    "FU":"FU",
+    "FT":"FT",
+    "FS":"FS",
+    "FM$":"FM$",
+    "FLS":"FLS",
+    "FLC":"FLC",
+    "FI":"FI",
+    "FE":"FE",
+    "Fat %":"FAT %",
+    "Fat":"FAT",
+    "Factor XI":"Factor XI",
+    "FA":"FA",
+    "Evaluation Date":"Evaluation Date",
+    "EFC":"EFC",
+    "DUMPS":"DUMPS",
+    "DSB":"DSB",
+    "DPR":"DPR",
+    "Dominant Red":"Dominant Red",
+    "DF":"DF",
+    "DCE":"DCE",
+    "Dam":"Genomic Dam",
+    "CVM":"CVM",
+    "CM$":"CM$",
+    "Citrullinemia":"Citrullinemia",
+    "Chondrodysplasia":"Chondrodysplasia",
+    "CDCB_RP":"RP",
+    "CDCB_MET":"MET",
+    "CDCB_MAST":"MAST",
+    "CDCB_KET":"KET",
+    "CDCB_HLV":"HLiv",
+    "CDCB_HC":"MFV",
+    "CDCB_DA":"DA",
+    "CCR":"CCR",
+    "CA$":"CA$",
+    "Breed Of Evaluation":"breed",
+    "Brachyspina":"Brachyspina",
+    "BLAD":"BLAD",
+    "Birth Date":"birth_date",
+    "Beta Lactoglobulin":"Beta Lactoglobulin",
+    "Beta Casein A2":"Beta Casein A2",
+    "BDC":"BDC",
+    "BD":"BD",
+    "Barcode":"Barcode",
+    "At Lab Date":"At Lab Date",
+    "Alpha S-1 Casein":"Alpha S-1 Casein"
+ }
+GENOMIC_COLUMN_MAPPING_TYPE4 = { 
+    "Z_TWIN":"Z_TWIN",
+    "Z_RETP":"Z_RETP",
+    "Z_RESP":"Z_RESP",
+    "Z_MFV":"Z_MFV",
+    "Z_METR":"Z_METR",
+    "Z_MAST":"Z_MAST",
+    "Z_LAME":"Z_LAME",
+    "Z_KETO":"Z_KETO",
+    "Z_DA":"Z_DA",
+    "Z_CYST":"Z_CYST",
+    "Z_Calf_Scours":"Z_Calf_Scours",
+    "Z_Calf_Resp":"Z_Calf_Resp",
+    "Z_Calf_LIV":"Z_Calf_LIV",
+    "Z_ABRT":"Z_ABRT",
+    "WT$":"WT$",
+    "UW":"UW",
+    "UH":"UH",
+    "UDC":"UDC",
+    "UD Reliability":"UD Reliability",
+    "UD":"UD",
+    "UC":"UC",
+    "TYPE FS":"PTAT",
+    "TPI":"TPI",
+    "TL":"TL",
+    "Suggested Sire Naab":"Genomic Sire_NAAB_1",
+    "Suggested Sire":"Genomic_SIRE REG",
+    "Status":"Inactive",
+    "ST":"ST",
+    "SSB Reliability":"SSB Reliability",
+    "SSB":"SSB",
+    "Sire NAAB Code":"Genomic Sire_NAAB",
+    "SG":"SG",
+    "Sex":"sex",
+    "SCS Reliability":"SCS Reliability",
+    "SCS":"SCS",
+    "SCE Reliability":"SCE Reliability",
+    "SCE":"SCE",
+    "RW":"RW",
+    "RT":"RT",
+    "RFI":"RFI",
+    "Result Type":"Result Type",
+    "Recessive Red":"Recessive Red",
+    "RA":"RA",
+    "Purebred/Crossbred Evaluation":"Purebred/Crossbred Evaluation",
+    "PROT%":"PROT%",
+    "Prot Reliability":"Prot Reliability",
+    "Prot % Reliability":"Prot % Reliability",
+    "PROT":"PROT",
+    "PL Reliability":"PL Reliability",
+    "PL":"PL",
+    "Official ID":"Official ID",
+    "NM$ Reliability":"NM$ Reliability",
+    "NM$ % RANK":"NM$ % RANK",
+    "NM$":"NM$",
+    "Mulefoot":"Mulefoot",
+    "Milk Reliability":"Milk Reliability",
+    "MILK":"MILK",
+    "LS":"LS",
+    "LR":"LR",
+    "LIV":"LIV",
+    "Kappa Casein II":"Kappa Casein II",
+    "Kappa Casein I (ABE)":"Kappa Casein I (ABE)",
+    "IND INBRD":"GIB",
+    "Horn/Polled":"Horn/Polled",
+    "HH6":"HH6",
+    "HH5":"HH5",
+    "HH4":"HH4",
+    "HH3":"HH3",
+    "HH2":"HH2",
+    "HH1":"HH1",
+    "HCR Reliability":"HCR Reliability",
+    "HCR":"HCR",
+    "HCD":"HCD",
+    "Group":"Categories",
+    "GM$":"GM$",
+    "GL":"GL",
+    "FUT INBRD":"FIB",
+    "FU":"FU",
+    "FT":"FT",
+    "FS-Type  Reliability":"FS-Type  Reliability",
+    "FS ":"FS",
+    "FM$":"FM$",
+    "FLS":"FLS",
+    "FLC":"FLC",
+    "FI":"FI",
+    "FE":"FE",
+    "Fat Reliability":"Fat Reliability",
+    "Fat % Reliability":"Fat % Reliability",
+    "FAT %":"FAT %",
+    "FAT":"FAT",
+    "Factor XI":"Factor XI",
+    "FA":"FA",
+    "Evaluation Date":"Evaluation Date",
+    "EFC":"EFC",
+    "DWP$":"DWP$",
+    "DWP % RANK":"DWP % RANK",
+    "DUMPS":"DUMPS",
+    "DSB Reliability":"DSB Reliability",
+    "DSB":"DSB",
+    "DPR Reliability":"DPR Reliability",
+    "DPR":"DPR",
+    "Dominant Red":"Dominant Red",
+    "DF":"DF",
+    "DCE Reliability":"DCE Reliability",
+    "DCE":"DCE",
+    "Dam Correct":"Genomic Dam",
+    "CW$":"CW$",
+    "CVM":"CVM",
+    "CM$":"CM$",
+    "Citrullinemia":"Citrullinemia",
+    "Chondrodysplasia":"Chondrodysplasia",
+    "CDCB_RP":"RP",
+    "CDCB_MET":"MET",
+    "CDCB_MAST":"MAST",
+    "CDCB_KET":"KET",
+    "CDCB_HLV":"HLiv",
+    "CDCB_HC":"MFV",
+    "CDCB_DA":"DA",
+    "CCR Reliability":"CCR Reliability",
+    "CCR":"CCR",
+    "CA$":"CA$",
+    "BVDV Results":"BVDV Results",
+    "BVDV Confirmation Results":"BVDV Confirmation Results",
+    "Breed":"breed",
+    "Brachyspina":"Brachyspina",
+    "BLAD":"BLAD",
+    "Birth Date":"birth_date",
+    "Beta Lactoglobulin":"Beta Lactoglobulin",
+    "Beta Casein A2":"Beta Casein A2",
+    "Beta Casein A/B":"Beta Casein A/B",
+    "BDC":"BDC",
+    "BD":"BD",
+    "At Lab Date":"At Lab Date",
+    "Animal ID":"cow_id",
+    "Alpha S-1 Casein":"Alpha S-1 Casein"
+ }
+GENOMIC_COLUMN_MAPPING_TYPE5 = { 
+    "最终体型评分可靠性":"FS-Type  Reliability",
+    "最终体型评分":"PTAT",
+    "总性能指数":"TPI",
+    "状态":"Inactive",
+    "肢蹄指数":"FLC",
+    "肢蹄评分":"FLS",
+    "有无角":"Horn/Polled",
+    "隐性红毛基因":"Recessive Red",
+    "液奶净价值":"FM$",
+    "悬韧带强度":"UC",
+    "性别":"sex",
+    "显性红":"Dominant Red",
+    "未来近交指数":"FIB",
+    "体细胞评分可靠性":"SCS Reliability",
+    "体细胞评分":"SCS",
+    "体深":"BD",
+    "体躯结构指数":"BDC",
+    "体强度":"SG",
+    "体高":"ST",
+    "蹄角度":"FA",
+    "饲料效率":"FE",
+    "饲料节约量":"FS",
+    "硕腾子宫炎指数":"Z_METR",
+    "硕腾真胃异位指数":"Z_DA",
+    "硕腾酮病指数":"Z_KETO",
+    "硕腾蹄病指数":"Z_LAME",
+    "硕腾胎衣停滞指数":"Z_RETP",
+    "硕腾双胎指数":"Z_TWIN",
+    "硕腾乳房炎指数":"Z_MAST",
+    "硕腾卵巢囊肿指数":"Z_CYST",
+    "硕腾流产指数":"Z_ABRT",
+    "硕腾犊牛呼吸道病指数":"Z_Calf_Resp",
+    "硕腾犊牛腹泻指数":"Z_Calf_Scours",
+    "硕腾犊牛成活率指数":"Z_Calf_LIV",
+    "硕腾低血钙症指数":"Z_MFV",
+    "硕腾成母牛呼吸道疾病指数":"Z_RESP",
+    "首产提前天数":"EFC",
+    "收样日期":"At Lab Date",
+    "生产寿命可靠性":"PL Reliability",
+    "生产寿命":"PL",
+    "软骨发育异常":"Chondrodysplasia",
+    "乳脂率可靠性":"Fat % Reliability",
+    "乳脂率":"FAT %",
+    "乳脂可靠性":"Fat Reliability",
+    "乳脂":"FAT",
+    "乳头长度":"TL",
+    "乳房深度可靠性":"UD Reliability",
+    "乳房深度":"UD",
+    "乳房结构指数":"UDC",
+    "乳蛋白率可靠性":"Prot % Reliability",
+    "乳蛋白率":"PROT%",
+    "乳蛋白可靠性":"Prot Reliability",
+    "乳蛋白":"PROT",
+    "青年牛受胎率可靠性":"HCR Reliability",
+    "青年牛受胎率":"HCR",
+    "青年牛成活率":"HLiv",
+    "前乳头位置":"FT",
+    "前乳房附着":"FU",
+    "评估日期":"Evaluation Date",
+    "品种":"breed",
+    "女儿怀孕率可靠性":"DPR Reliability",
+    "女儿怀孕率":"DPR",
+    "女儿产犊易度可靠性":"DCE Reliability",
+    "女儿产犊易度":"DCE",
+    "女儿产犊死胎率可靠性":"DSB Reliability",
+    "女儿产犊死胎率":"DSB",
+    "牛配种易度":"SCE",
+    "牛白细胞粘附缺陷病":"BLAD",
+    "凝血因子 XI缺乏":"Factor XI",
+    "尿苷单磷酸合成酶缺乏":"DUMPS",
+    "奶酪净价值":"CM$",
+    "牧场牛号":"cow_id",
+    "母亲矫正":"Genomic Dam",
+    "母牛健康指数":"WT$",
+    "棱角性":"DF",
+    "尻宽":"RW",
+    "尻角度":"RA",
+    "卡帕酪蛋白II":"Kappa Casein II",
+    "卡帕酪蛋白I":"Kappa Casein I (ABE)",
+    "净价值排名":"NM$ % RANK",
+    "净价值":"NM$",
+    "结余饲料量":"RFI",
+    "结果类型":"Result Type",
+    "健康净价值排名":"DWP % RANK",
+    "健康净价值":"DWP$",
+    "建议父亲":"Genomic_SIRE REG",
+    "怀孕期天数":"GL",
+    "后肢后视":"LR",
+    "后肢侧视":"LS",
+    "后乳头位置":"RT",
+    "后乳房附着宽度":"UW",
+    "后乳房附着高":"UH",
+    "荷斯坦繁殖缺陷6型":"HH6",
+    "荷斯坦繁殖缺陷5型":"HH5",
+    "荷斯坦繁殖缺陷4型":"HH4",
+    "荷斯坦繁殖缺陷3型":"HH3",
+    "荷斯坦繁殖缺陷2型":"HH2",
+    "荷斯坦繁殖缺陷1型":"HH1",
+    "官方牛号":"Official ID",
+    "瓜氨酸血症":"Citrullinemia",
+    "公牛配种死胎率可靠性":"SSB Reliability",
+    "公牛配种死胎率":"SSB",
+    "公牛配种产犊易度":"SCE Reliability",
+    "个体近交指数":"GIB",
+    "父亲矫正":"Genomic Sire_NAAB",
+    "分组":"Categories",
+    "放牧净价值":"GM$",
+    "繁殖指数":"FI",
+    "短脊椎综合症征":"Brachyspina",
+    "犊牛健康指数":"CW$",
+    "犊牛脊椎畸形综合征":"CVM",
+    "胆固醇吸收障碍单倍型":"HCD",
+    "单趾畸形":"Mulefoot",
+    "存活率":"LIV",
+    "纯种/非纯种评估":"Purebred/Crossbred Evaluation",
+    "出生日期":"birth_date",
+    "成母牛受胎率可靠性":"CCR Reliability",
+    "成母牛受胎率":"CCR",
+    "产奶量可靠性":"Milk Reliability",
+    "产奶量":"MILK",
+    "产活犊能力":"CA$",
+    "β乳球蛋白":"Beta Lactoglobulin",
+    "β酪蛋白A2":"Beta Casein A2",
+    "β酪蛋白 A/B":"Beta Casein A/B",
+    "α-S-1酪蛋白":"Alpha S-1 Casein",
+    "NM$ 可靠性":"NM$ Reliability",
+    "CDCB子宫炎":"MET",
+    "CDCB真胃移位":"DA",
+    "CDCB酮病":"KET",
+    "CDCB胎衣不下":"RP",
+    "CDCB乳房炎":"MAST",
+    "CDCB低血钙":"MFV",
+    "BVDV Results":"BVDV Results",
+    "BVDV Confirmation Results":"BVDV Confirmation Results"
+ }
+
+# 也可以统一放到一个 dict 中，按照类型区分
+GENOMIC_COLUMN_MAPPING_BY_TYPE = {
+    "type1": GENOMIC_COLUMN_MAPPING_TYPE1,
+    "type2": GENOMIC_COLUMN_MAPPING_TYPE2,
+    "type3": GENOMIC_COLUMN_MAPPING_TYPE3,
+    "type4": GENOMIC_COLUMN_MAPPING_TYPE4,
+    "type5": GENOMIC_COLUMN_MAPPING_TYPE5,
+}
+
+# === 3. 定义一个检测报告类型的函数 ===
+def detect_report_type(genomic_df: pd.DataFrame) -> str:
+    """
+    根据每种类型的“关键列”或特征列来判断。
+    假设每种类型各有 3 个关键列，如果都存在，则认为是对应类型。
+    若判断逻辑更复杂，请自行修改。
+    """
+    # 示例：每种类型各自有一组“关键列”
+    type1_keys = {"Sire NAAB", "MGS REG", "MGS NAAB"}  # 示例关键列
+    type2_keys = {"Dom Red", "UCL", "Coat Color"}  # 示例关键列
+    type3_keys = {"Maternal Grandsire (MGS)", "Type-FS", "On-farm ID (Herd Management #)"}  # ...
+    type4_keys = {"Status", "Group", "Dam Correct"}           # ...
+    type5_keys = {"生产寿命", "个体近交指数", "怀孕期天数"}           # ...
+
+    # 将表里的实际列转为 set 便于判断
+    actual_cols = set(genomic_df.columns)
+
+    # 依次判断是否满足某种类型的关键列
+    if type1_keys.issubset(actual_cols):
+        return "type1"
+    elif type2_keys.issubset(actual_cols):
+        return "type2"
+    elif type3_keys.issubset(actual_cols):
+        return "type3"
+    elif type4_keys.issubset(actual_cols):
+        return "type4"
+    elif type5_keys.issubset(actual_cols):
+        return "type5"
+    else:
+        # 如果都不满足，你可以抛出异常，或者返回一个默认类型
+        raise ValueError("无法识别报告类型，请下载模版填写对应内容")
+
+
+
+
 def format_naab_number(naab_number):
     errors = []
     naab_number = str(naab_number).strip()
@@ -484,483 +1345,194 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
     return output_file
 
 
-
+# === 4. 修改 preprocess_genomic_data 函数 ===
 def preprocess_genomic_data(genomic_df, progress_callback=None):
     """
-    预处理基因组检测数据
+    预处理基因组检测数据的主函数。通过检查关键列名，
+    确定不同的报告类型，进而选择对应的映射字典进行重命名。
+    不再需要 combine_first 逻辑。
+
+    :param genomic_df: 读取 Excel/CSV 后得到的原始 DataFrame
+    :param progress_callback: 进度更新的回调函数，可选
+    :return: 预处理并标准化后的 DataFrame
     """
-    # 定义基因组检测数据的列映射，包括所有可能的列名变体
-    genomic_column_mapping = {
-        "Sire NAAB":"Genomic Sire_NAAB",
-        "MGS REG":"Genomic mgs_reg",
-        "MGS NAAB":"Genomic mgs_NAAB",
-        "MAST":"MAST",
-        "JNS":"JNS",
-        "Jersey %":"Jersey %",
-        "Inactive":"Inactive",
-        "DA":"DA",
-        "Weaver":"Weaver",
-        "UDP":"UD",
-        "Udder Health":"Udder Health",
-        "UCL":"UC",
-        "TLG":"TL",
-        "Telstar":"Telstar",
-        "Suggested Sire Naab":"Genomic Sire_NAAB",
-        "STR":"SG",
-        "STA":"ST",
-        "SMA":"SMA",
-        "Sire Submitted":"Sire Submitted",
-        "Sire Status":"Sire Status",
-        "SDM":"SDM",
-        "Sample ID":"Sample ID",
-        "RUW":"UW",
-        "RUH":"UH",
-        "RTW":"RW",
-        "RTP":"RT",
-        "RPA":"RA",
-        "RP":"RP",
-        "RLS":"LS",
-        "RLR":"LR",
-        "Results Last Updated":"Results Last Updated",
-        "Evaluation Date":"Results Last Updated",
-        "PTAT":"PTAT",
-        "Pro (lbs.)":"PROT",
-        "Pro (%)":"PROT%",
-        "Polled":"Horn/Polled",
-        "NM$ USA %":"NM$ % RANK",
-        "NM Gen REL %":"NM$ Reliability",
-        "MGS Status":"MGS Status",
-        "MFV":"MFV",
-        "MET":"MET",
-        "Maternal Grand Sire":"Genomic mgs_reg",
-        "MAS":"MAST",
-        "KET":"KET",
-        "Kappa Cas":"Kappa Casein I (ABE)",
-        "IPI":"TPI",
-        "Hoof Health":"Hoof Health",
-        "Holstein %":"Holstein %",
-        "HLiv":"HLiv",
-        "Haplo CVM":"CVM",
-        "Guernsey %":"Guernsey %",
-        "GFI":"FI",
-        "Genomic Sire":"Genomic_SIRE REG",
-        "Genomic Dam":"Genomic Dam",
-        "FUA":"FU",
-        "FTP":"FT",
-        "FTA":"FA",
-        "First Evaluation Date":"First Evaluation Date",
-        "Feed Save":"FS ",
-        "Fat (lbs)":"FAT",
-        "Fat (%)":"FAT %",
-        "Farm ID":"cow_id",
-        "Evaluation Type":"Purebred/Crossbred Evaluation",
-        "Dom Red":"Dominant Red",
-        "DFM":"DF",
-        "Dam Submitted":"Dam Submitted",
-        "Dam Status":"Dam Status",
-        "DAB":"DA",
-        "Coat Color":"Recessive Red",
-        "Caustv Polled":"Caustv Polled",
-        "Caust CVM":"Caust CVM",
-        "Caust Brachy":"Caust Brachy",
-        "Categories":"Categories",
-        "BVD":"BVDV Results",
-        "Brown Swiss %":"Brown Swiss %",
-        "BLH":"BLH",
-        "BLE":"BLE",
-        "Birth":"birth_date",
-        "Beta Lactoglob":"Beta Lactoglobulin",
-        "BDE":"BD",
-        "Ayrshire %":"Ayrshire %",
-        "AB Beta Cas":"Alpha S-1 Casein",
-        "A2 Beta Cas":"Beta Casein A2",
-        "Udder Health":"Udder Health",
-        "Type-FS":"PTAT",
-        "Sire":"Genomic_SIRE REG",
-        "Prot":"PROT",
-        "Prot %":"PROT%",
-        "On-farm ID (Herd Management #)":"cow_id",
-        "NM$ % Rank":"NM$ % RANK",
-        "Milk":"MILK",
-        "MGS NAAB Code":"Genomic mgs_NAAB",
-        "Maternal Grandsire (MGS)":"Genomic mgs_reg",
-        "Ind  Inbrd":"GIB",
-        "Fut Inbrd":"FIB",
-        "Fat":"FAT",
-        "Fat %":"FAT %",
-        "Dam":"Genomic Dam",
-        "Breed Of Evaluation":"breed",
-        "Barcode":"Barcode",
-        "Z_TWIN":"Z_TWIN",
-        "Z_RETP":"Z_RETP",
-        "Z_RESP":"Z_RESP",
-        "Z_MFV":"Z_MFV",
-        "Z_METR":"Z_METR",
-        "Z_MAST":"Z_MAST",
-        "Z_LAME":"Z_LAME",
-        "Z_KETO":"Z_KETO",
-        "Z_DA":"Z_DA",
-        "Z_CYST":"Z_CYST",
-        "Z_Calf_Scours":"Z_Calf_Scours",
-        "Z_Calf_Resp":"Z_Calf_Resp",
-        "Z_Calf_LIV":"Z_Calf_LIV",
-        "Z_ABRT":"Z_ABRT",
-        "WT$":"WT$",
-        "UW":"UW",
-        "UH":"UH",
-        "UDC":"UDC",
-        "UD":"UD",
-        "UD Reliability":"UD Reliability",
-        "UC":"UC",
-        "TYPE FS":"PTAT",
-        "TPI":"TPI",
-        "TL":"TL",
-        "Suggested Sire":"Genomic_SIRE REG",
-        "Status":"Inactive",
-        "ST":"ST",
-        "SSB":"SSB",
-        "SSB Reliability":"SSB Reliability",
-        "Sire NAAB Code":"Genomic Sire_NAAB",
-        "SG":"SG",
-        "Sex":"sex",
-        "SCS":"SCS",
-        "SCS Reliability":"SCS Reliability",
-        "SCE":"SCE",
-        "SCE Reliability":"SCE Reliability",
-        "RW":"RW",
-        "RT":"RT",
-        "RFI":"RFI",
-        "Result Type":"Result Type",
-        "Recessive Red":"Recessive Red",
-        "RA":"RA",
-        "Purebred/Crossbred Evaluation":"Purebred/Crossbred Evaluation",
-        "PROT%":"PROT%",
-        "PROT":"PROT",
-        "Prot Reliability":"Prot Reliability",
-        "Prot % Reliability":"Prot % Reliability",
-        "PL":"PL",
-        "PL Reliability":"PL Reliability",
-        "Official ID":"Official ID",
-        "NM$":"NM$",
-        "NM$ Reliability":"NM$ Reliability",
-        "NM$ % RANK":"NM$ % RANK",
-        "Mulefoot":"Mulefoot",
-        "MILK":"MILK",
-        "Milk Reliability":"Milk Reliability",
-        "LS":"LS",
-        "LR":"LR",
-        "LIV":"LIV",
-        "Kappa Casein II":"Kappa Casein II",
-        "Kappa Casein I (ABE)":"Kappa Casein I (ABE)",
-        "IND INBRD":"GIB",
-        "Horn/Polled":"Horn/Polled",
-        "HH6":"HH6",
-        "HH5":"HH5",
-        "HH4":"HH4",
-        "HH3":"HH3",
-        "HH2":"HH2",
-        "HH1":"HH1",
-        "HCR":"HCR",
-        "HCR Reliability":"HCR Reliability",
-        "HCD":"HCD",
-        "Group":"Categories",
-        "GM$":"GM$",
-        "GL":"GL",
-        "FUT INBRD":"FIB",
-        "FU":"FU",
-        "FT":"FT",
-        "FS-Type  Reliability":"FS-Type  Reliability",
-        "FS ":"FS ",
-        "FM$":"FM$",
-        "FLS":"FLS",
-        "FLC":"FLC",
-        "FI":"FI",
-        "FE":"FE",
-        "FAT":"FAT",
-        "Fat Reliability":"Fat Reliability",
-        "FAT %":"FAT %",
-        "Fat % Reliability":"Fat % Reliability",
-        "Factor XI":"Factor XI",
-        "FA":"FA",
-        "Evaluation Date":"Evaluation Date",
-        "EFC":"EFC",
-        "DWP$":"DWP$",
-        "DWP % RANK":"DWP % RANK",
-        "DUMPS":"DUMPS",
-        "DSB":"DSB",
-        "DSB Reliability":"DSB Reliability",
-        "DPR":"DPR",
-        "DPR Reliability":"DPR Reliability",
-        "Dominant Red":"Dominant Red",
-        "DF":"DF",
-        "DCE":"DCE",
-        "DCE Reliability":"DCE Reliability",
-        "Dam Correct":"Genomic Dam",
-        "CW$":"CW$",
-        "CVM":"CVM",
-        "CM$":"CM$",
-        "Citrullinemia":"Citrullinemia",
-        "Chondrodysplasia":"Chondrodysplasia",
-        "CDCB_RP":"RP",
-        "CDCB_MET":"MET",
-        "CDCB_MAST":"MAST",
-        "CDCB_KET":"KET",
-        "CDCB_HLV":"HLiv",
-        "CDCB_HC":"MFV",
-        "CDCB_DA":"DA",
-        "CCR":"CCR",
-        "CCR Reliability":"CCR Reliability",
-        "CA$":"CA$",
-        "Breed":"breed",
-        "Brachyspina":"Brachyspina",
-        "BLAD":"BLAD",
-        "Birth Date":"birth_date",
-        "Beta Lactoglobulin":"Beta Lactoglobulin",
-        "Beta Casein A2":"Beta Casein A2",
-        "Beta Casein A/B":"Beta Casein A/B",
-        "BDC":"BDC",
-        "BD":"BD",
-        "At Lab Date":"At Lab Date",
-        "Animal ID":"cow_id",
-        "Alpha S-1 Casein":"Alpha S-1 Casein",
-        "最终体型评分可靠性":"FS-Type  Reliability",
-        "最终体型评分":"PTAT",
-        "总性能指数":"TPI",
-        "状态":"Inactive",
-        "肢蹄指数":"FLC",
-        "肢蹄评分":"FLS",
-        "有无角":"Horn/Polled",
-        "隐性红毛基因":"Recessive Red",
-        "液奶净价值":"FM$",
-        "悬韧带强度":"UC",
-        "性别":"sex",
-        "显性红":"Dominant Red",
-        "未来近交指数":"FIB",
-        "体细胞评分可靠性":"SCS Reliability",
-        "体细胞评分":"SCS",
-        "体深":"BD",
-        "体躯结构指数":"BDC",
-        "体强度":"SG",
-        "体高":"ST",
-        "蹄角度":"FA",
-        "饲料效率":"FE",
-        "饲料节约量":"FS ",
-        "硕腾子宫炎指数":"Z_METR",
-        "硕腾真胃异位指数":"Z_DA",
-        "硕腾酮病指数":"Z_KETO",
-        "硕腾蹄病指数":"Z_LAME",
-        "硕腾胎衣停滞指数":"Z_RETP",
-        "硕腾双胎指数":"Z_TWIN",
-        "硕腾乳房炎指数":"Z_MAST",
-        "硕腾卵巢囊肿指数":"Z_CYST",
-        "硕腾流产指数":"Z_ABRT",
-        "硕腾犊牛呼吸道病指数":"Z_Calf_Resp",
-        "硕腾犊牛腹泻指数":"Z_Calf_Scours",
-        "硕腾犊牛成活率指数":"Z_Calf_LIV",
-        "硕腾低血钙症指数":"Z_MFV",
-        "硕腾成母牛呼吸道疾病指数":"Z_RESP",
-        "首产提前天数":"EFC",
-        "收样日期":"At Lab Date",
-        "生产寿命可靠性":"PL Reliability",
-        "生产寿命":"PL",
-        "软骨发育异常":"Chondrodysplasia",
-        "乳脂率可靠性":"Fat % Reliability",
-        "乳脂率":"FAT %",
-        "乳脂可靠性":"Fat Reliability",
-        "乳脂":"FAT",
-        "乳头长度":"TL",
-        "乳房深度可靠性":"UD Reliability",
-        "乳房深度":"UD",
-        "乳房结构指数":"UDC",
-        "乳蛋白率可靠性":"Prot % Reliability",
-        "乳蛋白率":"PROT%",
-        "乳蛋白可靠性":"Prot Reliability",
-        "乳蛋白":"PROT",
-        "青年牛受胎率可靠性":"HCR Reliability",
-        "青年牛受胎率":"HCR",
-        "青年牛成活率":"HLiv",
-        "前乳头位置":"FT",
-        "前乳房附着":"FU",
-        "评估日期":"Evaluation Date",
-        "品种":"breed",
-        "女儿怀孕率可靠性":"DPR Reliability",
-        "女儿怀孕率":"DPR",
-        "女儿产犊易度可靠性":"DCE Reliability",
-        "女儿产犊易度":"DCE",
-        "女儿产犊死胎率可靠性":"DSB Reliability",
-        "女儿产犊死胎率":"DSB",
-        "牛配种易度":"SCE",
-        "牛白细胞粘附缺陷病":"BLAD",
-        "凝血因子 XI缺乏":"Factor XI",
-        "尿苷单磷酸合成酶缺乏":"DUMPS",
-        "奶酪净价值":"CM$",
-        "牧场牛号":"cow_id",
-        "母亲矫正":"Genomic Dam",
-        "母牛健康指数":"WT$",
-        "棱角性":"DF",
-        "尻宽":"RW",
-        "尻角度":"RA",
-        "卡帕酪蛋白II":"Kappa Casein II",
-        "卡帕酪蛋白I":"Kappa Casein I (ABE)",
-        "净价值排名":"NM$ % RANK",
-        "净价值":"NM$",
-        "结余饲料量":"RFI",
-        "结果类型":"Result Type",
-        "健康净价值排名":"DWP % RANK",
-        "健康净价值":"DWP$",
-        "建议父亲":"Genomic_SIRE REG",
-        "怀孕期天数":"GL",
-        "后肢后视":"LR",
-        "后肢侧视":"LS",
-        "后乳头位置":"RT",
-        "后乳房附着宽度":"UW",
-        "后乳房附着高":"UH",
-        "荷斯坦繁殖缺陷6型":"HH6",
-        "荷斯坦繁殖缺陷5型":"HH5",
-        "荷斯坦繁殖缺陷4型":"HH4",
-        "荷斯坦繁殖缺陷3型":"HH3",
-        "荷斯坦繁殖缺陷2型":"HH2",
-        "荷斯坦繁殖缺陷1型":"HH1",
-        "官方牛号":"Official ID",
-        "瓜氨酸血症":"Citrullinemia",
-        "公牛配种死胎率可靠性":"SSB Reliability",
-        "公牛配种死胎率":"SSB",
-        "公牛配种产犊易度":"SCE Reliability",
-        "个体近交指数":"GIB",
-        "父亲矫正":"Genomic Sire_NAAB",
-        "分组":"Categories",
-        "放牧净价值":"GM$",
-        "繁殖指数":"FI",
-        "短脊椎综合症征":"Brachyspina",
-        "犊牛健康指数":"CW$",
-        "犊牛脊椎畸形综合征":"CVM",
-        "胆固醇吸收障碍单倍型":"HCD",
-        "单趾畸形":"Mulefoot",
-        "存活率":"LIV",
-        "纯种/非纯种评估":"Purebred/Crossbred Evaluation",
-        "出生日期":"birth_date",
-        "成母牛受胎率可靠性":"CCR Reliability",
-        "成母牛受胎率":"CCR",
-        "产奶量可靠性":"Milk Reliability",
-        "产奶量":"MILK",
-        "产活犊能力":"CA$",
-        "β乳球蛋白":"Beta Lactoglobulin",
-        "β酪蛋白A2":"Beta Casein A2",
-        "β酪蛋白 A/B":"Beta Casein A/B",
-        "α-S-1酪蛋白":"Alpha S-1 Casein",
-        "NM$ 可靠性":"NM$ Reliability",
-        "CDCB子宫炎":"MET",
-        "CDCB真胃移位":"DA",
-        "CDCB酮病":"KET",
-        "CDCB胎衣不下":"RP",
-        "CDCB乳房炎":"MAST",
-        "CDCB低血钙":"MFV",
-        "BVDV Results":"BVDV Results",
-        "BVDV Confirmation Results":"BVDV Confirmation Results"
-    }
+    print("开始预处理基因组检测数据...")
+    genomic_df = genomic_df.copy()
+    print(f"输入数据的列名: {genomic_df.columns.tolist()}")
+    print(f"输入数据的形状: {genomic_df.shape}")
 
-     # 替换表头
-    genomic_df.rename(columns=genomic_column_mapping, inplace=True)
+    try:
+        # 1. 根据关键列名检测报告类型
+        report_type = detect_report_type(genomic_df)
+        print(f"识别到的报告类型: {report_type}")
 
-    # 打印重命名后的列名以调试
-    print("重命名后的列名:", genomic_df.columns.tolist())
+        # 2. 选择对应的映射字典
+        mapping_dict = GENOMIC_COLUMN_MAPPING_BY_TYPE[report_type]
+        print(f"使用映射字典: {mapping_dict}")
 
-    # 必需的列
-    required_columns = [
-        "cow_id",
-        "NM$"
-        # 根据需要添加更多必需的列
-    ]
+        # 3. 找到 cow_id 列（也可以直接用映射后的 "cow_id"）
+        cow_id_col = None
+        cow_id_alternatives = ["Animal ID", "Farm ID", "牧场牛号", "On-farm ID (Herd Management #)"]
+        for possible_id in cow_id_alternatives:
+            if possible_id in genomic_df.columns:
+                cow_id_col = possible_id
+                print(f"找到 cow_id 列: {cow_id_col}")
+                break
+        if not cow_id_col:
+            raise ValueError(
+                f"在输入数据中未找到 cow_id 列。可用的列名: {genomic_df.columns.tolist()}"
+            )
 
-    # 检查缺失列
-    missing_columns = [col for col in required_columns if col not in genomic_df.columns]
-    if missing_columns:
-        print("缺失列:", missing_columns)  # 调试信息
-        raise ValueError(f"基因组检测数据缺少以下必需列: {', '.join(missing_columns)}")
+        # 保存 cow_id 的原始值，供后续插回最终 DataFrame
+        cow_id_values = genomic_df[cow_id_col].copy()
 
-    # 删除缺失值
-    genomic_df = genomic_df.dropna(subset=required_columns)
+        # 4. 按照当前类型的映射字典重命名列
+        rename_dict = {old: new for old, new in mapping_dict.items() if old in genomic_df.columns}
+        print(f"将要重命名的列: {rename_dict}")
+        genomic_df = genomic_df.rename(columns=rename_dict)
+        print(f"重命名后的列名: {genomic_df.columns.tolist()}")
 
+        # 5. 构建 result_rows，用来拼装标准化后的数据
+        result_rows = []
+        for idx in range(len(genomic_df)):
+            row_data = {}
+            # 初始化所有标准列为 NaN
+            for col in STANDARD_GENOMIC_COLUMNS:
+                row_data[col] = np.nan
 
-    # 检查 'Evaluation Date' 或 'Results Last Updated' 列是否存在
-    date_column = None
-    if 'Evaluation Date' in genomic_df.columns:
-        date_column = 'Evaluation Date'
-    elif 'Results Last Updated' in genomic_df.columns:
-        date_column = 'Results Last Updated'
-    
-    if date_column:
-        # 转换日期格式
-        genomic_df[date_column] = pd.to_datetime(genomic_df[date_column], errors='coerce')
-        # 重命名为标准列名
-        genomic_df.rename(columns={date_column: 'Results Last Updated'}, inplace=True)
-    else:
-        # 如果没有日期列，添加当前日期
-        genomic_df['Results Last Updated'] = pd.Timestamp.now()
-    
-    return genomic_df
+            # 将存在于 genomic_df 中的列映射到 row_data
+            for col in genomic_df.columns:
+                if col in STANDARD_GENOMIC_COLUMNS:
+                    row_data[col] = genomic_df.iloc[idx][col]
 
+            # 强制添加 cow_id
+            row_data["cow_id"] = cow_id_values.iloc[idx]
 
-# core/data/processor.py (继续)
+            # 如果存在 'Results Last Updated' 或 'Evaluation Date' 列，则做时间转换
+            if "Results Last Updated" in genomic_df.columns:
+                row_data["Results_Last_Updated"] = pd.to_datetime(
+                    genomic_df.iloc[idx]["Results Last Updated"], errors="coerce"
+                )
+            elif "Evaluation Date" in genomic_df.columns:
+                row_data["Results_Last_Updated"] = pd.to_datetime(
+                    genomic_df.iloc[idx]["Evaluation Date"], errors="coerce"
+                )
+            else:
+                # 如果都不存在，则默认赋值当前时间
+                row_data["Results_Last_Updated"] = pd.Timestamp.now()
 
+            result_rows.append(row_data)
+
+        # 6. 生成最终的 standardized_df
+        standardized_df = pd.DataFrame(result_rows)
+
+        # 确保列顺序和 STANDARD_GENOMIC_COLUMNS 一致
+        # 如果一些列在 STANDARD_GENOMIC_COLUMNS 中未出现，就忽略
+        standardized_df = standardized_df[STANDARD_GENOMIC_COLUMNS + ["cow_id", "Results_Last_Updated"]]
+
+        print(f"处理后的数据形状: {standardized_df.shape}")
+        print("基因组数据预处理完成")
+
+        return standardized_df
+
+    except Exception as e:
+        print(f"预处理过程中发生错误: {str(e)}")
+        print("当前处理的数据状态:")
+        print(f"- 原始数据形状: {genomic_df.shape}")
+        print(f"- 原始数据列名: {genomic_df.columns.tolist()}")
+        raise
+
+# === 5. 修改 process_genomic_data_file 函数 ===
 def process_genomic_data_file(input_files: list[Path], project_path: Path, progress_callback=None) -> Path:
     """
-    标准化基因组检测数据文件
+    标准化基因组检测数据文件。
+
+    :param input_files: 输入文件路径列表
+    :param project_path: 项目根目录路径
+    :param progress_callback: 进度更新的回调函数，可选
+    :return: 最终汇总文件的路径
     """
-    # 将标准化后的文件存储到 standardized_data 文件夹
+    print("开始处理基因组检测数据...")
+
     standardized_path = project_path / "standardized_data"
     standardized_path.mkdir(parents=True, exist_ok=True)
 
-    # 初始化一个空的 DataFrame 来存储所有标准化后的数据
-    all_cleaned_data = pd.DataFrame()
+    processed_files = []  # 用于存储处理后的文件路径
 
+    # 为每个输入文件创建独立的处理结果
     for idx, input_file in enumerate(input_files, start=1):
-        # 读取文件，根据文件类型选择读取方法
         try:
+            print(f"处理文件 {idx}/{len(input_files)}: {input_file.name}")
+            # 读取文件
             if input_file.suffix.lower() == '.csv':
                 df = pd.read_csv(input_file)
             else:
                 df = pd.read_excel(input_file)
-        except Exception as e:
-            raise ValueError(f"读取基因组检测数据文件失败 ({input_file.name}): {e}")
 
-        # 对数据进行标准化处理
-        try:
+            # 预处理数据（根据报告类型重命名）
             df_cleaned = preprocess_genomic_data(df, progress_callback)
+
+            # 保存独立的处理结果
+            output_file = standardized_path / f"processed_genomic_data_{idx}.xlsx"
+            df_cleaned.to_excel(output_file, index=False)
+            print(f"已保存处理结果到: {output_file}")
+            processed_files.append(output_file)
+
         except Exception as e:
-            raise ValueError(f"预处理基因组检测数据失败 ({input_file.name}): {e}")
+            raise ValueError(f"处理文件 {input_file.name} 时发生错误: {e}")
 
-        # 添加到所有数据中
-        all_cleaned_data = pd.concat([all_cleaned_data, df_cleaned], ignore_index=True)
-
-    # 读取现有的 processed_genomic_data.xlsx，如果存在
-    output_file = standardized_path / "processed_genomic_data.xlsx"
-    if output_file.exists():
-        try:
-            existing_data = pd.read_excel(output_file)
-        except Exception as e:
-            raise ValueError(f"读取现有的标准化文件失败: {e}")
-
-        # 合并新数据与现有数据
-        combined_data = pd.concat([existing_data, all_cleaned_data], ignore_index=True)
-    else:
-        combined_data = all_cleaned_data
-
-    # 删除重复的 cow_id，保留 'Results Last Updated' 最新的记录
-    if 'cow_id' in combined_data.columns and 'Results Last Updated' in combined_data.columns:
-        combined_data.sort_values('Results Last Updated', ascending=False, inplace=True)
-        combined_data.drop_duplicates(subset='cow_id', keep='first', inplace=True)
-    else:
-        raise ValueError("标准化数据缺少 'cow_id' 或 'Results Last Updated' 列，无法处理重复记录。")
-
-    # 保存标准化后的文件
+    # 合并所有处理结果到最终文件
     try:
-        combined_data.to_excel(output_file, index=False)
+        final_output = standardized_path / "processed_genomic_data.xlsx"
+
+        if not final_output.exists():
+            if len(processed_files) == 1:
+                # 只有一份处理结果，直接重命名为最终汇总文件
+                processed_files[0].rename(final_output)
+                print(f"已保存最终汇总结果到: {final_output}")
+            else:
+                # 多份处理结果，进行合并
+                final_df = pd.concat(
+                    [pd.read_excel(f) for f in processed_files],
+                    ignore_index=True
+                )
+
+                # 根据 cow_id 和 Results_Last_Updated 去重
+                final_df['Results_Last_Updated'] = pd.to_datetime(final_df['Results_Last_Updated'])
+                final_df = final_df.sort_values('Results_Last_Updated', ascending=False)
+                final_df = final_df.drop_duplicates(subset='cow_id', keep='first')
+
+                # 保存最终结果
+                final_df.to_excel(final_output, index=False)
+                print(f"已保存最终汇总结果到: {final_output}")
+        else:
+            # 如果存在旧的汇总文件，需要将新处理的文件与之合并
+            final_df = pd.read_excel(final_output)
+
+            # 确保旧的汇总文件列名无重复且符合标准
+            final_df = final_df.loc[:, ~final_df.columns.duplicated()]
+            # 可以进一步验证列名是否唯一，避免潜在问题
+            if final_df.columns.duplicated().any():
+                raise ValueError("现有汇总文件中存在重复的列名。请检查并清理汇总文件。")
+
+            # 读取并合并新处理的文件
+            for temp_file in processed_files:
+                temp_df = pd.read_excel(temp_file)
+                # 确保 temp_df 的列名与 final_df 一致
+                if not set(STANDARD_GENOMIC_COLUMNS + ['cow_id', 'Results_Last_Updated']).issubset(temp_df.columns):
+                    raise ValueError(f"处理文件 {temp_file.name} 缺少必要的标准列。")
+                final_df = pd.concat([final_df, temp_df], ignore_index=True)
+
+            # 根据 cow_id 和 Results_Last_Updated 去重
+            final_df['Results_Last_Updated'] = pd.to_datetime(final_df['Results_Last_Updated'])
+            final_df = final_df.sort_values('Results_Last_Updated', ascending=False)
+            final_df = final_df.drop_duplicates(subset='cow_id', keep='first')
+
+            # 保存最终结果
+            final_df.to_excel(final_output, index=False)
+            print(f"已保存最终汇总结果到: {final_output}")
+
+        return final_output
+
     except Exception as e:
-        raise ValueError(f"保存基因组检测数据文件失败: {e}")
-
-    # 确保文件存在
-    if not output_file.exists():
-        raise ValueError("标准化后的基因组检测数据文件未生成。")
-
-    return output_file
+        raise ValueError(f"合并处理结果时发生错误: {e}")

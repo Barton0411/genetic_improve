@@ -1,74 +1,36 @@
-# gui/main_window.py
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import shutil
+from pathlib import Path
 
+from PyQt6.QtCore import (
+    Qt, QDir, QUrl, pyqtSignal, QThread, Qt
+)
+from PyQt6.QtGui import (
+    QFileSystemModel, QDesktopServices
+)
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QFileDialog, QMessageBox, QLabel, 
-    QListWidget, QListWidgetItem, QStackedWidget, QInputDialog, QFrame, QTreeView, QGridLayout,
-    QAbstractItemView  # 添加这一行
+    QListWidget, QListWidgetItem, QStackedWidget, QInputDialog, 
+    QFrame, QTreeView, QGridLayout, QAbstractItemView, QMenu
 )
 
-from PyQt6.QtCore import Qt, QDir
-from PyQt6.QtGui import QFileSystemModel
-from pathlib import Path
 from config.settings import Settings
+from core.breeding_calc.traits_calc import KeyTraitsPage
 from utils.file_manager import FileManager
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QPushButton, QFileDialog, QMessageBox, QLabel, 
-    QListWidget, QListWidgetItem, QStackedWidget, QInputDialog, QFrame, QTreeView, QGridLayout
-)
-from PyQt6.QtCore import Qt, QDir
-from PyQt6.QtGui import QFileSystemModel
-from pathlib import Path
-from config.settings import Settings
-from utils.file_manager import FileManager
-import shutil
-from PyQt6.QtCore import QUrl
-from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtCore import QDir
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFrame, QVBoxLayout, QListWidget, QListWidgetItem
-from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtWidgets import QFrame, QLabel, QVBoxLayout, QMessageBox, QFileDialog
-from pathlib import Path
-import shutil
 from core.data.uploader import (
     upload_and_standardize_bull_data,
     upload_and_standardize_breeding_data,
     upload_and_standardize_body_data,
     upload_and_standardize_cow_data
 )
-# gui/main_window.py 
-import sys
-import os
-from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QPushButton, QFileDialog, QMessageBox, QLabel, 
-    QListWidget, QListWidgetItem, QStackedWidget, QInputDialog, QFrame, QTreeView, QGridLayout
-)
-from PyQt6.QtCore import Qt, QDir, pyqtSignal, QThread
-from PyQt6.QtGui import QFileSystemModel, QDesktopServices
-from pathlib import Path
-from config.settings import Settings
-from utils.file_manager import FileManager
-import shutil
-from PyQt6.QtCore import QUrl
-
-from core.data.uploader import (
-    upload_and_standardize_bull_data,
-    upload_and_standardize_breeding_data,
-    upload_and_standardize_body_data,
-    upload_and_standardize_cow_data
-)
-
 from gui.worker import CowDataWorker, GenomicDataWorker
 from gui.progress import ProgressDialog
+from gui.db_update_worker import DBUpdateWorker
+
+# 修改 sys.path（如果必要，确保只做一次）
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 class DragDropArea(QFrame):
     dropped = pyqtSignal(Path)  # 发射文件路径时使用Path对象
@@ -110,13 +72,17 @@ class DragDropArea(QFrame):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, username=None):  # 添加 username 参数
         super().__init__()
         self.settings = Settings()
+        self.username = username  # 保存用户名
         self.content_stack = QStackedWidget()  # 提前创建 content_stack
         self.selected_project_path = None   # 用于记录当前选择的项目路径
         self.templates_path = Path(__file__).parent.parent / "templates"  # 模板存放路径 
+        self.key_traits_page = None 
         self.setup_ui()
+        self.check_and_update_database_on_startup()
+        self.sub_nav_menu = None  # 添加子导航菜单属性
 
     def setup_ui(self):
         self.setWindowTitle("奶牛育种智选报告专家")
@@ -148,14 +114,18 @@ class MainWindow(QMainWindow):
         """)
         nav_layout = QVBoxLayout(nav_frame)
         
+        # 修改导航项结构，使用嵌套列表表示父子关系
         nav_items = [
-            ("育种项目管理", "folder"),
-            ("数据上传", "upload"),
-            ("牛群排名", "chart"),
-            ("配种记录分析", "analysis"),
-            ("体型外貌评定", "body"),
-            ("个体选配", "match"),
-            ("自动化生成", "report")
+            ("育种项目管理", "folder", []),
+            ("数据上传", "upload", []),
+            ("牛群排名", "chart", [
+                "在群母牛关键性状计算",
+                "在群母牛指数计算及排名"
+            ]),
+            ("配种记录分析", "analysis", []),
+            ("体型外貌评定", "body", []),
+            ("个体选配", "match", []),
+            ("自动化生成", "report", [])
         ]
 
         self.nav_list = QListWidget()
@@ -177,10 +147,22 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        for text, icon in nav_items:
+        # 修改添加导航项的逻辑
+        for text, icon, subitems in nav_items:
+            # 添加主导航项
             item = QListWidgetItem(text)
             item.setTextAlignment(Qt.AlignmentFlag.AlignLeft)
+            # 设置主导航项的缩进级别为0
+            item.setData(Qt.ItemDataRole.UserRole + 1, 0)
             self.nav_list.addItem(item)
+            
+            # 如果有子项，添加子导航项
+            for subitem in subitems:
+                sub_item = QListWidgetItem("    " + subitem)  # 使用空格进行视觉上的缩进
+                sub_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft)
+                # 设置子导航项的缩进级别为1
+                sub_item.setData(Qt.ItemDataRole.UserRole + 1, 1)
+                self.nav_list.addItem(sub_item)
 
         nav_layout.addWidget(self.nav_list)
         layout.addWidget(nav_frame)
@@ -196,6 +178,10 @@ class MainWindow(QMainWindow):
 
         # 创建"数据上传"页面  
         self.create_upload_page() 
+
+        # 创建"关键性状计算"页面
+        self.key_traits_page = KeyTraitsPage(parent=self)
+        self.content_stack.addWidget(self.key_traits_page)
 
         # TODO: 创建其他页面...
         
@@ -271,7 +257,6 @@ class MainWindow(QMainWindow):
         
         self.content_stack.addWidget(page)
 
-
     def get_selected_project_path(self):
         """获取用户在树中选择的项目路径"""
         index = self.file_tree.currentIndex()
@@ -307,8 +292,6 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"创建项目失败：{str(e)}")
 
-
-
     def select_project_by_path(self, project_path: Path):
         """根据项目路径自动选择项目"""
         index = self.file_system_model.index(str(project_path))
@@ -320,10 +303,6 @@ class MainWindow(QMainWindow):
             self.file_system_model.setRootPath(str(project_path.parent))
         else:
             QMessageBox.warning(self, "警告", f"无法找到项目路径: {project_path}")
-
-
-
-
 
     def select_project(self):
         """选择项目，并检查项目结构"""
@@ -415,11 +394,22 @@ class MainWindow(QMainWindow):
 
     def on_nav_item_changed(self, index):
         """处理导航项选择变化"""
-        self.content_stack.setCurrentIndex(index)
-        # 用户确认选择项目后，更新导航列表样式表，让选中项颜色更亮
+        current_item = self.nav_list.item(index)
+        if current_item:
+            indent_level = current_item.data(Qt.ItemDataRole.UserRole + 1)
+            text = current_item.text().strip()
+            
+            if indent_level == 1:  # 子导航项
+                if text == "在群母牛关键性状计算":
+                    # 切换到关键性状计算页面
+                    self.content_stack.setCurrentWidget(self.key_traits_page)
+                elif text == "在群母牛指数计算及排名":
+                    # TODO: 处理在群母牛指数计算及排名
+                    pass
+            else:  # 主导航项
+                self.content_stack.setCurrentIndex(index)
+                
         self.update_nav_selected_style()
-
-
 
     # 新增“数据上传”页面函数
     def create_upload_page(self):
@@ -534,7 +524,6 @@ class MainWindow(QMainWindow):
         self.progress_dialog.close()
         QMessageBox.critical(self, "错误", f"上传或标准化母牛数据时发生错误：\n{error_message}")
 
-
     def create_upload_cell(self, display_name: str, template_file: str):
         frame = QFrame()
         v_layout = QVBoxLayout(frame)
@@ -601,7 +590,6 @@ class MainWindow(QMainWindow):
 
         return frame
 
-
     def download_template(self, template_file: str):
         """下载模板文件"""
         source = self.templates_path / template_file
@@ -615,8 +603,6 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "成功", f"已保存模板到: {save_path}")
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"保存模板失败: {str(e)}")
-
-
 
     def select_file_and_upload(self, display_name: str):
         """选择文件后调用通用处理函数"""
@@ -639,4 +625,67 @@ class MainWindow(QMainWindow):
 
         # 调用上传处理逻辑
         self.handle_file_upload(input_files, display_name)
+
+    def check_and_update_database_on_startup(self):
+        """在应用启动时自动检查和更新数据库"""
+        self.progress_dialog = ProgressDialog(self)
+        self.progress_dialog.setWindowTitle("数据库更新")
+        self.progress_dialog.title_label.setText("正在检查和更新本地数据库...")
+        self.progress_dialog.progress_bar.setRange(0, 0)  # 不显示具体进度
+        self.progress_dialog.show()
+
+        # 创建线程和 worker
+        self.db_update_thread = QThread()
+        self.db_update_worker = DBUpdateWorker()
+        self.db_update_worker.moveToThread(self.db_update_thread)
+
+        # 连接信号与槽
+        self.db_update_thread.started.connect(self.db_update_worker.run)
+        self.db_update_worker.finished.connect(self.on_db_update_finished)
+        self.db_update_worker.error.connect(self.on_db_update_error)
+        self.db_update_worker.finished.connect(self.db_update_thread.quit)
+        self.db_update_worker.finished.connect(self.db_update_worker.deleteLater)
+        self.db_update_thread.finished.connect(self.db_update_thread.deleteLater)
+        self.db_update_worker.error.connect(self.db_update_thread.quit)
+        self.db_update_worker.error.connect(self.db_update_worker.deleteLater)
+
+        # 启动线程
+        self.db_update_thread.start()
+
+    def on_db_update_finished(self):
+        """处理数据库更新完成的信号"""
+        self.progress_dialog.close()
+        QMessageBox.information(self, "更新完成", "本地数据库已成功检查和更新。")
+
+    def on_db_update_error(self, error_message: str):
+        """处理数据库更新错误的信号"""
+        self.progress_dialog.close()
+        QMessageBox.critical(self, "更新错误", f"数据库更新过程中发生错误：\n{error_message}")
+
+    def show_sub_nav_menu(self, pos, sub_items):
+        """显示子导航菜单"""
+        menu = QMenu(self)
+        for item in sub_items:
+            action = menu.addAction(item)
+            action.triggered.connect(lambda checked, text=item: self.handle_sub_nav_click(text))
+        menu.exec(pos)
+
+    def handle_sub_nav_click(self, text):
+        """处理子导航项点击事件"""
+        if text == "在群母牛关键性状计算":
+            # TODO: 连接到 traits_calc.py 的功能
+            pass
+        elif text == "在群母牛指数计算及排名":
+            # TODO: 连接到 index_calc.py 的功能
+            pass        
+
+
+    def on_nav_item_entered(self, item):
+        """处理鼠标进入导航项事件"""
+        sub_items = item.data(Qt.ItemDataRole.UserRole)
+        if sub_items:
+            # 获取项目在视图中的位置
+            rect = self.nav_list.visualItemRect(item)
+            global_pos = self.nav_list.mapToGlobal(rect.topRight())
+            self.show_sub_nav_menu(global_pos, sub_items)  
 

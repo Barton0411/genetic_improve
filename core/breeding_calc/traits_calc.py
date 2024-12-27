@@ -1,10 +1,754 @@
-"""
-牛群关键性状计算模块
-"""
+# core/breeding_calc/traits_calc.py
+from PyQt6.QtWidgets import (
+    QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, 
+    QListWidget, QListWidgetItem, QAbstractItemView, QMessageBox    # 添加 QListWidgetItem
+)
+from PyQt6.QtCore import Qt, QThread  # 修改这行，添加 QThread
+import pandas as pd
+from sqlalchemy import create_engine, text
+import datetime
+from core.data.update_manager import (
+    CLOUD_DB_HOST, CLOUD_DB_PORT, CLOUD_DB_USER, 
+    CLOUD_DB_PASSWORD, CLOUD_DB_NAME, LOCAL_DB_PATH
+)
+from PyQt6.QtWidgets import QMainWindow  # 添加这行
+import numpy as np
+from sklearn.linear_model import LinearRegression
 
-class TraitsCalculator:
-    def __init__(self):
-        pass
+from gui.progress import ProgressDialog
+from gui.worker import TraitsCalculationWorker
+
+import time
+import datetime
+from PyQt6.QtCore import QThread, QObject, pyqtSignal, pyqtSlot
+from gui.progress import ProgressDialog
+
+# 添加性状翻译字典
+TRAITS_TRANSLATION = {
+    'TPI': '育种综合指数', 'NM$': '净利润值', 'CM$': '奶酪净值', 'FM$': '液奶净值', 'GM$': '放牧净值',
+    'MILK': '产奶量', 'FAT': '乳脂量', 'PROT': '乳蛋白量', 'FAT %': '乳脂率', 'PROT%': '乳蛋白率',
+    'SCS': '体细胞指数', 'DPR': '女儿怀孕率', 'HCR': '青年牛受胎率', 'CCR': '成母牛受胎率', 'PL': '生产寿命',
+    'SCE': '配种产犊难易度', 'DCE': '女儿产犊难易度', 'SSB': '配种死胎率', 'DSB': '女儿死淘率',
+    'PTAT': '体型综合指数', 'UDC': '乳房综合指数', 'FLC': '肢蹄综合指数', 'BDC': '体重综合指数',
+    'ST': '体高', 'SG': '强壮度', 'BD': '体深', 'DF': '乳用特征', 'RA': '尻角度', 'RW': '尻宽',
+    'LS': '后肢侧视', 'LR': '后肢后视', 'FA': '蹄角度', 'FLS': '肢蹄评分', 'FU': '前方附着',
+    'UH': '后房高度', 'UW': '后方宽度', 'UC': '悬韧带', 'UD': '乳房深度', 'FT': '前乳头位置',
+    'RT': '后乳头位置', 'TL': '乳头长度', 'FE': '饲料效率指数', 'FI': '繁殖力指数', 'HI': '健康指数',
+    'LIV': '存活率', 'GL': '妊娠长度', 'MAST': '乳房炎抗病性', 'MET': '子宫炎抗病性', 'RP': '胎衣不下抗病性',
+    'KET': '酮病抗病性', 'DA': '变胃抗病性', 'MFV': '产后瘫抗病性', 'EFC': '首次产犊月龄',
+    'HLiv': '后备牛存活率', 'FS': '饲料节约指数', 'RFI': '剩余饲料采食量', 'Milk Speed': '排乳速度',
+    'Eval Date': '数据日期'
+}
+
+class KeyTraitsPage(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        self.default_traits = [
+            'NM$', 'TPI', 'MILK', 'FAT', 'FAT %', 'PROT', 'PROT%', 
+            'SCS', 'PL', 'DPR', 'PTAT', 'UDC', 'FLC', 'RFI'
+        ]
+        
+        self.all_traits = [
+            'TPI', 'NM$', 'CM$', 'FM$', 'GM$', 'MILK', 'FAT', 'PROT', 
+            'FAT %', 'PROT%', 'SCS', 'DPR', 'HCR', 'CCR', 'PL', 'SCE', 
+            'DCE', 'SSB', 'DSB', 'PTAT', 'UDC', 'FLC', 'BDC', 'ST', 'SG', 
+            'BD', 'DF', 'RA', 'RW', 'LS', 'LR', 'FA', 'FLS', 'FU', 'UH', 
+            'UW', 'UC', 'UD', 'FT', 'RT', 'TL', 'FE', 'FI', 'HI', 'LIV', 
+            'GL', 'MAST', 'MET', 'RP', 'KET', 'DA', 'MFV', 'EFC', 'HLiv', 
+            'FS', 'RFI', 'Milk Speed', 'Eval Date'
+        ]
+        
+        self.required_trait = 'NM$'
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QHBoxLayout(self)
+        
+        # 左侧：全部性状列表
+        left_layout = QVBoxLayout()
+        left_label = QLabel("全部性状")
+        self.all_traits_list = QListWidget()
+
+        # 修改添加性状的方式，显示中英文
+        for trait in self.all_traits:
+            item = QListWidgetItem(f"{trait} - {TRAITS_TRANSLATION[trait]}")
+            # 存储英文性状名称作为数据
+            item.setData(Qt.ItemDataRole.UserRole, trait)
+            self.all_traits_list.addItem(item)
+
+        self.all_traits_list.itemDoubleClicked.connect(self.add_trait)
+        left_layout.addWidget(left_label)
+        left_layout.addWidget(self.all_traits_list)
+        layout.addLayout(left_layout)
+
+        # 中间：按钮区域
+        button_layout = QVBoxLayout()
+        add_button = QPushButton("添加 >>")
+        add_button.clicked.connect(self.add_trait)
+        remove_button = QPushButton("<< 移除")
+        remove_button.clicked.connect(self.remove_trait)
+        select_all_button = QPushButton("全选")
+        select_all_button.clicked.connect(self.select_all_traits)
+        reset_button = QPushButton("恢复默认")
+        reset_button.clicked.connect(self.reset_traits)
+        confirm_button = QPushButton("确认")  # 添加确认按钮
+        confirm_button.clicked.connect(self.start_traits_calculation)  # 添加点击事件处理
+        
+        button_layout.addStretch()
+        button_layout.addWidget(add_button)
+        button_layout.addWidget(remove_button)
+        button_layout.addWidget(select_all_button)
+        button_layout.addWidget(reset_button)
+        button_layout.addWidget(confirm_button)  # 添加确认按钮到布局
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+
+        # 右侧：已选择性状列表
+        right_layout = QVBoxLayout()
+        right_label = QLabel("已选择性状\n（可拖拽调整顺序）")
+        self.selected_traits_list = QListWidget()
+
+        # 修改添加默认性状的方式，显示中英文
+        for trait in self.default_traits:
+            item = QListWidgetItem(f"{trait} - {TRAITS_TRANSLATION[trait]}")
+            item.setData(Qt.ItemDataRole.UserRole, trait)
+            self.selected_traits_list.addItem(item)
+
+        self.selected_traits_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.selected_traits_list.itemDoubleClicked.connect(self.remove_trait)
+        right_layout.addWidget(right_label)
+        right_layout.addWidget(self.selected_traits_list)
+        layout.addLayout(right_layout)
+
+
+
+        # 设置布局的伸缩因子
+        layout.setStretch(0, 2)  # 左侧列表
+        layout.setStretch(1, 1)  # 中间按钮区域
+        layout.setStretch(2, 2)  # 右侧列表
+
+    def add_trait(self, item=None):
+        if not item:
+            item = self.all_traits_list.currentItem()
+        if item:
+            trait = item.data(Qt.ItemDataRole.UserRole)
+            if not self.is_trait_selected(trait):
+                new_item = QListWidgetItem(f"{trait} - {TRAITS_TRANSLATION[trait]}")
+                new_item.setData(Qt.ItemDataRole.UserRole, trait)
+                self.selected_traits_list.addItem(new_item)
+
+    def remove_trait(self, item=None):
+        if not item:
+            item = self.selected_traits_list.currentItem()
+        if item:
+            trait = item.data(Qt.ItemDataRole.UserRole)
+            if trait != self.required_trait:
+                self.selected_traits_list.takeItem(self.selected_traits_list.row(item))
+
+    def is_trait_selected(self, trait):
+        for i in range(self.selected_traits_list.count()):
+            item = self.selected_traits_list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == trait:
+                return True
+        return False
+
+    def select_all_traits(self):
+        self.selected_traits_list.clear()
+        for trait in self.all_traits:
+            item = QListWidgetItem(f"{trait} - {TRAITS_TRANSLATION[trait]}")
+            item.setData(Qt.ItemDataRole.UserRole, trait)
+            self.selected_traits_list.addItem(item)
+
+    def reset_traits(self):
+        self.selected_traits_list.clear()
+        for trait in self.default_traits:
+            item = QListWidgetItem(f"{trait} - {TRAITS_TRANSLATION[trait]}")
+            item.setData(Qt.ItemDataRole.UserRole, trait)
+            self.selected_traits_list.addItem(item)
+
+    def get_selected_traits(self):
+        return [self.selected_traits_list.item(i).data(Qt.ItemDataRole.UserRole) 
+                for i in range(self.selected_traits_list.count())]
+
+    # 在 KeyTraitsPage 类中添加新的方法
+
+
+
+    def process_key_traits_by_year(self, detail_path, progress_callback=None):
+        """处理年度关键性状数据"""
+        print("开始处理年度关键性状数据...")
+        
+        try:
+            # 1. 读取详细数据文件
+            df = pd.read_excel(detail_path)
+            
+            # 2. 获取出生年份范围
+            min_year = df['birth_year'].min()
+            max_year = df['birth_year'].max()
+            print(f"出生年份范围: {min_year} - {max_year}")
+
+            # 3. 准备所有性状的数据
+            results = {}
+            
+            # 4. 获取默认值（从999HO99999）
+            default_values = {}
+            engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
+            with engine.connect() as conn:
+                default_bull = conn.execute(
+                    text("SELECT * FROM bull_library WHERE `BULL NAAB`='999HO99999'")
+                ).fetchone()
+                if default_bull:
+                    default_bull_dict = dict(default_bull._mapping)
+                    for trait in self.get_selected_traits():
+                        default_values[trait] = default_bull_dict.get(trait, 0)
+                else:
+                    print("警告: 未找到默认公牛999HO99999")
+                    for trait in self.get_selected_traits():
+                        default_values[trait] = 0
+                        
+            # 5. 处理每个性状
+            total_traits = len(self.get_selected_traits())
+            for idx, trait in enumerate(self.get_selected_traits(), 1):
+                # 更新进度
+                if progress_callback:
+                    progress = int((idx / total_traits) * 100)
+                    progress_callback(progress)
+                    
+                print(f"处理性状: {trait}")
+                trait_col = f'sire_{trait}'
+                
+                # 5.1 如果性状列不存在，直接使用默认值处理所有年份
+                if trait_col not in df.columns:
+                    print(f"性状列 {trait_col} 不存在，使用默认值")
+                    all_years = pd.DataFrame({'birth_year': range(min_year, max_year + 1)})
+                    all_years['mean'] = default_values[trait]
+                    all_years['interpolated'] = True
+                else:
+                    # 原有的计算逻辑
+                    yearly_means = df.groupby('birth_year').agg({
+                        trait_col: ['count', 'mean']
+                    }).reset_index()
+                    yearly_means.columns = ['birth_year', 'count', 'mean']
+                    
+                    # 5.2 筛选数据量>=10的年份
+                    valid_years = yearly_means[yearly_means['count'] >= 10]
+                    
+                    if len(valid_years) > 1:
+                        # 有多个有效年份，进行正常回归
+                        X = valid_years['birth_year'].values.reshape(-1, 1)
+                        y = valid_years['mean'].values
+                        reg = LinearRegression().fit(X, y)
+                        
+                        # 生成所有年份的预测值
+                        all_years = pd.DataFrame({'birth_year': range(min_year, max_year + 1)})
+                        all_years['mean'] = reg.predict(all_years['birth_year'].values.reshape(-1, 1))
+                        all_years['interpolated'] = ~all_years['birth_year'].isin(valid_years['birth_year'])
+                        
+                    elif len(valid_years) == 1:
+                        # 只有一个有效年份
+                        valid_year = valid_years['birth_year'].iloc[0]
+                        valid_mean = valid_years['mean'].iloc[0]
+                        
+                        if valid_year == min_year:
+                            # 使用最小年份+1的默认值
+                            points = {
+                                valid_year: valid_mean,
+                                valid_year + 1: default_values[trait]
+                            }
+                            slope = default_values[trait] - valid_mean  # 计算斜率
+                        else:
+                            # 使用最小年份的默认值
+                            points = {
+                                min_year: default_values[trait],
+                                valid_year: valid_mean
+                            }
+                            slope = (valid_mean - default_values[trait]) / (valid_year - min_year)  # 计算斜率
+                        
+                        # 使用这两个点创建线性方程
+                        all_years = pd.DataFrame({'birth_year': range(min_year, max_year + 1)})
+                        all_years['mean'] = all_years['birth_year'].apply(
+                            lambda x: points.get(x, 
+                                # 如果年份大于最大已知年份，使用线性外推
+                                valid_mean + slope * (x - valid_year) if x > valid_year else
+                                # 否则使用线性插值
+                                np.interp(x, list(points.keys()), list(points.values())))
+                        )
+                        all_years['interpolated'] = ~all_years['birth_year'].isin([valid_year])
+                        
+                    else:
+                        # 没有有效年份，全部使用默认值
+                        all_years = pd.DataFrame({'birth_year': range(min_year, max_year + 1)})
+                        all_years['mean'] = default_values[trait]
+                        all_years['interpolated'] = True
+                
+                # 保存处理结果到字典中
+                results[trait] = all_years
+            
+            # 6. 尝试保存所有结果到Excel
+            output_path = detail_path.parent / 'processed_cow_data_key_traits_mean_by_year.xlsx'
+            while True:
+                try:
+                    with pd.ExcelWriter(output_path) as writer:
+                        for trait, data in results.items():
+                            data.to_excel(writer, sheet_name=trait, index=False)
+                    print("年度关键性状数据处理完成")
+                    break
+                except PermissionError:
+                    reply = QMessageBox.question(
+                        self,
+                        "文件被占用",
+                        f"文件 {output_path.name} 正在被其他程序使用。\n请关闭该文件后点击'重试'继续，或点击'取消'停止操作。",
+                        QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Cancel
+                    )
+                    if reply == QMessageBox.StandardButton.Cancel:
+                        return False
+            
+            return True
+            
+        except Exception as e:
+            print(f"处理年度关键性状数据时发生错误: {str(e)}")
+            raise
+
+    def start_traits_calculation(self):
+        """开始关键性状计算流程"""
+        print("开始关键性状计算流程...")
+        
+        # 获取主窗口实例
+        parent = self.parent()
+        while parent and not isinstance(parent, QMainWindow):
+            parent = parent.parent()
+        main_window = parent
+        
+        print(f"获取到主窗口: {main_window}")
+        
+        if not main_window:
+            print("未找到主窗口")
+            QMessageBox.warning(self, "警告", "无法获取主窗口")
+            return
+            
+        if not hasattr(main_window, 'selected_project_path') or not main_window.selected_project_path:
+            print("未选择项目")
+            QMessageBox.warning(self, "警告", "请先选择一个项目")
+            return
+        
+        print(f"选择的项目路径: {main_window.selected_project_path}")
+            
+        cow_data_path = main_window.selected_project_path / "standardized_data" / "processed_cow_data.xlsx"
+        print(f"母牛数据文件路径: {cow_data_path}")
+        
+        if not cow_data_path.exists():
+            print("母牛数据文件不存在")
+            QMessageBox.warning(self, "警告", "请先上传并处理母牛数据")
+            return
+            
+        try:
+            # 1. 获取所选性状列表
+            selected_traits = self.get_selected_traits()
+            print(f"获取到所选性状: {selected_traits}")
+
+            # 2. 读取母牛数据，获取公牛列表
+            print("开始读取母牛数据...")
+            cow_df = pd.read_excel(cow_data_path)
+            
+            # 添加birth_year列
+            cow_df['birth_year'] = pd.to_datetime(cow_df['birth_date']).dt.year
+            
+            # 添加sire_identified, mgs_identified, mmgs_identified列
+            for col in ['sire', 'mgs', 'mmgs']:
+                cow_df[f"{col}_identified"] = False
+            
+            bull_ids = set()
+            for col in ['sire', 'mgs', 'mmgs']:
+                if col in cow_df.columns:
+                    bull_ids.update(cow_df[col].dropna().unique())
+            print(f"提取到的公牛ID数量: {len(bull_ids)}")
+                    
+            # 3. 检查数据库中的公牛,并提取所选性状数据
+            print("开始检查数据库中的公牛...")
+            engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
+            bull_traits = {}
+            with engine.connect() as conn:
+                missing_bulls = []
+                for bull_id in bull_ids:
+                    if pd.isna(bull_id):  # 跳过空值
+                        continue
+                    if len(str(bull_id)) > 10:
+                        print(f"检查长ID公牛 {bull_id} (BULL REG)")
+                        result = conn.execute(
+                            text("SELECT * FROM bull_library WHERE `BULL REG`=:bull_id"),
+                            {"bull_id": bull_id}
+                        ).fetchone()
+                    else:
+                        print(f"检查短ID公牛 {bull_id} (BULL NAAB)")
+                        result = conn.execute(
+                            text("SELECT * FROM bull_library WHERE `BULL NAAB`=:bull_id"),
+                            {"bull_id": bull_id}
+                        ).fetchone()
+                        
+                    if result:
+                        # 如果找到了公牛,提取所选性状数据
+                        result_dict = dict(result._mapping)
+                        bull_traits[str(bull_id)] = {trait: result_dict.get(trait) for trait in selected_traits}
+                    else:
+                        missing_bulls.append(bull_id)
+                
+            print(f"缺失公牛数量: {len(missing_bulls)}")
+                        
+            # 4. 如果有缺失的公牛，创建缺失公牛的DataFrame并更新到云端数据库
+            if missing_bulls:
+                print("开始处理缺失公牛...")
+                username = main_window.username if hasattr(main_window, 'username') else 'unknown'
+                missing_df = pd.DataFrame({
+                    'bull': missing_bulls,
+                    'source': 'traits_calculation',
+                    'time': datetime.datetime.now(),
+                    'user': username
+                })
+                
+                print("开始更新缺失公牛到云端数据库...")
+                cloud_engine = create_engine(
+                    f"mysql+pymysql://{CLOUD_DB_USER}:{CLOUD_DB_PASSWORD}"
+                    f"@{CLOUD_DB_HOST}:{CLOUD_DB_PORT}/{CLOUD_DB_NAME}?charset=utf8mb4"
+                )
+                missing_df.to_sql('miss_bull', cloud_engine, if_exists='append', index=False)
+                print("缺失公牛更新完成")
+                
+            # 5. 将提取到的公牛性状数据合并到母牛数据中
+            print("开始合并性状数据...")
+            for bull_type in ['sire', 'mgs', 'mmgs']:
+                print(f"处理 {bull_type} 的性状数据")
+                for trait in selected_traits:
+                    cow_df[f"{bull_type}_{trait}"] = cow_df[bull_type].apply(
+                        lambda x: bull_traits.get(str(x), {}).get(trait) if pd.notna(x) else np.nan
+                    )
+                    print(f"{bull_type}_{trait} 的前5行数据:")
+                    print(cow_df[f"{bull_type}_{trait}"].head())
+                
+                # 更新 identified 列
+                cow_df[f"{bull_type}_identified"] = cow_df[bull_type].apply(
+                    lambda x: str(x) in bull_traits if pd.notna(x) else False
+                )
+                    
+            # 6. 保存详细结果
+            detail_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_detail.xlsx"
+            if not self.save_results_with_retry(cow_df, detail_output_path):
+                print("用户取消了保存操作")
+                return
+            
+            # 7. 处理年度平均值和回归分析
+            yearly_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_mean_by_year.xlsx"
+            if not self.process_key_traits_by_year(detail_output_path):
+                print("用户取消了年度数据保存操作")
+                return
+
+            # 8. 计算关键性状得分
+            pedigree_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pidgree.xlsx"
+            if not self.calculate_key_traits_scores(detail_output_path, yearly_output_path):
+                print("用户取消了得分计算操作")
+                return
+            
+            # 9. 用基因组数据更新关键性状得分
+            genomic_data_path = main_window.selected_project_path / "standardized_data" / "processed_genomic_data.xlsx"
+            if genomic_data_path.exists():
+                if not self.update_with_genomic_data(pedigree_output_path, genomic_data_path):
+                    print("用户取消了基因组数据更新操作")
+                    return
+            else:
+                print("未找到基因组数据文件，跳过基因组数据更新")
+
+            # 10. 显示完成消息
+            QMessageBox.information(self, "完成", "关键性状计算流程已完成")
+            
+            print("关键性状计算流程完成")
+            
+        except Exception as e:
+            print(f"发生错误: {str(e)}")
+            QMessageBox.critical(self, "错误", f"处理过程中发生错误���{str(e)}")
+        try:
+            # 创建进度对话框
+            self.progress_dialog = ProgressDialog(self)
+            self.progress_dialog.show()
+
+            # 设置文件路径
+            detail_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_detail.xlsx"
+            yearly_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_mean_by_year.xlsx"
+            pedigree_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pidgree.xlsx"
+            genomic_data_path = main_window.selected_project_path / "standardized_data" / "processed_genomic_data.xlsx"
+
+            # 创建工作线程和worker
+            self.thread = QThread()
+            self.worker = TraitsCalculationWorker(
+                self,
+                detail_output_path,
+                yearly_output_path,
+                pedigree_output_path,
+                genomic_data_path if genomic_data_path.exists() else None
+            )
+            self.worker.moveToThread(self.thread)
+
+            # 连接信号
+            self.thread.started.connect(self.worker.run)
+            self.worker.progress.connect(self.progress_dialog.update_progress)
+            self.worker.task_info.connect(self.progress_dialog.set_task_info)
+            self.worker.speed_info.connect(self.progress_dialog.update_info)
+            self.worker.finished.connect(self.on_calculation_finished)
+            self.worker.error.connect(self.on_calculation_error)
+            self.worker.finished.connect(self.thread.quit)
+            self.worker.finished.connect(self.worker.deleteLater)
+            self.thread.finished.connect(self.thread.deleteLater)
+
+            # 启动线程
+            self.thread.start()
+
+        except Exception as e:
+            print(f"发生错误: {str(e)}")
+            QMessageBox.critical(self, "错误", f"处理过程中发生错误：{str(e)}")
+
+
+    def on_calculation_finished(self):
+        """计算完成的处理"""
+        self.progress_dialog.close()
+        QMessageBox.information(self, "完成", "关键性状计算流程已完成")
+
+    def on_calculation_error(self, error_message):
+        """计算错误的处理"""
+        self.progress_dialog.close()
+        QMessageBox.critical(self, "错误", f"处理过程中发生错误：{error_message}")
+
+
+    def calculate_key_traits_scores(self, detail_path, yearly_path, progress_callback=None):
+        """计算母牛关键性状得分"""
+        print("开始计算母牛关键性状得分...")
+        
+        try:
+            # 1. 读取详细数据文件和年度数据文件
+            print("读取详细数据文件...")
+            df = pd.read_excel(detail_path)
+            
+            # 2. 确保所有日期列的格式正确
+            print("处理日期列...")
+            date_columns = ['birth_date', 'birth_date_dam', 'birth_date_mgd']
+            for col in date_columns:
+                if col in df.columns:
+                    # 尝试转换日期，对于无效日期使用NaT
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+                    # 记录无效日期的数量
+                    invalid_dates = df[col].isna().sum()
+                    if invalid_dates > 0:
+                        print(f"警告: {col} 列中有 {invalid_dates} 个无效日期")
+            
+            # 3. 从日期提取年份，同时处理无效日期
+            print("提取年份...")
+            df['birth_year'] = df['birth_date'].dt.year
+            df['dam_birth_year'] = df['birth_date_dam'].dt.year
+            df['mgd_birth_year'] = df['birth_date_mgd'].dt.year
+            
+            # 4. 读取所有年度数据到字典中
+            print("读取年度数据...")
+            yearly_data = {}
+            with pd.ExcelFile(yearly_path) as xls:
+                for trait in self.get_selected_traits():
+                    yearly_data[trait] = pd.read_excel(xls, sheet_name=trait)
+                    # 将birth_year设为索引以便快速查找
+                    yearly_data[trait].set_index('birth_year', inplace=True)
+                    # 记录可用的年份范围
+                    print(f"性状 {trait} 的年度数据范围: {yearly_data[trait].index.min()} - {yearly_data[trait].index.max()}")
+            
+            # 5. 获取默认公牛999HO99999的性状值
+            print("获取默认公牛数据...")
+            engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
+            default_values = {}
+            with engine.connect() as conn:
+                default_bull = conn.execute(
+                    text("SELECT * FROM bull_library WHERE `BULL NAAB`='999HO99999'")
+                ).fetchone()
+                if default_bull:
+                    default_bull_dict = dict(default_bull._mapping)
+                    for trait in self.get_selected_traits():
+                        default_values[trait] = default_bull_dict.get(trait, 0)
+                    print(f"获取到默认公牛性状值: {default_values}")
+                else:
+                    print("警告: 未找到默认公牛999HO99999，使用0作为默认值")
+                    for trait in self.get_selected_traits():
+                        default_values[trait] = 0
+
+            # 6. 设置权重
+            weights = {
+                'sire': 0.5,
+                'mgs': 0.25,
+                'mmgs': 0.125,
+                'default': 0.125  # 999HO99999的权重
+            }
+            
+            # 7. 为每个性状计算加权得分
+            print("开始计算加权得分...")
+            total_traits = len(self.get_selected_traits())
+            total_rows = len(df)
+            
+            for trait_idx, trait in enumerate(self.get_selected_traits(), 1):
+                print(f"处理性状: {trait}")
+                score_column = f'{trait}_score'
+                df[score_column] = 0.0  # 初始化得分列
+                
+                for index, row in df.iterrows():
+                    # 更新进度
+                    if progress_callback:
+                        current_position = (trait_idx - 1) * total_rows + index + 1
+                        progress = int((current_position / (total_traits * total_rows)) * 100)
+                        progress_callback(progress)
+
+                    trait_score = 0.0
+                    
+                    # 处理sire
+                    sire_col = f'sire_{trait}'
+                    if pd.isna(row[sire_col]):
+                        # 尝试从年度数据获取
+                        if pd.notna(row['birth_year']):
+                            birth_year = int(row['birth_year'])  # 确保年份是整数
+                            if birth_year in yearly_data[trait].index:
+                                trait_score += weights['sire'] * yearly_data[trait].loc[birth_year, 'mean']
+                            else:
+                                print(f"警告: 找不到出生年份 {birth_year} 的年度数据，使用默认值")
+                                trait_score += weights['sire'] * default_values[trait]
+                        else:
+                            trait_score += weights['sire'] * default_values[trait]
+                    else:
+                        trait_score += weights['sire'] * row[sire_col]
+
+                    # 处理mgs
+                    mgs_col = f'mgs_{trait}'
+                    if pd.isna(row[mgs_col]):
+                        # 尝试从年度数据获取，使用母亲出生年份
+                        if pd.notna(row['dam_birth_year']):
+                            dam_birth_year = int(row['dam_birth_year'])
+                            if dam_birth_year in yearly_data[trait].index:
+                                trait_score += weights['mgs'] * yearly_data[trait].loc[dam_birth_year, 'mean']
+                            else:
+                                print(f"警告: 找不到母亲出生年份 {dam_birth_year} 的年度数据，使用默认值")
+                                trait_score += weights['mgs'] * default_values[trait]
+                        else:
+                            trait_score += weights['mgs'] * default_values[trait]
+                    else:
+                        trait_score += weights['mgs'] * row[mgs_col]
+
+                    # 处理mmgs
+                    mmgs_col = f'mmgs_{trait}'
+                    if pd.isna(row[mmgs_col]):
+                        # 尝试从年度数据获取，使用母亲的母亲出生年份
+                        if pd.notna(row['mgd_birth_year']):
+                            mgd_birth_year = int(row['mgd_birth_year'])
+                            if mgd_birth_year in yearly_data[trait].index:
+                                trait_score += weights['mmgs'] * yearly_data[trait].loc[mgd_birth_year, 'mean']
+                            else:
+                                print(f"警告: 找不到外祖母出生年份 {mgd_birth_year} 的年度数据，使用默认值")
+                                trait_score += weights['mmgs'] * default_values[trait]
+                        else:
+                            trait_score += weights['mmgs'] * default_values[trait]
+                    else:
+                        trait_score += weights['mmgs'] * row[mmgs_col]
+
+                    # 添加999HO99999的权重
+                    trait_score += weights['default'] * default_values[trait]
+                    
+                    df.at[index, score_column] = trait_score
+                    
+                # 打印每个性状的得分统计信息
+                print(f"性状 {trait} 得分统计:")
+                print(df[score_column].describe())
+                    
+            # 8. 保存结果
+            print("保存计算结果...")
+            output_path = detail_path.parent / "processed_cow_data_key_traits_scores_pidgree.xlsx"
+            if not self.save_results_with_retry(df, output_path):
+                print("用户取消了得分数据保存操作")
+                return False
+                
+            print("母牛关键性状得分计算完成")
+            return True
+            
+        except Exception as e:
+            print(f"计算母牛关键性状得分时发生错误: {str(e)}")
+            raise
+
+    def update_with_genomic_data(self, pedigree_path, genomic_path, progress_callback=None):
+        """用基因组数据更新关键性状得分"""
+        print("开始用基因组数据更新关键性状得分...")
+        
+        try:
+            # 1. 读取系谱计算的得分文件
+            df_pedigree = pd.read_excel(pedigree_path)
+            
+            # 2. 读取基因组数据
+            df_genomic = pd.read_excel(genomic_path)
+            
+            # 3. 为所有性状得分添加来源列，默认为"P"(系谱)
+            score_columns = [col for col in df_pedigree.columns if col.endswith('_score')]
+            for col in score_columns:
+                df_pedigree[f"{col}_source"] = "P"
+                
+            # 4. 用基因组数据更新得分
+            total_traits = len(self.get_selected_traits())
+            total_rows = len(df_pedigree)
+
     
-    def calculate_traits(self):
-        pass 
+            for trait_idx, trait in enumerate(self.get_selected_traits(), 1):
+                score_col = f"{trait}_score"
+                source_col = f"{trait}_score_source"
+
+                # 遍历每一行数据
+                for row_idx, (idx, row) in enumerate(df_pedigree.iterrows(), 1):
+                    # 更新进度
+                    if progress_callback:
+                        current_position = (trait_idx - 1) * total_rows + row_idx
+                        progress = int((current_position / (total_traits * total_rows)) * 100)
+                        progress_callback(progress)
+                        
+                    cow_id = row['cow_id']
+                    # 查找对应的基因组数据
+                    genomic_row = df_genomic[df_genomic['cow_id'] == cow_id]
+                    
+                    if not genomic_row.empty and trait in genomic_row.columns:
+                        # 如果找到基因组数据且该性状有值
+                        if pd.notna(genomic_row[trait].iloc[0]):
+                            # 更新得分和来源标记
+                            df_pedigree.at[idx, score_col] = genomic_row[trait].iloc[0]
+                            df_pedigree.at[idx, source_col] = "G"
+                            print(f"母牛 {cow_id} 的 {trait} 更新为基因组数据")
+            
+            # 5. 添加一个总结列，显示有多少个性状使用了基因组数据
+            genomic_count = df_pedigree[[col for col in df_pedigree.columns if col.endswith('_source')]].apply(
+                lambda x: (x == "G").sum(), axis=1
+            )
+            df_pedigree['genomic_traits_count'] = genomic_count
+            
+            # 6. 保存结果
+            output_path = pedigree_path.parent / "processed_cow_data_key_traits_scores_genomic.xlsx"
+            if not self.save_results_with_retry(df_pedigree, output_path):
+                print("用户取消了基因组数据更新结果保存")
+                return False
+            
+            print("基因组数据更新完成")
+            return True
+            
+        except Exception as e:
+            print(f"更新基因组数据时发生错误: {str(e)}")
+            raise
+
+
+    def save_results_with_retry(self, df, output_path):
+        """尝试保存结果，如果文件被占用���提示用户并重试"""
+        while True:
+            try:
+                df.to_excel(output_path, index=False)
+                print(f"结果已保存到: {output_path}")
+                return True
+            except PermissionError:
+                reply = QMessageBox.question(
+                    self,
+                    "文件被占用",
+                    f"文件 {output_path.name} 正在被其他程序使用。\n请关闭该文件后点击'重试'继续，或点击'取消'停止操作。",
+                    QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Cancel
+                )
+                if reply == QMessageBox.StandardButton.Cancel:
+                    return False
