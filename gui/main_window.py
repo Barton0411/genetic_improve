@@ -29,6 +29,8 @@ from gui.worker import CowDataWorker, GenomicDataWorker
 from gui.progress import ProgressDialog
 from gui.db_update_worker import DBUpdateWorker
 from core.breeding_calc.bull_traits_calc import BullKeyTraitsPage  
+from core.breeding_calc.index_page import IndexCalculationPage
+
 
 
 # 修改 sys.path（如果必要，确保只做一次）
@@ -122,13 +124,12 @@ class MainWindow(QMainWindow):
             ("育种项目管理", "folder", []),
             ("数据上传", "upload", []),
             ("母牛遗传数据分析", "chart", [
-                "在群母牛关键性状计算",
-                "在群母牛指数计算及排名"
+                "在群母牛关键性状计算"
             ]),
             ("备选公牛遗传数据分析", "chart", [  # 新添加的导航项
-                "备选公牛关键性状计算",
-                "备选公牛指数计算及排名"
+                "备选公牛关键性状计算"
             ]),
+            ("牛只指数计算排名", "chart", []),
             ("配种记录分析", "analysis", []),
             ("体型外貌评定", "body", []),
             ("个体选配", "match", []),
@@ -193,6 +194,10 @@ class MainWindow(QMainWindow):
         # 创建"备选公牛关键性状计算"页面  # 新添加的页面
         self.bull_key_traits_page = BullKeyTraitsPage(parent=self)
         self.content_stack.addWidget(self.bull_key_traits_page)
+
+        # 创建"牛只指数计算排名"页面
+        self.index_calculation_page = IndexCalculationPage(parent=self)
+        self.content_stack.addWidget(self.index_calculation_page)
 
         # TODO: 创建其他页面...
         
@@ -412,20 +417,16 @@ class MainWindow(QMainWindow):
             
             if indent_level == 1:  # 子导航项
                 if text == "在群母牛关键性状计算":
-                    # 切换到关键性状计算页面
                     self.content_stack.setCurrentWidget(self.cow_key_traits_page)
-                elif text == "在群母牛指数计算及排名":
-                    # TODO: 处理在群母牛指数计算及排名
-                    pass
-                elif text == "备选公牛关键性状计算":  # 新添加的处理
+                elif text == "备选公牛关键性状计算":
                     self.content_stack.setCurrentWidget(self.bull_key_traits_page)
-                elif text == "备选公牛指数计算及排名":  # 新添加的处理
-                    # TODO: 处理备选公牛指数计算及排名
-                    pass
             else:  # 主导航项
-                self.content_stack.setCurrentIndex(index)
+                if text == "牛只指数计算排名":
+                    self.content_stack.setCurrentWidget(self.index_calculation_page)
+                else:
+                    self.content_stack.setCurrentIndex(index)
                 
-        self.update_nav_selected_style()
+            self.update_nav_selected_style()
 
     # 新增“数据上传”页面函数
     def create_upload_page(self):

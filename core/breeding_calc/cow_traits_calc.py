@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, QThread  # 修改这行，添加 QThread
 import pandas as pd
 from sqlalchemy import create_engine, text
 import datetime
+from core.breeding_calc.traits_calculation import TraitsCalculation
 from core.data.update_manager import (
     CLOUD_DB_HOST, CLOUD_DB_PORT, CLOUD_DB_USER, 
     CLOUD_DB_PASSWORD, CLOUD_DB_NAME, LOCAL_DB_PATH
@@ -17,11 +18,16 @@ from sklearn.linear_model import LinearRegression
 
 from gui.progress import ProgressDialog
 from gui.worker import TraitsCalculationWorker
-
+from PyQt6.QtWidgets import QMainWindow
 import time
 import datetime
 from PyQt6.QtCore import QThread, QObject, pyqtSignal, pyqtSlot
 from gui.progress import ProgressDialog
+from PyQt6.QtWidgets import (
+    QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, 
+    QListWidget, QListWidgetItem, QAbstractItemView, QMessageBox, QMainWindow  # 添加 QMainWindow
+)
+
 
 # 添加性状翻译字典
 TRAITS_TRANSLATION = {
@@ -43,6 +49,7 @@ TRAITS_TRANSLATION = {
 class CowKeyTraitsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.traits_calculator = TraitsCalculation()
         
         self.default_traits = [
             'NM$', 'TPI', 'MILK', 'FAT', 'FAT %', 'PROT', 'PROT%', 
@@ -175,14 +182,8 @@ class CowKeyTraitsPage(QWidget):
 
     def start_cow_traits_calculation(self):
         """开始关键性状计算流程"""
-        print("开始关键性状计算流程...")
-        
         # 获取主窗口实例
-        parent = self.parent()
-        while parent and not isinstance(parent, QMainWindow):
-            parent = parent.parent()
-        main_window = parent
-        
+        main_window = self.get_main_window()
         if not main_window:
             QMessageBox.warning(self, "警告", "无法获取主窗口")
             return
@@ -196,39 +197,25 @@ class CowKeyTraitsPage(QWidget):
             self.progress_dialog = ProgressDialog(self)
             self.progress_dialog.show()
 
-            # 设置文件路径
-            detail_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_detail.xlsx"
-            yearly_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_mean_by_year.xlsx"
-            pedigree_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pidgree.xlsx"
-            genomic_data_path = main_window.selected_project_path / "standardized_data" / "processed_genomic_data.xlsx"
-
-            # 创建工作线程和worker
-            self.thread = QThread()
-            self.worker = TraitsCalculationWorker(
-                self,
-                detail_output_path,
-                yearly_output_path,
-                pedigree_output_path,
-                genomic_data_path if genomic_data_path.exists() else None
+            # 获取选中的性状列表
+            selected_traits = self.get_selected_traits()
+            
+            # 执行计算
+            success, message = self.traits_calculator.process_data(
+                main_window, 
+                selected_traits,
+                progress_callback=self.progress_dialog.update_progress
             )
-            self.worker.moveToThread(self.thread)
 
-            # 连接信号
-            self.thread.started.connect(self.worker.run)
-            self.worker.progress.connect(self.progress_dialog.update_progress)
-            self.worker.task_info.connect(self.progress_dialog.set_task_info)
-            self.worker.speed_info.connect(self.progress_dialog.update_info)
-            self.worker.finished.connect(self.on_calculation_finished)
-            self.worker.error.connect(self.on_calculation_error)
-            self.worker.finished.connect(self.thread.quit)
-            self.worker.finished.connect(self.worker.deleteLater)
-            self.thread.finished.connect(self.thread.deleteLater)
-
-            # 启动线程
-            self.thread.start()
+            if success:
+                self.progress_dialog.close()
+                QMessageBox.information(self, "完成", "关键性状计算完成！")
+            else:
+                self.progress_dialog.close()
+                QMessageBox.critical(self, "错误", f"计算过程中发生错误：{message}")
 
         except Exception as e:
-            print(f"发生错误: {str(e)}")
+            self.progress_dialog.close()
             QMessageBox.critical(self, "错误", f"处理过程中发生错误：{str(e)}")
 
     def process_cow_key_traits_by_year(self, detail_path, progress_callback=None):
@@ -734,3 +721,11 @@ class CowKeyTraitsPage(QWidget):
                 )
                 if reply == QMessageBox.StandardButton.Cancel:
                     return False
+                
+
+    def get_main_window(self):
+        """获取主窗口实例"""
+        parent = self.parent()
+        while parent and not isinstance(parent, QMainWindow):
+            parent = parent.parent()
+        return parent
