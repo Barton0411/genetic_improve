@@ -1,11 +1,10 @@
-# gui/login_dialog.py
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QMessageBox, QWidget
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QIcon
-from pathlib import Path  # 添加这行
+from pathlib import Path  
 import logging
 from sqlalchemy import create_engine, text
 from core.data.update_manager import (
@@ -18,13 +17,19 @@ class LoginDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("奶牛育种智选报告专家 - 登录")
         self.setFixedSize(300, 150)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        
+        # 设置窗口标志，确保总是在最前面
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint |  # 窗口保持在最前
+            Qt.WindowType.CustomizeWindowHint |   # 自定义窗口外观
+            Qt.WindowType.WindowTitleHint |      # 显示标题栏
+            Qt.WindowType.WindowCloseButtonHint  # 显示关闭按钮
+        )
 
         # 设置窗口图标
-        icon_path = Path(__file__).parent.parent / "icon.ico"  # 直接从项目根目录获取
+        icon_path = Path(__file__).parent.parent / "icon.ico"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
-
 
         self.layout = QVBoxLayout()
 
@@ -71,6 +76,28 @@ class LoginDialog(QDialog):
         self.layout.addWidget(self.waiting_widget)
         self.setLayout(self.layout)
 
+        # 样式设置
+        self.setStyleSheet("""
+            QDialog {
+                background-color: white;
+            }
+            QLineEdit {
+                padding: 5px;
+                border: 1px solid #ccc;
+                border-radius: 3px;
+            }
+            QPushButton {
+                padding: 5px 15px;
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+
     def show_waiting(self):
         """显示等待提示，隐藏登录界面"""
         for widget in [
@@ -106,14 +133,12 @@ class LoginDialog(QDialog):
     def process_login(self, username, password):
         """处理登录验证"""
         try:
-            # 使用与 update_manager.py 相同的数据库连接信息
             cloud_engine = create_engine(
                 f"mysql+pymysql://{CLOUD_DB_USER}:{CLOUD_DB_PASSWORD}"
                 f"@{CLOUD_DB_HOST}:{CLOUD_DB_PORT}/{CLOUD_DB_NAME}?charset=utf8mb4"
             )
 
             with cloud_engine.connect() as connection:
-                # 检查用户名和密码
                 result = connection.execute(
                     text("SELECT * FROM `id-pw` WHERE ID=:username AND PW=:password"),
                     {"username": username, "password": password}
@@ -132,7 +157,11 @@ class LoginDialog(QDialog):
         except Exception as e:
             logging.error(f"数据库连接错误: {str(e)}")
             self.show_login_form()
-            QMessageBox.critical(self, "数据库连接错误", f"连接数据库时发生错误，请联系管理员。")
+            QMessageBox.critical(
+                self, 
+                "数据库连接错误", 
+                f"连接数据库时发生错误，请联系管理员。\n{str(e)}"
+            )
             self.username_input.clear()
             self.password_input.clear()
             self.username_input.setFocus()

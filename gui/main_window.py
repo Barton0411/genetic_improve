@@ -7,15 +7,16 @@ from PyQt6.QtCore import (
     Qt, QDir, QUrl, pyqtSignal, QThread, Qt
 )
 from PyQt6.QtGui import (
-    QFileSystemModel, QDesktopServices
+    QFileSystemModel, QDesktopServices, QBrush, QPalette, QPixmap
 )
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QFileDialog, QMessageBox, QLabel, 
     QListWidget, QListWidgetItem, QStackedWidget, QInputDialog, 
-    QFrame, QTreeView, QGridLayout, QAbstractItemView, QMenu
+    QFrame, QTreeView, QGridLayout, QAbstractItemView, QMenu,QGraphicsOpacityEffect
 )
-
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 from config.settings import Settings
 from core.breeding_calc.cow_traits_calc import CowKeyTraitsPage
 from utils.file_manager import FileManager
@@ -30,7 +31,15 @@ from gui.progress import ProgressDialog
 from gui.db_update_worker import DBUpdateWorker
 from core.breeding_calc.bull_traits_calc import BullKeyTraitsPage  
 from core.breeding_calc.index_page import IndexCalculationPage
-
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+    QPushButton, QFileDialog, QMessageBox, QLabel, 
+    QListWidget, QListWidgetItem, QStackedWidget, QInputDialog, 
+    QFrame, QTreeView
+)
+from PyQt6.QtCore import Qt, QDir
+from PyQt6.QtGui import QFileSystemModel, QPixmap
+from pathlib import Path
 
 
 # 修改 sys.path（如果必要，确保只做一次）
@@ -204,74 +213,159 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.content_stack)
 
     def create_project_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-
-        # 路径显示和修改区域
-        path_layout = QHBoxLayout()
-        path_label = QLabel("当前路径:")
-        self.path_button = QPushButton(self.settings.get_default_storage())
-        self.path_button.clicked.connect(self.change_storage_location)
-        path_layout.addWidget(path_label)
-        path_layout.addWidget(self.path_button)
-        layout.addLayout(path_layout)
-
-        # 使用QFileSystemModel和QTreeView显示项目目录
-        self.file_system_model = QFileSystemModel()
-        self.file_system_model.setRootPath(self.settings.get_default_storage())
-        self.file_system_model.setFilter(QDir.Filter.NoDotAndDotDot | QDir.Filter.AllEntries)     # 显示所有文件夹和文件
-        
-        self.file_tree = QTreeView()
-        self.file_tree.setModel(self.file_system_model)
-        self.file_tree.setRootIndex(self.file_system_model.index(self.settings.get_default_storage()))
-        self.file_tree.setAnimated(False)
-        self.file_tree.setIndentation(20)
-        self.file_tree.setSortingEnabled(True)
-        self.file_tree.setSelectionMode(QTreeView.SelectionMode.SingleSelection)
-        
-        # 调整列宽和表头
-        self.file_tree.setColumnWidth(0, 300)
-        self.file_tree.setHeaderHidden(False)
-        headers = ['名称', '修改日期', '类型', '大小']
-        for i, header in enumerate(headers):
-            if i < self.file_system_model.columnCount():
-                self.file_system_model.setHeaderData(i, Qt.Orientation.Horizontal, header)
-        
-        layout.addWidget(self.file_tree)
-
-        self.file_tree.doubleClicked.connect(self.on_file_double_clicked)       # 双击文件夹或文件，选择项目
-
-        # 底部按钮区域
-        button_layout = QHBoxLayout()
-        
-        create_btn = QPushButton("新建")
-        create_btn.clicked.connect(self.create_new_project)
-        
-        confirm_btn = QPushButton("确定")
-        confirm_btn.clicked.connect(self.select_project)
-        
-        delete_btn = QPushButton("删除")
-        delete_btn.clicked.connect(self.delete_project)
-        
-        for btn in [create_btn, confirm_btn, delete_btn]:
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #3498db;
-                    color: white;
-                    border: none;
-                    padding: 8px 20px;
-                    border-radius: 4px;
-                    min-width: 100px;
-                }
-                QPushButton:hover {
-                    background-color: #2980b9;
-                }
-            """)
-            button_layout.addWidget(btn)
-        
-        layout.addLayout(button_layout)
-        
-        self.content_stack.addWidget(page)
+            """创建育种项目管理页面"""
+            # 创建一个自定义的Page类来处理resizeEvent
+            class ProjectPage(QWidget):
+                def __init__(self, parent=None):
+                    super().__init__(parent)
+                    self.main_window = parent  # 保存对主窗口的引用
+                    self.init_ui()
+                    
+                def init_ui(self):
+                    # 创建背景标签
+                    self.background_label = QLabel(self)
+                    image_path = Path(__file__).parent.parent / "homepage.jpg"
+                    if image_path.exists():
+                        pixmap = QPixmap(str(image_path))
+                        self.background_label.setPixmap(pixmap)
+                        self.background_label.setScaledContents(True)
+                    else:
+                        print(f"未找到背景图片: {image_path}")
+                    
+                    # 设置背景标签占满整个窗口
+                    self.background_label.setGeometry(0, 0, self.width(), self.height())
+                    
+                    # 创建半透明遮罩层
+                    self.overlay = QWidget(self)
+                    self.overlay.setStyleSheet("background-color: rgba(255, 255, 255, 0.6);")
+                    self.overlay.setGeometry(0, 0, self.width(), self.height())
+                    
+                    # 创建内容容器
+                    self.content_widget = QWidget(self)
+                    self.content_widget.setGeometry(0, 0, self.width(), self.height())
+                    
+                    # 创建主布局
+                    self.main_layout = QVBoxLayout(self.content_widget)
+                    self.main_layout.setContentsMargins(10, 10, 10, 10)
+                    
+                    # 初始化UI组件
+                    self.setup_ui_components()
+                    
+                def setup_ui_components(self):
+                    # 路径显示和修改区域
+                    path_layout = QHBoxLayout()
+                    path_label = QLabel("当前路径:")
+                    self.path_button = QPushButton(self.main_window.settings.get_default_storage())
+                    self.path_button.clicked.connect(lambda: self.main_window.change_storage_location())
+                    path_layout.addWidget(path_label)
+                    path_layout.addWidget(self.path_button)
+                    
+                    # 文件系统模型
+                    self.file_system_model = QFileSystemModel()
+                    self.file_system_model.setRootPath(self.main_window.settings.get_default_storage())
+                    self.file_system_model.setFilter(QDir.Filter.NoDotAndDotDot | QDir.Filter.AllEntries)
+                    
+                    # 创建树形视图
+                    self.file_tree = QTreeView()
+                    self.file_tree.setModel(self.file_system_model)
+                    self.file_tree.setRootIndex(self.file_system_model.index(self.main_window.settings.get_default_storage()))
+                    self.file_tree.setAnimated(False)
+                    self.file_tree.setIndentation(20)
+                    self.file_tree.setSortingEnabled(True)
+                    self.file_tree.setSelectionMode(QTreeView.SelectionMode.SingleSelection)
+                    
+                    # 设置树形视图的样式
+                    self.file_tree.setStyleSheet("""
+                        QTreeView {
+                            background-color: rgba(255, 255, 255, 0.7);
+                            border: 1px solid #ccc;
+                            border-radius: 5px;
+                        }
+                        QTreeView::item:hover {
+                            background-color: rgba(200, 200, 200, 0.7);
+                        }
+                        QTreeView::item:selected {
+                            background-color: rgba(51, 153, 255, 0.7);
+                        }
+                    """)
+                    
+                    # 调整列宽和表头
+                    self.file_tree.setColumnWidth(0, 300)
+                    self.file_tree.setHeaderHidden(False)
+                    headers = ['名称', '修改日期', '类型', '大小']
+                    for i, header in enumerate(headers):
+                        if i < self.file_system_model.columnCount():
+                            self.file_system_model.setHeaderData(i, Qt.Orientation.Horizontal, header)
+                    
+                    # 底部按钮区域
+                    button_layout = QHBoxLayout()
+                    button_style = """
+                        QPushButton {
+                            background-color: rgba(52, 152, 219, 0.8);
+                            color: white;
+                            border: none;
+                            padding: 8px 20px;
+                            border-radius: 4px;
+                            min-width: 100px;
+                        }
+                        QPushButton:hover {
+                            background-color: rgba(41, 128, 185, 0.8);
+                        }
+                    """
+                    
+                    # 创建按钮
+                    create_btn = QPushButton("新建")
+                    confirm_btn = QPushButton("确定")
+                    delete_btn = QPushButton("删除")
+                    
+                    # 连接按钮信号
+                    create_btn.clicked.connect(lambda: self.main_window.create_new_project())
+                    confirm_btn.clicked.connect(lambda: self.main_window.select_project())
+                    delete_btn.clicked.connect(lambda: self.main_window.delete_project())
+                    
+                    # 设置按钮样式
+                    for btn in [create_btn, confirm_btn, delete_btn]:
+                        btn.setStyleSheet(button_style)
+                        button_layout.addWidget(btn)
+                    
+                    # 将所有组件添加到主布局
+                    self.main_layout.addLayout(path_layout)
+                    self.main_layout.addWidget(self.file_tree)
+                    self.main_layout.addLayout(button_layout)
+                
+                def resizeEvent(self, event):
+                    """处理窗口大小调整事件"""
+                    super().resizeEvent(event)
+                    # 更新所有组件的大小
+                    size = event.size()
+                    self.background_label.setGeometry(0, 0, size.width(), size.height())
+                    self.overlay.setGeometry(0, 0, size.width(), size.height())
+                    self.content_widget.setGeometry(0, 0, size.width(), size.height())
+            
+            # 创建页面实例
+            page = ProjectPage(self)
+            self.content_stack.addWidget(page)
+            
+            # 保存必要的引用
+            self.file_tree = page.file_tree
+            self.file_system_model = page.file_system_model
+            self.path_button = page.path_button
+            
+            return page
+    def update_background_image(self):
+        """更新背景图大小"""
+        if hasattr(self, 'file_tree'):
+            size = self.size()
+            background_widget = self.file_tree.parent()
+            if background_widget:
+                image_path = Path(__file__).parent.parent / "homepage.jpg"
+                if image_path.exists():
+                    pixmap = QPixmap(str(image_path))
+                    scaled_pixmap = pixmap.scaled(size, Qt.AspectRatioMode.KeepAspectRatio)
+                    palette = background_widget.palette()
+                    brush = QBrush(scaled_pixmap)
+                    palette.setBrush(QPalette.ColorRole.Window, brush)
+                    background_widget.setPalette(palette)
 
     def get_selected_project_path(self):
         """获取用户在树中选择的项目路径"""
@@ -417,15 +511,17 @@ class MainWindow(QMainWindow):
             
             if indent_level == 1:  # 子导航项
                 if text == "在群母牛关键性状计算":
+                    # 切换到关键性状计算页面
                     self.content_stack.setCurrentWidget(self.cow_key_traits_page)
+                elif text == "在群母牛指数计算及排名":
+                    pass  # TODO: 处理在群母牛指数计算及排名
                 elif text == "备选公牛关键性状计算":
                     self.content_stack.setCurrentWidget(self.bull_key_traits_page)
+                elif text == "备选公牛指数计算及排名":
+                    pass  # TODO: 处理备选公牛指数计算及排名
             else:  # 主导航项
-                if text == "牛只指数计算排名":
-                    self.content_stack.setCurrentWidget(self.index_calculation_page)
-                else:
-                    self.content_stack.setCurrentIndex(index)
-                
+                self.content_stack.setCurrentIndex(index)
+                    
             self.update_nav_selected_style()
 
     # 新增“数据上传”页面函数
