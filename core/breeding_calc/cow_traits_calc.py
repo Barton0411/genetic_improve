@@ -49,7 +49,8 @@ TRAITS_TRANSLATION = {
 class CowKeyTraitsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.traits_calculator = TraitsCalculation()
+        # 注释掉或删除这一行，因为我们会在每次计算时重新创建
+        # self.traits_calculator = TraitsCalculation()   # <-- 删除这一行
         
         self.default_traits = [
             'NM$', 'TPI', 'MILK', 'FAT', 'FAT %', 'PROT', 'PROT%', 
@@ -193,6 +194,8 @@ class CowKeyTraitsPage(QWidget):
             return
 
         try:
+            # 每次计算前创建新的计算器实例
+            self.traits_calculator = TraitsCalculation() 
             # 创建进度对话框
             self.progress_dialog = ProgressDialog(self)
             self.progress_dialog.show()
@@ -217,6 +220,13 @@ class CowKeyTraitsPage(QWidget):
         except Exception as e:
             self.progress_dialog.close()
             QMessageBox.critical(self, "错误", f"处理过程中发生错误：{str(e)}")
+        finally:
+                # 添加资源清理代码
+                if hasattr(self, 'progress_dialog'):
+                    self.progress_dialog.close()
+                if hasattr(self.traits_calculator, 'engine'):
+                    self.traits_calculator.engine.dispose()  # <-- 添加这一行
+
 
     def process_cow_key_traits_by_year(self, detail_path, progress_callback=None):
         """处理年度关键性状数据"""
@@ -355,6 +365,7 @@ class CowKeyTraitsPage(QWidget):
 
     def perform_cow_traits_calculation(self, main_window, progress_callback=None, task_info_callback=None):
         """执行关键性状计算的核心逻辑"""
+        engine = None   # 初始化engine为None
         try:
             # 1. 获取所选性状列表
             selected_traits = self.get_selected_traits()
@@ -476,6 +487,9 @@ class CowKeyTraitsPage(QWidget):
 
         except Exception as e:
             return False, str(e)
+        finally:
+            if engine:
+                engine.dispose()
 
     def on_calculation_finished(self):
         """计算完成的处理"""
