@@ -28,6 +28,8 @@ class BaseCowCalculation:
             except Exception as e:
                 print(f"数据库连接失败: {e}")
                 return False
+            
+            
 
     def check_project_data(self, project_path: Path, data_filename: str) -> Tuple[bool, str]:
         """

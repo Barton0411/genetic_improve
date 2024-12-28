@@ -7,6 +7,8 @@ import numpy as np
 from typing import Dict, List, Tuple, Optional
 from sqlalchemy import create_engine, text
 
+from core.breeding_calc.traits_calculation import TraitsCalculation
+
 from .base_calculation import BaseCowCalculation
 from .cow_traits_calc import TRAITS_TRANSLATION
 import os
@@ -37,6 +39,8 @@ class IndexCalculation(BaseCowCalculation):
         super().__init__()
         self.output_prefix = "processed_index"
         self.required_columns = ['cow_id']  # 基本必需列
+        self.traits_calculator = TraitsCalculation()  # 初始化 TraitsCalculation 实例
+        self.init_db_connection()  # 初始化数据库连接
 
 
     @staticmethod
@@ -149,47 +153,58 @@ class IndexCalculation(BaseCowCalculation):
             weight_values = weights[weight_name]
             selected_traits = list(weight_values.keys())
             
-            # 3. 计算关键性状
-            success, cow_df = self.calculate_cow_traits(project_path, selected_traits)
-            if not success:
-                return False, "计算母牛关键性状失败"
+
+            # 3. 检查是否已有关键性状结果
+            existing_results, is_complete = self.check_existing_traits_results(project_path, selected_traits)
             
-            # 4. 检查基因组数据并更新
-            genomic_path = project_path / "standardized_data" / "processed_genomic_data.xlsx"
-            if genomic_path.exists():
-                try:
-                    genomic_df = pd.read_excel(genomic_path)
-                    for trait in selected_traits:
-                        # 为每个性状创建source列
-                        cow_df[f'{trait}_source'] = 'P'  # 默认为系谱计算
-                        
-                        # 遍历每头母牛
-                        for idx, row in cow_df.iterrows():
-                            genomic_row = genomic_df[genomic_df['cow_id'] == row['cow_id']]
-                            if not genomic_row.empty and trait in genomic_row.columns:
-                                if pd.notna(genomic_row[trait].iloc[0]):
-                                    cow_df.at[idx, trait] = genomic_row[trait].iloc[0]
-                                    cow_df.at[idx, f'{trait}_source'] = 'G'
-                except Exception as e:
-                    print(f"处理基因组数据时发生错误: {e}")
+            if existing_results is None:
+                # 3.1 如果没有现有结果,就调用 TraitsCalculation 计算所有选中的性状
+                success, message = self.traits_calculator.process_data(main_window, selected_traits)
+                if not success:
+                    return False, message
+                
+                # 检查基因组更新的结果文件
+                genomic_path = project_path / "analysis_results" / "processed_cow_data_key_traits_scores_genomic.xlsx"
+                if genomic_path.exists():
+                    df = pd.read_excel(genomic_path)
+                else:
+                    df = pd.read_excel(project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pedigree.xlsx")
+            else:
+                if not is_complete:
+                    # 3.2 如果现有结果不完整,就将原有性状和缺失性状合并,重新计算所有性状
+                    existing_traits = [col[:-6] for col in existing_results.columns if col.endswith('_score')]
+                    selected_traits = list(set(existing_traits + selected_traits))
+                    success, message = self.traits_calculator.process_data(main_window, selected_traits)
+                    if not success:
+                        return False, message
+                    
+                    # 检查基因组更新的结果文件
+                    genomic_path = project_path / "analysis_results" / "processed_cow_data_key_traits_scores_genomic.xlsx"
+                    if genomic_path.exists():
+                        df = pd.read_excel(genomic_path)
+                    else:
+                        df = pd.read_excel(project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pedigree.xlsx")
+                else:
+                    # 3.3 如果现有结果已经完整,就直接使用
+                    df = existing_results
             
-            # 5. 计算指数得分
-            trait_columns = [col for col in cow_df.columns if col in selected_traits]
-            cow_df[f'{weight_name}_index'] = cow_df.apply(
+            # 4. 计算指数得分
+            weight_values = weights[weight_name]
+            df[f'{weight_name}_index'] = df.apply(
                 lambda row: self.calculate_index_score(
-                    {trait: row[trait] for trait in trait_columns}, 
+                    {trait: row[f'{trait}_score'] for trait in selected_traits},
                     weight_values
-                ),
+                ), 
                 axis=1
             )
             
-            # 6. 排序并添加排名
-            cow_df = cow_df.sort_values(f'{weight_name}_index', ascending=False)
-            cow_df['ranking'] = range(1, len(cow_df) + 1)
+            # 5. 排序并添加排名
+            df = df.sort_values(f'{weight_name}_index', ascending=False)
+            df['ranking'] = range(1, len(df) + 1)
             
-            # 7. 保存结果
-            output_path = project_path / "analysis_results" / f"{self.output_prefix}_cow_scores.xlsx"
-            return self.save_results_with_retry(cow_df, output_path), "计算完成"
+            # 6. 保存结果
+            output_path = project_path / "analysis_results" / f"{self.output_prefix}_cow_index_scores.xlsx"
+            return self.save_results_with_retry(df, output_path), "计算完成"
             
         except Exception as e:
             return False, str(e)
@@ -283,3 +298,31 @@ class IndexCalculation(BaseCowCalculation):
         except Exception as e:
             print(f"计算母牛性状失败: {e}")
             return False, None
+        
+
+    # 检查是否已有关键性状结果,如果有,检查是否包含所有选中性状。
+    def check_existing_traits_results(self, project_path: Path, selected_traits: list) -> Tuple[Optional[pd.DataFrame], bool]:
+        """
+        检查是否已有关键性状结果,如果有,检查是否包含所有选中性状。
+        
+        Args:
+            project_path: 项目路径
+            selected_traits: 选中的性状列表
+            
+        Returns:
+            Tuple[Optional[pd.DataFrame], bool]: (现有性状结果的DataFrame, 是否包含所有选中性状)
+        """
+        genomic_path = project_path / "analysis_results" / "processed_cow_data_key_traits_scores_genomic.xlsx"
+        pedigree_path = project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pedigree.xlsx"
+        
+        if genomic_path.exists():
+            df = pd.read_excel(genomic_path)
+        elif pedigree_path.exists():
+            df = pd.read_excel(pedigree_path)
+        else:
+            return None, False
+        
+        existing_traits = [col[:-6] for col in df.columns if col.endswith('_score')]
+        missing_traits = [trait for trait in selected_traits if trait not in existing_traits]
+        
+        return df, len(missing_traits) == 0    
