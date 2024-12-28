@@ -70,7 +70,7 @@ class TraitsCalculation(BaseCowCalculation):
                     cow_df[f"{bull_type}_{trait}"] = cow_df[bull_type].apply(
                         lambda x: bull_traits.get(str(x), {}).get(trait) if pd.notna(x) else np.nan
                     )
-                
+                    
                 # 更新identified列
                 cow_df[f"{bull_type}_identified"] = cow_df[bull_type].apply(
                     lambda x: str(x) in bull_traits if pd.notna(x) else False
@@ -95,12 +95,17 @@ class TraitsCalculation(BaseCowCalculation):
             if not self.calculate_trait_scores(detail_output_path, yearly_output_path, pedigree_output_path):
                 return False, "计算性状得分失败"
 
-            # 9. 更新基因组数据（如果有）
+            # 9. 检查并处理基因组数据
             genomic_data_path = project_path / "standardized_data" / "processed_genomic_data.xlsx"
             if genomic_data_path.exists():
                 genomic_output_path = output_dir / f"{self.output_prefix}_scores_genomic.xlsx"
                 if not self.update_genomic_data(pedigree_output_path, genomic_data_path, genomic_output_path):
                     return False, "更新基因组数据失败"
+                # 确保基因组数据评估文件存在
+                if not genomic_output_path.exists():
+                    # 如果更新失败，复制系谱评估文件作为基因组评估文件的基础
+                    df = pd.read_excel(pedigree_output_path)
+                    df.to_excel(genomic_output_path, index=False)
 
             return True, "计算完成"
 
@@ -324,41 +329,55 @@ class TraitsCalculation(BaseCowCalculation):
         
         return contribution
 
-    def update_genomic_data(self, pedigree_path: Path, genomic_path: Path, 
-                           output_path: Path) -> bool:
+    def update_genomic_data(self, pedigree_path: Path, genomic_path: Path, output_path: Path) -> bool:
         """用基因组数据更新关键性状得分"""
         try:
-            # 读取数据
+            # 1. 读取系谱数据文件
             df_pedigree = pd.read_excel(pedigree_path)
+            
+            # 2. 读取基因组数据
             df_genomic = pd.read_excel(genomic_path)
             
-            # 为所有得分列添加来源列
+            # 3. 初始化数据来源标记
             score_columns = [col for col in df_pedigree.columns if col.endswith('_score')]
             for col in score_columns:
-                df_pedigree[f"{col}_source"] = "P"
+                df_pedigree[f"{col}_source"] = "P"  # 默认标记为系谱来源
             
-            # 用基因组数据更新得分
-            for trait in [col.replace('_score', '') for col in score_columns]:
-                score_col = f"{trait}_score"
-                source_col = f"{trait}_score_source"
+            # 4. 更新得分和数据来源
+            traits = [col[:-6] for col in score_columns]  # 去掉 '_score' 后缀
+            
+            for _, row in df_pedigree.iterrows():
+                cow_id = row['cow_id']
+                genomic_row = df_genomic[df_genomic['cow_id'] == cow_id]
                 
-                # 遍历每一行数据
-                for idx, row in df_pedigree.iterrows():
-                    genomic_row = df_genomic[df_genomic['cow_id'] == row['cow_id']]
-                    
-                    if not genomic_row.empty and trait in genomic_row.columns:
-                        if pd.notna(genomic_row[trait].iloc[0]):
-                            df_pedigree.at[idx, score_col] = genomic_row[trait].iloc[0]
-                            df_pedigree.at[idx, source_col] = "G"
+                if not genomic_row.empty:
+                    # 遍历每个性状
+                    for trait in traits:
+                        score_col = f'{trait}_score'
+                        source_col = f'{trait}_score_source'
+                        
+                        # 如果基因组数据中有该性状的值且不为空
+                        if trait in genomic_row.columns and pd.notna(genomic_row[trait].iloc[0]):
+                            df_pedigree.loc[df_pedigree['cow_id'] == cow_id, score_col] = genomic_row[trait].iloc[0]
+                            df_pedigree.loc[df_pedigree['cow_id'] == cow_id, source_col] = "G"
             
-            # 添加基因组性状计数列
-            df_pedigree['genomic_traits_count'] = df_pedigree[
-                [col for col in df_pedigree.columns if col.endswith('_source')]
-            ].apply(lambda x: (x == "G").sum(), axis=1)
+            # 5. 添加基因组性状计数列
+            source_cols = [col for col in df_pedigree.columns if col.endswith('_source')]
+            df_pedigree['genomic_traits_count'] = df_pedigree[source_cols].apply(
+                lambda x: (x == "G").sum(), axis=1
+            )
             
-            # 保存结果
-            return self.save_results_with_retry(df_pedigree, output_path)
-            
+            # 6. 保存结果
+            try:
+                df_pedigree.to_excel(output_path, index=False)
+                return True
+            except PermissionError:
+                print(f"文件 {output_path} 被占用")
+                return False
+            except Exception as e:
+                print(f"保存基因组数据更新结果失败: {e}")
+                return False
+                
         except Exception as e:
-            print(f"更新基因组数据失败: {e}")
-            return False
+            print(f"更新基因组数据时发生错误: {e}")
+            return False      

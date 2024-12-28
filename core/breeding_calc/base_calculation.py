@@ -21,14 +21,26 @@ class BaseCowCalculation:
 
     def init_db_connection(self):
         """初始化数据库连接"""
-        if not self.db_engine:
-            try:
-                self.db_engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
-                return True
-            except Exception as e:
-                print(f"数据库连接失败: {e}")
-                return False
+        try:
+            print(f"尝试连接数据库：{LOCAL_DB_PATH}")
+            if self.db_engine:
+                self.db_engine.dispose()
+                self.db_engine = None
+                
+            self.db_engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
             
+            # 测试连接
+            with self.db_engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+                print("数据库连接成功")
+                
+            return True
+        except Exception as e:
+            print(f"数据库连接失败，错误信息: {str(e)}")
+            if self.db_engine:
+                self.db_engine.dispose()
+                self.db_engine = None
+            return False
             
 
     def check_project_data(self, project_path: Path, data_filename: str) -> Tuple[bool, str]:

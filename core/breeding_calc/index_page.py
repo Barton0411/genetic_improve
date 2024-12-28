@@ -279,9 +279,6 @@ class IndexCalculationPage(QWidget):
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
 
-        # 每次计算前重新初始化计算器
-        self.index_calculator = IndexCalculation()
-        
         try:
             success, message = self.index_calculator.process_cow_index(
                 main_window, self.current_weight_name
@@ -291,10 +288,9 @@ class IndexCalculationPage(QWidget):
                 QMessageBox.information(self, "完成", "母牛群指数计算完成！")
             else:
                 QMessageBox.warning(self, "错误", f"计算失败：{message}")
-        finally:
-            # 确保计算完成后清理资源
-            if hasattr(self.index_calculator, 'db_engine'):
-                self.index_calculator.db_engine.dispose()
+
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"计算过程中发生错误：{str(e)}")
 
     def calculate_bull_index(self):
         """计算备选公牛指数排名"""
@@ -306,9 +302,6 @@ class IndexCalculationPage(QWidget):
         if not main_window or not main_window.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
-        
-        # 每次计算前重新初始化计算器
-        self.index_calculator = IndexCalculation()
 
         try:
             success, message = self.index_calculator.process_bull_index(
@@ -319,7 +312,6 @@ class IndexCalculationPage(QWidget):
                 QMessageBox.information(self, "完成", "备选公牛指数计算完成！")
             else:
                 QMessageBox.warning(self, "错误", f"计算失败：{message}")
-        finally:
-            # 确保计算完成后清理资源
-            if hasattr(self.index_calculator, 'db_engine'):
-                self.index_calculator.db_engine.dispose()
+
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"计算过程中发生错误：{str(e)}")
