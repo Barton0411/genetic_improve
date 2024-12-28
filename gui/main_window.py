@@ -188,33 +188,73 @@ class MainWindow(QMainWindow):
         self.nav_list.currentRowChanged.connect(self.on_nav_item_changed)
 
     def create_content_area(self, layout):
-        self.content_stack = QStackedWidget()
-        
-        # 创建"育种项目管理"页面
-        self.create_project_page()
+            # 创建一个容器来包含背景和内容
+            container = QWidget()
+            container_layout = QVBoxLayout(container)
+            container_layout.setContentsMargins(0, 0, 0, 0)
+            container_layout.setSpacing(0)
+            
+            # 创建背景标签
+            background_label = QLabel(container)
+            image_path = Path(__file__).parent.parent / "homepage.jpg"
+            if image_path.exists():
+                pixmap = QPixmap(str(image_path))
+                background_label.setPixmap(pixmap)
+                background_label.setScaledContents(True)
+            else:
+                print(f"未找到背景图片: {image_path}")
+            
+            # 创建半透明遮罩层
+            overlay = QWidget(container)
+            overlay.setStyleSheet("background-color: rgba(255, 255, 255, 0.6);")
+            
+            # 创建内容栈
+            self.content_stack = QStackedWidget(container)
+            
+            # 创建各个页面
+            self.create_project_page()
+            self.create_upload_page()
+            
+            # 创建关键性状计算页面
+            self.cow_key_traits_page = CowKeyTraitsPage(parent=self)
+            self.content_stack.addWidget(self.cow_key_traits_page)
+            
+            # 创建备选公牛关键性状计算页面
+            self.bull_key_traits_page = BullKeyTraitsPage(parent=self)
+            self.content_stack.addWidget(self.bull_key_traits_page)
+            
+            # 创建牛只指数计算排名页面
+            self.index_calculation_page = IndexCalculationPage(parent=self)
+            self.content_stack.addWidget(self.index_calculation_page)
 
-        # 创建"数据上传"页面  
-        self.create_upload_page() 
+            # 设置所有页面的背景为透明
+            for i in range(self.content_stack.count()):
+                page = self.content_stack.widget(i)
+                page.setAutoFillBackground(False)
+                page.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        # 创建"关键性状计算"页面
-        self.cow_key_traits_page = CowKeyTraitsPage(parent=self)
-        self.content_stack.addWidget(self.cow_key_traits_page)
+            # 设置组件的位置和大小
+            def update_geometry():
+                size = container.size()
+                background_label.setGeometry(0, 0, size.width(), size.height())
+                overlay.setGeometry(0, 0, size.width(), size.height())
+                self.content_stack.setGeometry(0, 0, size.width(), size.height())
 
-        # 创建"备选公牛关键性状计算"页面  # 新添加的页面
-        self.bull_key_traits_page = BullKeyTraitsPage(parent=self)
-        self.content_stack.addWidget(self.bull_key_traits_page)
-
-        # 创建"牛只指数计算排名"页面
-        self.index_calculation_page = IndexCalculationPage(parent=self)
-        self.content_stack.addWidget(self.index_calculation_page)
-
-        # TODO: 创建其他页面...
-        
-        layout.addWidget(self.content_stack)
+            # 添加resize事件处理
+            container.resizeEvent = lambda e: update_geometry()
+            
+            # 初始化组件大小
+            container.setMinimumSize(800, 600)
+            update_geometry()
+            
+            # 添加到主布局
+            layout.addWidget(container)
+            
+            return self.content_stack
 
     def create_project_page(self):
             """创建育种项目管理页面"""
-            # 创建一个自定义的Page类来处理resizeEvent
+            # 创建一个自定义的Page类
             class ProjectPage(QWidget):
                 def __init__(self, parent=None):
                     super().__init__(parent)
@@ -222,30 +262,8 @@ class MainWindow(QMainWindow):
                     self.init_ui()
                     
                 def init_ui(self):
-                    # 创建背景标签
-                    self.background_label = QLabel(self)
-                    image_path = Path(__file__).parent.parent / "homepage.jpg"
-                    if image_path.exists():
-                        pixmap = QPixmap(str(image_path))
-                        self.background_label.setPixmap(pixmap)
-                        self.background_label.setScaledContents(True)
-                    else:
-                        print(f"未找到背景图片: {image_path}")
-                    
-                    # 设置背景标签占满整个窗口
-                    self.background_label.setGeometry(0, 0, self.width(), self.height())
-                    
-                    # 创建半透明遮罩层
-                    self.overlay = QWidget(self)
-                    self.overlay.setStyleSheet("background-color: rgba(255, 255, 255, 0.6);")
-                    self.overlay.setGeometry(0, 0, self.width(), self.height())
-                    
-                    # 创建内容容器
-                    self.content_widget = QWidget(self)
-                    self.content_widget.setGeometry(0, 0, self.width(), self.height())
-                    
-                    # 创建主布局
-                    self.main_layout = QVBoxLayout(self.content_widget)
+                    # 创建内容布局
+                    self.main_layout = QVBoxLayout(self)
                     self.main_layout.setContentsMargins(10, 10, 10, 10)
                     
                     # 初始化UI组件
@@ -255,6 +273,7 @@ class MainWindow(QMainWindow):
                     # 路径显示和修改区域
                     path_layout = QHBoxLayout()
                     path_label = QLabel("当前路径:")
+                    path_label.setStyleSheet("color: black;")  # 确保文字清晰可见
                     self.path_button = QPushButton(self.main_window.settings.get_default_storage())
                     self.path_button.clicked.connect(lambda: self.main_window.change_storage_location())
                     path_layout.addWidget(path_label)
@@ -286,6 +305,9 @@ class MainWindow(QMainWindow):
                         }
                         QTreeView::item:selected {
                             background-color: rgba(51, 153, 255, 0.7);
+                        }
+                        QTreeView::item {
+                            color: black;  /* 确保文字为黑色 */
                         }
                     """)
                     
@@ -332,15 +354,6 @@ class MainWindow(QMainWindow):
                     self.main_layout.addLayout(path_layout)
                     self.main_layout.addWidget(self.file_tree)
                     self.main_layout.addLayout(button_layout)
-                
-                def resizeEvent(self, event):
-                    """处理窗口大小调整事件"""
-                    super().resizeEvent(event)
-                    # 更新所有组件的大小
-                    size = event.size()
-                    self.background_label.setGeometry(0, 0, size.width(), size.height())
-                    self.overlay.setGeometry(0, 0, size.width(), size.height())
-                    self.content_widget.setGeometry(0, 0, size.width(), size.height())
             
             # 创建页面实例
             page = ProjectPage(self)
@@ -352,6 +365,8 @@ class MainWindow(QMainWindow):
             self.path_button = page.path_button
             
             return page
+
+
     def update_background_image(self):
         """更新背景图大小"""
         if hasattr(self, 'file_tree'):

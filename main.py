@@ -13,13 +13,14 @@ def main():
     splash.show()
     splash.startVideo()
     
-    # 直接显示登录对话框
+    # 显示登录对话框
     login_dialog = LoginDialog()
-    # 将登录对话框移动到屏幕中央
+    
+    # 将登录对话框移动到屏幕中下位置
     screen = app.primaryScreen().geometry()
     dialog_geometry = login_dialog.geometry()
-    x = (screen.width() - dialog_geometry.width()) // 2
-    y = (screen.height() - dialog_geometry.height()) // 2
+    x = (screen.width() - dialog_geometry.width()) // 2  # 水平居中
+    y = int(screen.height() * 0.55)  # 距离顶部55%的位置
     login_dialog.move(x, y)
     
     if login_dialog.exec() == QDialog.DialogCode.Accepted:
