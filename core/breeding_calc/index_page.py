@@ -18,6 +18,8 @@ class IndexCalculationPage(QWidget):
         self.trait_inputs = {}  # 存储性状输入框
         self.current_weight_name = None
         self.setup_ui()
+        # 初始化时就更新权重列表
+        self.update_weight_list()
 
     def setup_ui(self):
         main_layout = QHBoxLayout(self)
@@ -184,12 +186,9 @@ class IndexCalculationPage(QWidget):
     def update_weight_list(self):
         """更新权重列表"""
         self.weight_list.clear()
-        
-        main_window = self.get_main_window()
-        if not main_window or not main_window.selected_project_path:
-            return
-
-        weights = self.index_calculator.load_weights(main_window.selected_project_path)
+ 
+        # 直接从计算器加载权重
+        weights = self.index_calculator.load_weights()
         for name in weights.keys():
             item = QListWidgetItem(name)
             item.setData(Qt.ItemDataRole.UserRole, name)
@@ -201,11 +200,7 @@ class IndexCalculationPage(QWidget):
         self.current_weight_name = weight_name
         
         # 获取权重数据
-        main_window = self.get_main_window()
-        if not main_window or not main_window.selected_project_path:
-            return
-            
-        weights = self.index_calculator.load_weights(main_window.selected_project_path)
+        weights = self.index_calculator.load_weights()  # 不需要项目路径
         weight_values = weights.get(weight_name, {})
         
         # 更新输入框
@@ -220,11 +215,7 @@ class IndexCalculationPage(QWidget):
 
     def save_new_weight(self):
         """保存新权重配置"""
-        main_window = self.get_main_window()
-        if not main_window or not main_window.selected_project_path:
-            QMessageBox.warning(self, "警告", "请先选择一个项目")
-            return
-
+        # 权重保存不需要项目路径，删除相关检查
         # 获取权重名称
         name, ok = QInputDialog.getText(
             self, "新建权重", "请输入权重配置名称："
@@ -244,47 +235,38 @@ class IndexCalculationPage(QWidget):
                 weight_values[trait] = value
 
         # 保存权重
-        if self.index_calculator.save_custom_weight(
-            main_window.selected_project_path, name, weight_values
-        ):
+        if self.index_calculator.save_custom_weight(name, weight_values):
             self.update_weight_list()
             QMessageBox.information(self, "成功", "权重配置已保存")
         else:
             QMessageBox.warning(self, "错误", "保存权重配置失败")
 
     def delete_weight(self):
-        """删除当前选中的权重配置"""
-        if not self.current_weight_name:
-            return
+            """删除当前选中的权重配置"""
+            if not self.current_weight_name:
+                return
+                
+            if self.current_weight_name in ['NM$权重', 'TPI权重']:
+                QMessageBox.warning(self, "警告", "不能删除系统预设权重")
+                return
+
+            reply = QMessageBox.question(
+                self,
+                "确认删除",
+                f"确定要删除权重配置'{self.current_weight_name}'吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
             
-        if self.current_weight_name in ['NM$权重', 'TPI权重']:
-            QMessageBox.warning(self, "警告", "不能删除系统预设权重")
-            return
-
-        main_window = self.get_main_window()
-        if not main_window or not main_window.selected_project_path:
-            return
-
-        reply = QMessageBox.question(
-            self,
-            "确认删除",
-            f"确定要删除权重配置'{self.current_weight_name}'吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            if self.index_calculator.delete_custom_weight(
-                main_window.selected_project_path, 
-                self.current_weight_name
-            ):
-                self.update_weight_list()
-                self.current_weight_name = None
-                self.delete_weight_btn.setEnabled(False)
-                self.cow_index_btn.setEnabled(False)
-                self.bull_index_btn.setEnabled(False)
-                QMessageBox.information(self, "成功", "权重配置已删除")
-            else:
-                QMessageBox.warning(self, "错误", "删除权重配置失败")
+            if reply == QMessageBox.StandardButton.Yes:
+                if self.index_calculator.delete_custom_weight(self.current_weight_name):
+                    self.update_weight_list()
+                    self.current_weight_name = None
+                    self.delete_weight_btn.setEnabled(False)
+                    self.cow_index_btn.setEnabled(False)
+                    self.bull_index_btn.setEnabled(False)
+                    QMessageBox.information(self, "成功", "权重配置已删除")
+                else:
+                    QMessageBox.warning(self, "错误", "删除权重配置失败")
 
     def calculate_cow_index(self):
         """计算母牛群指数排名"""

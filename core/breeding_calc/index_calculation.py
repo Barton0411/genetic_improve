@@ -9,6 +9,8 @@ from sqlalchemy import create_engine, text
 
 from .base_calculation import BaseCowCalculation
 from .cow_traits_calc import TRAITS_TRANSLATION
+import os
+from pathlib import Path
 
 # 标准差数据
 TRAIT_SD = {
@@ -35,65 +37,77 @@ class IndexCalculation(BaseCowCalculation):
         super().__init__()
         self.output_prefix = "processed_index"
         self.required_columns = ['cow_id']  # 基本必需列
+
+
+    @staticmethod
+    def get_global_weights_path() -> Path:
+        """获取全局权重配置文件路径"""
+        # 找到genetic_projects目录
+        current_dir = Path(__file__).resolve().parent  # core/breeding_calc
+        while current_dir.name != 'genetic_improve':
+            current_dir = current_dir.parent
         
-    def load_weights(self, project_path: Path) -> Dict[str, Dict[str, float]]:
+        # genetic_projects是genetic_improve的同级目录
+        weights_path = current_dir.parent / "genetic_projects" / "index_weights"
+        weights_path.mkdir(parents=True, exist_ok=True)
+        return weights_path
+        
+    def load_weights(self) -> Dict[str, Dict[str, float]]:
         """加载所有权重配置（包括系统预设和用户自定义）"""
         weights = DEFAULT_WEIGHTS.copy()
         
-        # 加载用户自定义权重
-        weights_path = project_path / "index_weights" / "custom_weights.json"
-        if weights_path.exists():
-            try:
-                with open(weights_path, 'r', encoding='utf-8') as f:
+        try:
+            # 使用全局路径
+            weights_file = self.get_global_weights_path() / "custom_weights.json"
+            if weights_file.exists():
+                with open(weights_file, 'r', encoding='utf-8') as f:
                     custom_weights = json.load(f)
                 weights.update(custom_weights)
-            except Exception as e:
-                print(f"加载用户自定义权重失败: {e}")
+        except Exception as e:
+            print(f"加载用户自定义权重失败: {e}")
                 
         return weights
         
-    def save_custom_weight(self, project_path: Path, weight_name: str, 
-                          weight_values: Dict[str, float]) -> bool:
+    def save_custom_weight(self, weight_name: str, weight_values: Dict[str, float]) -> bool:
         """保存用户自定义权重"""
         try:
-            weights_dir = project_path / "index_weights"
-            weights_dir.mkdir(parents=True, exist_ok=True)
-            
-            weights_path = weights_dir / "custom_weights.json"
+            # 使用全局路径
+            weights_file = self.get_global_weights_path() / "custom_weights.json"
             
             # 读取现有权重
             existing_weights = {}
-            if weights_path.exists():
-                with open(weights_path, 'r', encoding='utf-8') as f:
+            if weights_file.exists():
+                with open(weights_file, 'r', encoding='utf-8') as f:
                     existing_weights = json.load(f)
             
             # 更新权重
             existing_weights[weight_name] = weight_values
             
-            # 保存更新后的权重
-            with open(weights_path, 'w', encoding='utf-8') as f:
+            # 保存
+            with open(weights_file, 'w', encoding='utf-8') as f:
                 json.dump(existing_weights, f, ensure_ascii=False, indent=4)
                 
             return True
+            
         except Exception as e:
             print(f"保存自定义权重失败: {e}")
             return False
             
-    def delete_custom_weight(self, project_path: Path, weight_name: str) -> bool:
+    def delete_custom_weight(self, weight_name: str) -> bool:
         """删除用户自定义权重"""
         try:
-            weights_path = project_path / "index_weights" / "custom_weights.json"
+            weights_file = self.get_global_weights_path() / "custom_weights.json"
             
-            if not weights_path.exists():
+            if not weights_file.exists():
                 return False
                 
-            with open(weights_path, 'r', encoding='utf-8') as f:
+            with open(weights_file, 'r', encoding='utf-8') as f:
                 weights = json.load(f)
                 
             if weight_name in weights:
                 del weights[weight_name]
                 
-                with open(weights_path, 'w', encoding='utf-8') as f:
+                with open(weights_file, 'w', encoding='utf-8') as f:
                     json.dump(weights, f, ensure_ascii=False, indent=4)
                     
                 return True
@@ -128,7 +142,7 @@ class IndexCalculation(BaseCowCalculation):
                 return False, "请先上传母牛数据"
                 
             # 2. 加载权重配置并获取性状列表
-            weights = self.load_weights(project_path)
+            weights = self.load_weights() 
             if weight_name not in weights:
                 return False, f"未找到权重配置：{weight_name}"
                 
@@ -191,7 +205,7 @@ class IndexCalculation(BaseCowCalculation):
                 return False, "请先上传备选公牛数据"
                 
             # 2. 加载权重配置
-            weights = self.load_weights(project_path)
+            weights = self.load_weights()
             if weight_name not in weights:
                 return False, f"未找到权重配置：{weight_name}"
                 
