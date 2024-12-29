@@ -13,7 +13,8 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QFileDialog, QMessageBox, QLabel, 
     QListWidget, QListWidgetItem, QStackedWidget, QInputDialog, 
-    QFrame, QTreeView, QGridLayout, QAbstractItemView, QMenu,QGraphicsOpacityEffect
+    QFrame, QTreeView, QGridLayout, QAbstractItemView, QMenu,QGraphicsOpacityEffect,
+    QStackedLayout
 )
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -85,18 +86,21 @@ class DragDropArea(QFrame):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, username=None):  # 添加 username 参数
+    def __init__(self, username=None):
         super().__init__()
         self.settings = Settings()
-        self.username = username  # 保存用户名
-        self.content_stack = QStackedWidget()  # 提前创建 content_stack
-        self.selected_project_path = None   # 用于记录当前选择的项目路径
-        self.templates_path = Path(__file__).parent.parent / "templates"  # 模板存放路径 
-        self.cow_key_traits_page = None 
-        self.bull_key_traits_page = None 
+        self.username = username
+        self.content_stack = QStackedWidget()
+        self.selected_project_path = None
+        self.templates_path = Path(__file__).parent.parent / "templates"
+        
+        # 先创建所有页面实例，仅创建一次
+        self.cow_key_traits_page = CowKeyTraitsPage(parent=self)
+        self.bull_key_traits_page = BullKeyTraitsPage(parent=self)
+        self.index_calculation_page = IndexCalculationPage(parent=self)
+        
         self.setup_ui()
         self.check_and_update_database_on_startup()
-        self.sub_nav_menu = None  # 添加子导航菜单属性
 
     def setup_ui(self):
         self.setWindowTitle("奶牛育种智选报告专家")
@@ -132,12 +136,7 @@ class MainWindow(QMainWindow):
         nav_items = [
             ("育种项目管理", "folder", []),
             ("数据上传", "upload", []),
-            ("母牛遗传数据分析", "chart", [
-                "在群母牛关键性状计算"
-            ]),
-            ("备选公牛遗传数据分析", "chart", [  # 新添加的导航项
-                "备选公牛关键性状计算"
-            ]),
+            ("关键育种性状分析", "chart", []), # 移除子导航
             ("牛只指数计算排名", "chart", []),
             ("配种记录分析", "analysis", []),
             ("体型外貌评定", "body", []),
@@ -187,71 +186,152 @@ class MainWindow(QMainWindow):
         # 连接导航信号
         self.nav_list.currentRowChanged.connect(self.on_nav_item_changed)
 
+    def create_genetic_analysis_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # 创建顶部按钮容器
+        button_container = QWidget()
+        button_container.setFixedHeight(50)  # 控制按钮高度
+        button_layout = QHBoxLayout(button_container)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(0)  # 移除按钮间距
+        
+        # 创建按钮样式
+        normal_style = """
+            QPushButton {
+                background-color: #f0f0f0;
+                color: #333;
+                border: none;
+                font-size: 14px;
+                padding: 10px 30px;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+        """
+
+        selected_style = """
+            QPushButton {
+                background-color: #3498db;  /* 蓝色背景 */
+                color: white;              /* 白色文字 */
+                border: none;
+                font-size: 14px;
+                padding: 10px 30px;
+                min-width: 120px;
+            }
+        """
+        
+        # 创建按钮
+        self.cow_btn = QPushButton("在群母牛")
+        self.bull_btn = QPushButton("备选公牛")
+        self.mated_bull_btn = QPushButton("已配公牛")
+        
+        # 设置默认样式
+        for btn in [self.cow_btn, self.bull_btn, self.mated_bull_btn]:
+            btn.setStyleSheet(normal_style)
+        
+        # 创建内容区域
+        content_area = QWidget()
+        content_layout = QStackedLayout(content_area)
+        
+        # 将三个页面添加到内容区域
+        content_layout.addWidget(self.cow_key_traits_page)
+        content_layout.addWidget(self.bull_key_traits_page)
+        # TODO: 添加已配公牛页面
+        mated_bull_page = QWidget()  # 临时占位
+        content_layout.addWidget(mated_bull_page)
+        
+        # 按钮点击事件
+        def on_cow_btn_clicked():
+            self.cow_btn.setStyleSheet(selected_style)
+            self.bull_btn.setStyleSheet(normal_style)
+            self.mated_bull_btn.setStyleSheet(normal_style)
+            content_layout.setCurrentIndex(0)
+        
+        def on_bull_btn_clicked():
+            self.cow_btn.setStyleSheet(normal_style)
+            self.bull_btn.setStyleSheet(selected_style)
+            self.mated_bull_btn.setStyleSheet(normal_style)
+            content_layout.setCurrentIndex(1)
+        
+        def on_mated_bull_btn_clicked():
+            self.cow_btn.setStyleSheet(normal_style)
+            self.bull_btn.setStyleSheet(normal_style)
+            self.mated_bull_btn.setStyleSheet(selected_style)
+            content_layout.setCurrentIndex(2)
+        
+        # 连接按钮信号
+        self.cow_btn.clicked.connect(on_cow_btn_clicked)
+        self.bull_btn.clicked.connect(on_bull_btn_clicked)
+        self.mated_bull_btn.clicked.connect(on_mated_bull_btn_clicked)
+        
+        # 添加按钮到布局
+        button_layout.addWidget(self.cow_btn)
+        button_layout.addWidget(self.bull_btn)
+        button_layout.addWidget(self.mated_bull_btn)
+        button_layout.addStretch()
+        
+        # 添加到主布局
+        layout.addWidget(button_container)
+        layout.addWidget(content_area)
+        
+        # 默认选中第一个按钮
+        on_cow_btn_clicked()
+        
+        return page
+
     def create_content_area(self, layout):
-            # 创建一个容器来包含背景和内容
-            container = QWidget()
-            container_layout = QVBoxLayout(container)
-            container_layout.setContentsMargins(0, 0, 0, 0)
-            container_layout.setSpacing(0)
-            
-            # 创建背景标签
-            background_label = QLabel(container)
-            image_path = Path(__file__).parent.parent / "homepage.jpg"
-            if image_path.exists():
-                pixmap = QPixmap(str(image_path))
-                background_label.setPixmap(pixmap)
-                background_label.setScaledContents(True)
-            else:
-                print(f"未找到背景图片: {image_path}")
-            
-            # 创建半透明遮罩层
-            overlay = QWidget(container)
-            overlay.setStyleSheet("background-color: rgba(255, 255, 255, 0.6);")
-            
-            # 创建内容栈
-            self.content_stack = QStackedWidget(container)
-            
-            # 创建各个页面
-            self.create_project_page()
-            self.create_upload_page()
-            
-            # 创建关键性状计算页面
-            self.cow_key_traits_page = CowKeyTraitsPage(parent=self)
-            self.content_stack.addWidget(self.cow_key_traits_page)
-            
-            # 创建备选公牛关键性状计算页面
-            self.bull_key_traits_page = BullKeyTraitsPage(parent=self)
-            self.content_stack.addWidget(self.bull_key_traits_page)
-            
-            # 创建牛只指数计算排名页面
-            self.index_calculation_page = IndexCalculationPage(parent=self)
-            self.content_stack.addWidget(self.index_calculation_page)
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+        
+        # 创建背景标签
+        background_label = QLabel(container)
+        image_path = Path(__file__).parent.parent / "homepage.jpg"
+        if image_path.exists():
+            pixmap = QPixmap(str(image_path))
+            background_label.setPixmap(pixmap)
+            background_label.setScaledContents(True)
+        
+        # 创建半透明遮罩层
+        overlay = QWidget(container)
+        overlay.setStyleSheet("background-color: rgba(255, 255, 255, 0.6);")
+        
+        # 创建内容栈
+        self.content_stack = QStackedWidget(container)
+        
+        # 按顺序添加页面，每个页面只添加一次
+        self.create_project_page()         # 第0页：项目管理
+        self.create_upload_page()          # 第1页：数据上传 
+        genetic_analysis_page = self.create_genetic_analysis_page()  # 第2页：关键育种性状分析
+        self.content_stack.addWidget(genetic_analysis_page)
+        self.content_stack.addWidget(self.index_calculation_page)    # 第3页：指数计算排名
 
-            # 设置所有页面的背景为透明
-            for i in range(self.content_stack.count()):
-                page = self.content_stack.widget(i)
-                page.setAutoFillBackground(False)
-                page.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        # 设置所有页面的背景为透明
+        for i in range(self.content_stack.count()):
+            page = self.content_stack.widget(i)
+            page.setAutoFillBackground(False)
+            page.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-            # 设置组件的位置和大小
-            def update_geometry():
-                size = container.size()
-                background_label.setGeometry(0, 0, size.width(), size.height())
-                overlay.setGeometry(0, 0, size.width(), size.height())
-                self.content_stack.setGeometry(0, 0, size.width(), size.height())
+        # 设置组件的位置和大小
+        def update_geometry():
+            size = container.size()
+            background_label.setGeometry(0, 0, size.width(), size.height())
+            overlay.setGeometry(0, 0, size.width(), size.height())
+            self.content_stack.setGeometry(0, 0, size.width(), size.height())
 
-            # 添加resize事件处理
-            container.resizeEvent = lambda e: update_geometry()
-            
-            # 初始化组件大小
-            container.setMinimumSize(800, 600)
-            update_geometry()
-            
-            # 添加到主布局
-            layout.addWidget(container)
-            
-            return self.content_stack
-
+        container.resizeEvent = lambda e: update_geometry()
+        container.setMinimumSize(800, 600)
+        update_geometry()
+        
+        layout.addWidget(container)
+        return self.content_stack  
+    
     def create_project_page(self):
             """创建育种项目管理页面"""
             # 创建一个自定义的Page类
@@ -518,25 +598,22 @@ class MainWindow(QMainWindow):
             self.file_tree.setRootIndex(self.file_system_model.index(folder))
 
     def on_nav_item_changed(self, index):
-        """处理导航项选择变化"""
         current_item = self.nav_list.item(index)
         if current_item:
-            indent_level = current_item.data(Qt.ItemDataRole.UserRole + 1)
             text = current_item.text().strip()
             
-            if indent_level == 1:  # 子导航项
-                if text == "在群母牛关键性状计算":
-                    # 切换到关键性状计算页面
-                    self.content_stack.setCurrentWidget(self.cow_key_traits_page)
-                elif text == "在群母牛指数计算及排名":
-                    pass  # TODO: 处理在群母牛指数计算及排名
-                elif text == "备选公牛关键性状计算":
-                    self.content_stack.setCurrentWidget(self.bull_key_traits_page)
-                elif text == "备选公牛指数计算及排名":
-                    pass  # TODO: 处理备选公牛指数计算及排名
-            else:  # 主导航项
-                self.content_stack.setCurrentIndex(index)
-                    
+            # 根据导航文本切换页面
+            if text == "育种项目管理":
+                self.content_stack.setCurrentIndex(0)  
+            elif text == "数据上传":
+                self.content_stack.setCurrentIndex(1)  
+            elif text == "关键育种性状分析":
+                # 第2页为关键育种性状分析页面
+                self.content_stack.setCurrentIndex(2)
+            elif text == "牛只指数计算排名":
+                # 第3页为指数计算页面
+                self.content_stack.setCurrentIndex(3)
+                
             self.update_nav_selected_style()
 
     # 新增“数据上传”页面函数
