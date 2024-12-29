@@ -142,6 +142,7 @@ class BullKeyTraitsPage(QWidget):
         return [self.selected_traits_list.item(i).data(Qt.ItemDataRole.UserRole) 
                 for i in range(self.selected_traits_list.count())]
 
+
     def start_bull_traits_calculation(self):
         """开始公牛关键性状计算流程"""
         # 获取主窗口实例

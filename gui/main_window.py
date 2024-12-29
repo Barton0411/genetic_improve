@@ -32,6 +32,7 @@ from gui.progress import ProgressDialog
 from gui.db_update_worker import DBUpdateWorker
 from core.breeding_calc.bull_traits_calc import BullKeyTraitsPage  
 from core.breeding_calc.index_page import IndexCalculationPage
+from core.breeding_calc.mated_bull_traits_calc import MatedBullKeyTraitsPage  
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QFileDialog, QMessageBox, QLabel, 
@@ -98,6 +99,7 @@ class MainWindow(QMainWindow):
         self.cow_key_traits_page = CowKeyTraitsPage(parent=self)
         self.bull_key_traits_page = BullKeyTraitsPage(parent=self)
         self.index_calculation_page = IndexCalculationPage(parent=self)
+        self.mated_bull_key_traits_page = MatedBullKeyTraitsPage(parent=self)
         
         self.setup_ui()
         self.check_and_update_database_on_startup()
@@ -241,9 +243,9 @@ class MainWindow(QMainWindow):
         # 将三个页面添加到内容区域
         content_layout.addWidget(self.cow_key_traits_page)
         content_layout.addWidget(self.bull_key_traits_page)
-        # TODO: 添加已配公牛页面
-        mated_bull_page = QWidget()  # 临时占位
-        content_layout.addWidget(mated_bull_page)
+            # 将已配公牛页面添加到内容区域
+        content_layout.addWidget(self.mated_bull_key_traits_page)
+
         
         # 按钮点击事件
         def on_cow_btn_clicked():
