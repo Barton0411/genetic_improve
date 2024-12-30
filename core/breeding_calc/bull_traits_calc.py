@@ -28,7 +28,7 @@ class BullKeyTraitsPage(QWidget):
         # 初始化所有可用性状列表
         self.all_traits = [
             'TPI', 'NM$', 'CM$', 'FM$', 'GM$', 'MILK', 'FAT', 'PROT', 
-            'FAT %', 'PROT%', 'SCS', 'DPR', 'HCR', 'CCR', 'PL', 'SCE', 
+            'FAT %', 'PROT%', 'SCS', 'DPR', 'HCR', 'CCR', 'SCR','PL', 'SCE', 
             'DCE', 'SSB', 'DSB', 'PTAT', 'UDC', 'FLC', 'BDC', 'ST', 'SG', 
             'BD', 'DF', 'RA', 'RW', 'LS', 'LR', 'FA', 'FLS', 'FU', 'UH', 
             'UW', 'UC', 'UD', 'FT', 'RT', 'TL', 'FE', 'FI', 'HI', 'LIV', 

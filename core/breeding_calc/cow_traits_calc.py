@@ -42,8 +42,50 @@ TRAITS_TRANSLATION = {
     'RT': '后乳头位置', 'TL': '乳头长度', 'FE': '饲料效率指数', 'FI': '繁殖力指数', 'HI': '健康指数',
     'LIV': '存活率', 'GL': '妊娠长度', 'MAST': '乳房炎抗病性', 'MET': '子宫炎抗病性', 'RP': '胎衣不下抗病性',
     'KET': '酮病抗病性', 'DA': '变胃抗病性', 'MFV': '产后瘫抗病性', 'EFC': '首次产犊月龄',
-    'HLiv': '后备牛存活率', 'FS': '饲料节约指数', 'RFI': '剩余饲料采食量', 'Milk Speed': '排乳速度',
-    'Eval Date': '数据日期'
+    'HLiv': '后备牛存活率', 'FS': '饲料节约指数', 'RFI': '剩余饲料采食量', 'Milk Speed': '排乳速度','SCR':'配种受胎率',
+    'Eval Date': '数据日期',
+    'BULL NAAB':'公牛 NAAB',
+    'BULL REG':'公牛 REG',
+    'MMGS REG':'外曾外祖父 REG',    
+    'SIRE REG':'父亲 REG',
+    'MGS REG':'外祖父 REG',
+    'GIB':'个体近交指数-G',
+    'MW':'早发肌无力',
+    'HH1':'荷斯坦繁殖缺陷1型',
+    'HH2':'荷斯坦繁殖缺陷2型',
+    'HH3':'荷斯坦繁殖缺陷3型',
+    'HH4':'荷斯坦繁殖缺陷4型',
+    'HH5':'荷斯坦繁殖缺陷5型',
+    'HH6':'荷斯坦繁殖缺陷6型',
+    'HMW':'早发肌无力-单倍型',
+    'BLAD':'牛白细胞粘附缺陷病',
+    'Chondrodysplasia':'软骨发育异常',
+    'Citrullinemia':'瓜氨酸血症',
+    'DUMPS':'尿苷单磷酸合成酶缺乏',
+    'Factor XI':'凝血因子 XI缺乏',
+    'CVM':'犊牛脊椎畸形综合征',
+    'Brachyspina':'短脊椎综合症征',
+    'Mulefoot':'单趾畸形',
+    'Cholesterol deficiency Deficiency Carrier':'胆固醇缺乏症携带者',
+    'Beta Casein A/B':'β酪蛋白 A/B',
+    'Beta Lactoglobulin':'β乳球蛋白',
+    'Beta Casein A2':'β酪蛋白A2',
+    'Kappa Casein I (ABE)':'卡帕酪蛋白I',
+    'GM$':'放牧净价值',
+    'Name':'牛短名',
+    'Reg Name':'注册名',
+    'Haplo Types':'单倍型',
+    'RCC':'隐性遗传缺陷携带者',
+    'Cholesterol deficiency':'胆固醇缺乏症',
+    'Upload Date':'数据上传日期',
+    'Recessives':'隐性基因'
+
+
+
+
+
+
+    
 }
 
 class CowKeyTraitsPage(QWidget):
@@ -59,12 +101,12 @@ class CowKeyTraitsPage(QWidget):
         
         self.all_traits = [
             'TPI', 'NM$', 'CM$', 'FM$', 'GM$', 'MILK', 'FAT', 'PROT', 
-            'FAT %', 'PROT%', 'SCS', 'DPR', 'HCR', 'CCR', 'PL', 'SCE', 
+            'FAT %', 'PROT%', 'SCS', 'DPR', 'HCR', 'CCR', 'SCR','PL', 'SCE', 
             'DCE', 'SSB', 'DSB', 'PTAT', 'UDC', 'FLC', 'BDC', 'ST', 'SG', 
             'BD', 'DF', 'RA', 'RW', 'LS', 'LR', 'FA', 'FLS', 'FU', 'UH', 
             'UW', 'UC', 'UD', 'FT', 'RT', 'TL', 'FE', 'FI', 'HI', 'LIV', 
             'GL', 'MAST', 'MET', 'RP', 'KET', 'DA', 'MFV', 'EFC', 'HLiv', 
-            'FS', 'RFI', 'Milk Speed', 'Eval Date'
+            'FS', 'RFI', 'Milk Speed'
         ]
         
         self.required_trait = 'NM$'
