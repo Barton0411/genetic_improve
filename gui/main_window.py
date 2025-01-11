@@ -17,6 +17,8 @@ from PyQt6.QtWidgets import (
     QStackedLayout
 )
 import warnings
+
+from core.inbreeding.inbreeding_page import InbreedingPage
 warnings.filterwarnings("ignore", category=UserWarning)
 from config.settings import Settings
 from core.breeding_calc.cow_traits_calc import CowKeyTraitsPage
@@ -95,11 +97,13 @@ class MainWindow(QMainWindow):
         self.selected_project_path = None
         self.templates_path = Path(__file__).parent.parent / "templates"
         
-        # 先创建所有页面实例，仅创建一次
+        # 创建所有页面实例
         self.cow_key_traits_page = CowKeyTraitsPage(parent=self)
         self.bull_key_traits_page = BullKeyTraitsPage(parent=self)
         self.index_calculation_page = IndexCalculationPage(parent=self)
         self.mated_bull_key_traits_page = MatedBullKeyTraitsPage(parent=self)
+        # 添加新的近交分析页面实例
+        self.inbreeding_page = InbreedingPage(parent=self)  # 新增
         
         self.setup_ui()
         self.check_and_update_database_on_startup()
@@ -138,9 +142,9 @@ class MainWindow(QMainWindow):
         nav_items = [
             ("育种项目管理", "folder", []),
             ("数据上传", "upload", []),
-            ("关键育种性状分析", "chart", []), # 移除子导航
+            ("关键育种性状分析", "chart", []),
             ("牛只指数计算排名", "chart", []),
-            ("配种记录分析", "analysis", []),
+            ("近交系数及隐性基因分析", "analysis", []),
             ("体型外貌评定", "body", []),
             ("个体选配", "match", []),
             ("自动化生成", "report", [])
@@ -313,6 +317,7 @@ class MainWindow(QMainWindow):
         genetic_analysis_page = self.create_genetic_analysis_page()  # 第2页：关键育种性状分析
         self.content_stack.addWidget(genetic_analysis_page)
         self.content_stack.addWidget(self.index_calculation_page)    # 第3页：指数计算排名
+        self.content_stack.addWidget(self.inbreeding_page)          # 第4页：近交分析页面
 
         # 设置所有页面的背景为透明
         for i in range(self.content_stack.count()):
@@ -615,10 +620,12 @@ class MainWindow(QMainWindow):
             elif text == "牛只指数计算排名":
                 # 第3页为指数计算页面
                 self.content_stack.setCurrentIndex(3)
+            elif text == "近交系数及隐性基因分析":
+                self.content_stack.setCurrentIndex(4)
                 
             self.update_nav_selected_style()
 
-    # 新增“数据上传”页面函数
+    # 新增"数据上传"页面函数
     def create_upload_page(self):
         page = QWidget()
         layout = QGridLayout(page)
