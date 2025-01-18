@@ -122,68 +122,25 @@ class InbreedingPage(QWidget):
         try:
             if self.db_engine:
                 self.db_engine.dispose()
-            
-            # 检查数据库文件是否存在
-            db_path = Path(LOCAL_DB_PATH)
-            print(f"数据库文件路径: {db_path}")
-            print(f"数据库文件是否存在: {db_path.exists()}")
-            print(f"数据库文件大小: {db_path.stat().st_size if db_path.exists() else 0} bytes")
-            
-            # 检查父目录是否存在
-            print(f"父目录是否存在: {db_path.parent.exists()}")
-            print(f"父目录权限: {oct(db_path.parent.stat().st_mode)[-3:] if db_path.parent.exists() else 'N/A'}")
-            
-            # 尝试创建数据库连接
-            connection_string = f'sqlite:///{LOCAL_DB_PATH}'
-            print(f"数据库连接字符串: {connection_string}")
-            
-            self.db_engine = create_engine(connection_string)
-            
-            # 测试连接并检查表结构
+            self.db_engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
+            # 测试连接
             with self.db_engine.connect() as conn:
-                # 检查表是否存在
-                result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()
-                print("数据库中的表:", [r[0] for r in result])
-                
-                # 检查bull_library表的结构
-                if 'bull_library' in [r[0] for r in result]:
-                    result = conn.execute(text("PRAGMA table_info(bull_library)")).fetchall()
-                    print("bull_library表结构:", result)
-                    
-                    # 检查数据量
-                    count = conn.execute(text("SELECT COUNT(*) FROM bull_library")).scalar()
-                    print(f"bull_library表中的记录数: {count}")
-                    
-                    # 检查一条示例数据
-                    try:
-                        sample = conn.execute(text("""
-                            SELECT `BULL NAAB`, `BULL REG`, 
-                                HH1, HH2, HH3, HH4, HH5, HH6, 
-                                BLAD, Chondrodysplasia, Citrullinemia, 
-                                DUMPS, `Factor XI`, CVM, Brachyspina, 
-                                Mulefoot, `Cholesterol deficiency`, MW
-                            FROM bull_library LIMIT 1
-                        """)).fetchone()
-                        if sample:
-                            # 使用zip和列名创建字典
-                            columns = ['BULL NAAB', 'BULL REG', 
-                                     'HH1', 'HH2', 'HH3', 'HH4', 'HH5', 'HH6',
-                                     'BLAD', 'Chondrodysplasia', 'Citrullinemia',
-                                     'DUMPS', 'Factor XI', 'CVM', 'Brachyspina',
-                                     'Mulefoot', 'Cholesterol deficiency', 'MW']
-                            sample_dict = dict(zip(columns, sample))
-                            print("示例数据:", sample_dict)
-                    except Exception as e:
-                        print(f"获取示例数据时出错: {e}")
-            
+                conn.execute(text("SELECT 1"))
             return True
         except Exception as e:
             logging.error(f"数据库连接失败: {e}")
-            print(f"数据库连接失败，错误信息: {str(e)}")
             return False
 
     def collect_required_bulls(self, analysis_type: str, project_path: Path) -> Set[str]:
-        """收集需要查询的公牛号"""
+        """收集需要查询的公牛号
+        
+        Args:
+            analysis_type: 分析类型 ('mated' 或 'candidate')
+            project_path: 项目路径
+            
+        Returns:
+            需要查询的公牛号集合
+        """
         required_bulls = set()
         try:
             # 获取母牛父号
@@ -207,7 +164,7 @@ class InbreedingPage(QWidget):
                 required_bulls.update(bull_df['bull_id'].dropna().astype(str).unique())
                 
             # 移除空字符串
-            required_bulls = {bull for bull in required_bulls if bull and str(bull).strip()}
+            required_bulls = {bull for bull in required_bulls if bull and bull.strip()}
             return required_bulls
             
         except Exception as e:
@@ -223,16 +180,8 @@ class InbreedingPage(QWidget):
             return bull_genes, missing_bulls
             
         try:
-            # 修改SQL语句，使用OR连接多个条件而不是IN子句
-            conditions = []
-            params = {}
-            for i, bull_id in enumerate(bull_ids):
-                naab_key = f'naab_{i}'
-                reg_key = f'reg_{i}'
-                conditions.append(f"`BULL NAAB` = :{naab_key} OR `BULL REG` = :{reg_key}")
-                params[naab_key] = bull_id
-                params[reg_key] = bull_id
-                
+            # 为每个ID创建占位符
+            placeholders = ', '.join('?' * len(bull_ids))
             query = text(f"""
                 SELECT `BULL NAAB`, `BULL REG`, 
                     HH1, HH2, HH3, HH4, HH5, HH6, 
@@ -240,38 +189,46 @@ class InbreedingPage(QWidget):
                     DUMPS, `Factor XI`, CVM, Brachyspina, 
                     Mulefoot, `Cholesterol deficiency`, MW
                 FROM bull_library 
-                WHERE {' OR '.join(conditions)}
+                WHERE `BULL NAAB` IN ({placeholders}) 
+                OR `BULL REG` IN ({placeholders})
             """)
             
             print("要查询的公牛号:", bull_ids)
-            
-            # 定义列名
-            columns = ['BULL NAAB', 'BULL REG', 
-                      'HH1', 'HH2', 'HH3', 'HH4', 'HH5', 'HH6',
-                      'BLAD', 'Chondrodysplasia', 'Citrullinemia',
-                      'DUMPS', 'Factor XI', 'CVM', 'Brachyspina',
-                      'Mulefoot', 'Cholesterol deficiency', 'MW']
+            # 每个ID都需要出现两次（一次用于NAAB，一次用于REG）
+            params = list(bull_ids) * 2
             
             # 执行查询
             with self.db_engine.connect() as conn:
-                result = conn.execute(query, params)
-                rows = result.fetchall()
-                print(f"查询到的记录数: {len(rows)}")
+                result = conn.execute(query, params).fetchall()
+                print(f"查询到的记录数: {len(result)}")
+                
+                # 打印前几条记录
+                if result:
+                    print("前3条记录示例:")
+                    for row in result[:3]:
+                        print(dict(row))
                 
                 # 处理查询结果
                 found_bulls = set()
-                for row in rows:
-                    row_dict = dict(zip(columns, row))
-                    naab = row_dict.get('BULL NAAB')
-                    reg = row_dict.get('BULL REG')
+                for row in result:
+                    row_dict = dict(row)  # 转换为普通字典
+                    naab = row_dict['BULL NAAB']
+                    reg = row_dict['BULL REG']
                     
                     # 提取基因信息
                     gene_data = {}
                     for gene in self.defect_genes:
                         value = row_dict.get(gene)
-                        # 只有明确标记为C的才是携带者，其他都是非携带
-                        value = str(value).strip().upper() if value else ''
-                        gene_data[gene] = 'C' if value == 'C' else 'F'
+                        if pd.isna(value):
+                            gene_data[gene] = 'missing data'
+                        else:
+                            value = str(value).strip().upper()
+                            if value == 'C':
+                                gene_data[gene] = 'C'
+                            elif value == 'F':
+                                gene_data[gene] = 'F'
+                            else:
+                                gene_data[gene] = 'missing data'
                     
                     # 添加到结果字典
                     if naab:
@@ -281,8 +238,12 @@ class InbreedingPage(QWidget):
                         bull_genes[str(reg)] = gene_data
                         found_bulls.add(str(reg))
                 
-                # 记录未找到的公牛
+                # 打印查询结果信息
+                print(f"找到基因信息的公牛数量: {len(found_bulls)}")
                 missing_bulls = list(bull_ids - found_bulls)
+                print(f"未找到基因信息的公牛数量: {len(missing_bulls)}")
+                if missing_bulls:
+                    print("部分未找到的公牛号:", missing_bulls[:5])
                 
                 return bull_genes, missing_bulls
                 
@@ -319,42 +280,34 @@ class InbreedingPage(QWidget):
         except Exception as e:
             logging.error(f"处理缺失公牛记录失败: {e}")
 
-    def analyze_gene_safety(self, sire_id: str, bull_id: str, bull_genes: Dict[str, Dict[str, str]]) -> Dict[str, str]:
-        """分析基因配对安全性
-        
-        Args:
-            sire_id: 母牛的父号
-            bull_id: 配种公牛号或备选公牛号
-            bull_genes: 所有公牛的基因信息字典
-            
-        Returns:
-            基因安全性分析结果
-        """
+    def analyze_gene_safety(self, cow_genes: Dict[str, str], bull_genes: Dict[str, str]) -> Dict[str, str]:
+        """分析基因配对安全性"""
         result = {}
-        
-        # 检查是否能找到相应的公牛
-        sire_found = bool(sire_id and sire_id in bull_genes)
-        bull_found = bool(bull_id and bull_id in bull_genes)
-        
         for gene in self.defect_genes:
-            if not sire_id:  # 如果父号为空
+            cow_gene = cow_genes.get(gene, 'missing data')
+            bull_gene = bull_genes.get(gene, 'missing data')
+            
+            if cow_gene == 'C' and bull_gene == 'C':
+                # 双方都是携带者
+                result[gene] = 'NO safe'
+            elif cow_gene == 'F' and bull_gene == 'F':
+                # 双方都是正常
+                result[gene] = 'safe'
+            elif (cow_gene == 'F' and bull_gene == 'C') or (cow_gene == 'C' and bull_gene == 'F'):
+                # 一方携带一方正常
+                result[gene] = 'safe'
+            elif cow_gene == 'missing data' and bull_gene == 'missing data':
+                # 双方都缺数据
+                result[gene] = 'missing data'
+            elif cow_gene == 'missing data':
+                # 母方缺数据
                 result[gene] = 'missing cow data'
-            elif not bull_id:  # 如果公牛号为空
-                result[gene] = 'missing bull data'
-            elif not sire_found:  # 如果父号在数据库中找不到
-                result[gene] = 'missing cow data'
-            elif not bull_found:  # 如果公牛号在数据库中找不到
+            elif bull_gene == 'missing data':
+                # 公方缺数据
                 result[gene] = 'missing bull data'
             else:
-                # 获取基因信息
-                sire_gene = bull_genes[sire_id][gene]
-                bull_gene = bull_genes[bull_id][gene]
-                
-                # 只有双方都是携带者时才是不安全的
-                if sire_gene == 'C' and bull_gene == 'C':
-                    result[gene] = 'NO safe'
-                else:
-                    result[gene] = 'safe'
+                # 其他情况
+                result[gene] = 'unknown'
                 
         return result
 
@@ -362,40 +315,13 @@ class InbreedingPage(QWidget):
         """分析已配公牛对"""
         try:
             # 读取配对数据
-            breeding_file = project_path / "standardized_data" / "processed_breeding_data.xlsx"
-            df = pd.read_excel(breeding_file)
-            print("配种记录列名:", df.columns.tolist())
-            
-            # 读取母牛数据以获取父号
-            cow_file = project_path / "standardized_data" / "processed_cow_data.xlsx"
-            cow_df = pd.read_excel(cow_file)
-            print("母牛数据列名:", cow_df.columns.tolist())
-            
-            # 定义列名映射
-            cow_columns_map = {
-                'cow_id': '耳号',
-                'sire': '父号'
-            }
-            breeding_columns_map = {
-                '耳号': '耳号',
-                '父号': '父号',
-                '冻精编号': '配种公牛'
-            }
-            
-            # 统一列名
-            cow_df = cow_df.rename(columns=cow_columns_map)
-            df = df.rename(columns=breeding_columns_map)
-            
-            # 创建耳号到父号的映射
-            cow_to_sire = dict(zip(cow_df['耳号'], cow_df['父号']))
+            bull_file = project_path / "standardized_data" / "processed_bull_data.xlsx"
+            df = pd.read_excel(bull_file)
             
             # 收集需要查询的公牛号
             bull_ids = set()
-            # 添加所有母牛的父号
-            bull_ids.update(cow_df['父号'].dropna().astype(str).unique())
-            # 添加所有配种公牛号
-            bull_ids.update(df['配种公牛'].dropna().astype(str).unique())
-            # 移除空字符串
+            bull_ids.update(df['父号'].dropna().astype(str).unique())
+            bull_ids.update(df['已配冻精号'].dropna().astype(str).unique())
             bull_ids = {bull for bull in bull_ids if bull and str(bull).strip()}
             
             # 查询基因信息
@@ -408,20 +334,22 @@ class InbreedingPage(QWidget):
             # 分析每个配对
             results = []
             for _, row in df.iterrows():
-                ear_id = str(row['耳号'])
-                bull_id = str(row['配种公牛']) if pd.notna(row['配种公牛']) else ''
+                cow_id = str(row['母牛号'])
+                sire_id = str(row['父号']) if pd.notna(row['父号']) else ''
+                bull_id = str(row['已配冻精号']) if pd.notna(row['已配冻精号']) else ''
                 
-                # 获取母牛的父号
-                sire_id = str(cow_to_sire.get(ear_id, '')) if pd.notna(cow_to_sire.get(ear_id)) else ''
+                # 获取基因信息
+                sire_genes = bull_genes.get(sire_id, {gene: 'missing data' for gene in self.defect_genes})
+                bull_genes_data = bull_genes.get(bull_id, {gene: 'missing data' for gene in self.defect_genes})
                 
                 # 分析安全性
-                gene_results = self.analyze_gene_safety(sire_id, bull_id, bull_genes)
+                gene_results = self.analyze_gene_safety(sire_genes, bull_genes_data)
                 
                 # 记录结果
                 results.append({
-                    '耳号': ear_id,
+                    '母牛号': cow_id,
                     '父号': sire_id,
-                    '配种公牛': bull_id,
+                    '配种公牛号': bull_id,
                     **gene_results
                 })
                 
@@ -429,10 +357,9 @@ class InbreedingPage(QWidget):
                 
         except Exception as e:
             logging.error(f"分析已配公牛对时发生错误: {e}")
-            print(f"错误详情: {e}")
             return []
 
-    def analyze_candidate_pairs(self, project_path: Path, bull_genes: Dict[str, Dict[str, str]]) -> List[Dict]:
+    def analyze_candidate_pairs(self, project_path: Path, bull_genes: Dict[str, str]) -> List[Dict]:
         """分析备选公牛对"""
         results = []
         try:
@@ -440,42 +367,30 @@ class InbreedingPage(QWidget):
             cow_df = pd.read_excel(project_path / "standardized_data" / "processed_cow_data.xlsx")
             bull_df = pd.read_excel(project_path / "standardized_data" / "processed_bull_data.xlsx")
             
-            print("母牛数据列名:", cow_df.columns.tolist())
-            print("备选公牛数据列名:", bull_df.columns.tolist())
-            
-            # 定义列名映射
-            cow_columns_map = {
-                'cow_id': '耳号',
-                'sire': '父号'
-            }
-            bull_columns_map = {
-                'bull_id': '配种公牛'
-            }
-            
-            # 统一列名
-            cow_df = cow_df.rename(columns=cow_columns_map)
-            bull_df = bull_df.rename(columns=bull_columns_map)
-            
             # 只分析在群的母牛
             cow_df = cow_df[cow_df['是否在场'] == '是']
             
             # 分析每对组合
             for _, cow_row in cow_df.iterrows():
-                ear_id = cow_row['耳号']
-                sire_id = str(cow_row['父号']) if pd.notna(cow_row['父号']) else ''
+                cow_id = cow_row['cow_id']
+                sire_id = str(cow_row['sire']) if pd.notna(cow_row['sire']) else ''
+                
+                # 获取母牛基因信息（通过父号）
+                cow_genes = bull_genes.get(sire_id, {gene: 'missing data' for gene in self.defect_genes})
                 
                 # 分析与每个备选公牛的组合
                 for _, bull_row in bull_df.iterrows():
-                    bull_id = str(bull_row['配种公牛'])
+                    bull_id = str(bull_row['bull_id'])
+                    candidate_genes = bull_genes.get(bull_id, {gene: 'missing data' for gene in self.defect_genes})
                     
                     # 分析安全性
-                    gene_results = self.analyze_gene_safety(sire_id, bull_id, bull_genes)
+                    gene_results = self.analyze_gene_safety(cow_genes, candidate_genes)
                     
                     # 记录结果
                     result = {
-                        '耳号': ear_id,
+                        '母牛号': cow_id,
                         '父号': sire_id,
-                        '配种公牛': bull_id,
+                        '备选公牛号': bull_id,
                         **gene_results
                     }
                     results.append(result)
@@ -484,7 +399,6 @@ class InbreedingPage(QWidget):
             
         except Exception as e:
             logging.error(f"分析备选公牛对时发生错误: {e}")
-            print(f"错误详情: {e}")
             return []
 
     def collect_abnormal_pairs(self, results: List[Dict]) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -496,9 +410,9 @@ class InbreedingPage(QWidget):
             for gene in self.defect_genes:
                 if result[gene] == 'NO safe':
                     abnormal_records.append({
-                        '耳号': result['耳号'],
+                        '母牛号': result['母牛号'],
                         '父号': result['父号'],
-                        '配种公牛': result['配种公牛'],
+                        '公牛号': result.get('配种公牛号', result.get('备选公牛号')),
                         '异常类型': gene,
                         '状态': 'NO safe'
                     })
@@ -517,19 +431,23 @@ class InbreedingPage(QWidget):
         return abnormal_df, stats_df
 
     def start_analysis(self, analysis_type: str):
-        """开始基因分析"""
+        """开始基因分析
+        
+        Args:
+            analysis_type: 分析类型 ('mated' 或 'candidate')
+        """
         try:
-            # 获取项目路径
+            # 1. 获取项目路径
             project_path = self.get_project_path()
             if not project_path:
                 return
                 
-            # 初始化数据库连接
+            # 2. 初始化数据库连接
             if not self.init_db_connection():
                 QMessageBox.critical(self, "错误", "无法连接到数据库")
                 return
             
-            # 创建进度对话框
+            # 3. 创建进度对话框
             progress = QProgressDialog(
                 "正在进行隐性基因分析...", 
                 "取消", 0, 100, self
@@ -538,29 +456,29 @@ class InbreedingPage(QWidget):
             progress.setWindowTitle("处理中")
             progress.setValue(0)
             
-            # 收集需要查询的公牛号
+            # 4. 收集需要查询的公牛号
             progress.setLabelText("收集公牛信息...")
             required_bulls = self.collect_required_bulls(analysis_type, project_path)
             if not required_bulls:
                 QMessageBox.warning(self, "警告", "未找到需要分析的公牛")
                 return
             
-            # 查询基因信息
+            # 5. 查询基因信息
             progress.setValue(20)
             progress.setLabelText("查询基因信息...")
             bull_genes, missing_bulls = self.query_bull_genes(required_bulls)
             
-            # 处理缺失公牛
+            # 6. 处理缺失公牛
             if missing_bulls:
                 progress.setValue(30)
                 progress.setLabelText("处理缺失公牛记录...")
                 self.process_missing_bulls(missing_bulls, analysis_type)
             
-            # 分析配对
+            # 7. 分析配对
             progress.setValue(40)
             progress.setLabelText("分析基因配对...")
             if analysis_type == 'mated':
-                results = self.analyze_mated_pairs(project_path)  # 只传入 project_path
+                results = self.analyze_mated_pairs(project_path, bull_genes)
             else:
                 results = self.analyze_candidate_pairs(project_path, bull_genes)
             
@@ -568,19 +486,19 @@ class InbreedingPage(QWidget):
                 QMessageBox.warning(self, "警告", "没有可分析的配对")
                 return
             
-            # 收集异常信息
+            # 8. 收集异常信息
             progress.setValue(70)
             progress.setLabelText("整理分析结果...")
             abnormal_df, stats_df = self.collect_abnormal_pairs(results)
             
-            # 更新显示
+            # 9. 更新显示
             progress.setValue(80)
             progress.setLabelText("更新显示...")
             self.detail_model.update_data(pd.DataFrame(results))
             self.abnormal_model.update_data(abnormal_df)
             self.stats_model.update_data(stats_df)
             
-            # 保存结果
+            # 10. 保存结果
             progress.setValue(90)
             progress.setLabelText("保存结果...")
             output_dir = project_path / "analysis_results"
