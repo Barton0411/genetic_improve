@@ -1,0 +1,175 @@
+from typing import Set, Tuple, Dict, List
+import logging
+import pandas as pd
+from sqlalchemy import text
+
+class InbreedingPage:
+    def query_bull_genes(self, bull_ids: Set[str]) -> Tuple[Dict, List[str]]:
+        """查询公牛基因信息"""
+        bull_genes = {}
+        missing_bulls = []
+        
+        if not bull_ids:
+            return bull_genes, missing_bulls
+            
+        try:
+            # 将集合转换为列表，方便处理
+            bull_ids_list = list(bull_ids)
+            print(f"要查询的公牛号: {bull_ids}")
+            
+            # 打印第一个数据库连接和表结构信息，帮助诊断
+            try:
+                with self.db_engine.connect() as conn:
+                    # 获取bull_library表的列信息
+                    columns_info = conn.execute(text("PRAGMA table_info(bull_library)")).fetchall()
+                    print("数据库bull_library表结构:")
+                    for col in columns_info:
+                        print(f"  - {col[1]} ({col[2]})")
+                    
+                    # 查询一条示例记录
+                    sample_record = conn.execute(text("SELECT * FROM bull_library LIMIT 1")).fetchone()
+                    if sample_record:
+                        print("示例记录:")
+                        for key, value in dict(sample_record).items():
+                            print(f"  - {key}: {value}")
+                    
+                    # 检查001HO02452是否存在
+                    check_query = "SELECT `BULL NAAB`, `BULL REG` FROM bull_library WHERE `BULL NAAB` = '001HO02452' OR `BULL REG` LIKE '%02452%'"
+                    check_result = conn.execute(text(check_query)).fetchall()
+                    print(f"检查001HO02452是否存在: 找到{len(check_result)}条记录")
+                    for row in check_result:
+                        print(f"  - NAAB: {row['BULL NAAB']}, REG: {row['BULL REG']}")
+            except Exception as diag_err:
+                print(f"诊断数据库时出错: {diag_err}")
+            
+            # 对公牛ID进行批处理，避免一次查询过多
+            batch_size = 20
+            for i in range(0, len(bull_ids_list), batch_size):
+                batch = bull_ids_list[i:i+batch_size]
+                
+                # 构建更灵活的查询条件
+                where_conditions = []
+                for bull_id in batch:
+                    bull_id_str = str(bull_id).strip()
+                    # 精确匹配
+                    where_conditions.append(f"`BULL NAAB` = '{bull_id_str}'")
+                    where_conditions.append(f"`BULL REG` = '{bull_id_str}'")
+                    
+                    # 提取数字部分进行匹配 (适用于格式不完全一致的情况)
+                    # 例如 001HO02452 → 提取 02452
+                    import re
+                    number_match = re.search(r'(\d+)$', bull_id_str)
+                    if number_match:
+                        number_part = number_match.group(1)
+                        if len(number_part) >= 4:  # 只使用足够长的数字部分
+                            where_conditions.append(f"`BULL NAAB` LIKE '%{number_part}%'")
+                            where_conditions.append(f"`BULL REG` LIKE '%{number_part}%'")
+                
+                query = f"""
+                    SELECT `BULL NAAB`, `BULL REG`, 
+                        HH1, HH2, HH3, HH4, HH5, HH6, 
+                        BLAD, Chondrodysplasia, Citrullinemia, 
+                        DUMPS, `Factor XI`, CVM, Brachyspina, 
+                        Mulefoot, `Cholesterol deficiency Deficiency Carrier` as `Cholesterol deficiency`, MW
+                    FROM bull_library 
+                    WHERE {" OR ".join(where_conditions)}
+                """
+                
+                # 执行查询
+                try:
+                    with self.db_engine.connect() as conn:
+                        print(f"执行批次 {i//batch_size + 1} 查询...")
+                        result = conn.execute(text(query)).fetchall()
+                        print(f"批次 {i//batch_size + 1}: 查询到 {len(result)} 条记录")
+                        
+                        # 处理查询结果
+                        batch_found_bulls = set()
+                        for row in result:
+                            row_dict = dict(row)  # 转换为普通字典
+                            naab = row_dict['BULL NAAB']
+                            reg = row_dict['BULL REG']
+                            
+                            print(f"找到匹配: NAAB={naab}, REG={reg}")
+                            
+                            # 提取基因信息
+                            gene_data = {}
+                            for gene in self.defect_genes:
+                                # 对于Cholesterol deficiency特殊处理
+                                gene_key = gene
+                                if gene == 'Cholesterol deficiency':
+                                    gene_key = 'Cholesterol deficiency'
+                                
+                                value = row_dict.get(gene_key)
+                                if pd.isna(value):
+                                    # 数据库中存在此公牛但基因值为NULL，表示不携带（F）
+                                    gene_data[gene] = 'F'
+                                else:
+                                    value = str(value).strip().upper()
+                                    if value == 'C':
+                                        gene_data[gene] = 'C'
+                                    elif value == 'F':
+                                        gene_data[gene] = 'F'
+                                    else:
+                                        gene_data[gene] = 'missing data'
+                            
+                            # 为这一行的NAAB和REG添加基因信息
+                            if naab:
+                                bull_genes[str(naab)] = gene_data
+                            if reg:
+                                bull_genes[str(reg)] = gene_data
+                                
+                            # 为每个匹配的批次中的ID添加基因信息
+                            for bull_id in batch:
+                                bull_id_str = str(bull_id).strip()
+                                
+                                # 精确匹配
+                                if bull_id_str == str(naab) or bull_id_str == str(reg):
+                                    bull_genes[bull_id_str] = gene_data
+                                    batch_found_bulls.add(bull_id_str)
+                                    continue
+                                
+                                # 数字末尾匹配
+                                number_match = re.search(r'(\d+)$', bull_id_str)
+                                if number_match:
+                                    number_part = number_match.group(1)
+                                    if (len(number_part) >= 4 and 
+                                        (str(naab) and number_part in str(naab) or 
+                                         str(reg) and number_part in str(reg))):
+                                        bull_genes[bull_id_str] = gene_data
+                                        batch_found_bulls.add(bull_id_str)
+                                        continue
+                        
+                        # 打印未在此批次中找到的公牛
+                        batch_missing = set(str(b).strip() for b in batch) - batch_found_bulls
+                        if batch_missing:
+                            print(f"此批次中未找到: {batch_missing}")
+                
+                except Exception as e:
+                    print(f"执行批次 {i//batch_size + 1} 查询失败: {e}")
+                    print(f"SQL查询: {query}")
+            
+            # 找出哪些ID没有查询到
+            found_bulls = set(bull_genes.keys())
+            missing_bulls = list(bull_ids - found_bulls)
+            
+            print(f"查询到{len(bull_genes)}个公牛的基因信息，缺失{len(missing_bulls)}个")
+            if missing_bulls:
+                print("部分未找到的公牛号:", missing_bulls[:5])
+            
+            # 添加详细诊断信息
+            print("\n======= 基因数据样本 =======")
+            sample_size = min(3, len(bull_genes))
+            sample_bulls = list(bull_genes.keys())[:sample_size]
+            for bull_id in sample_bulls:
+                print(f"公牛 {bull_id} 基因数据:")
+                for gene, value in bull_genes[bull_id].items():
+                    print(f"  - {gene}: {value}")
+            print("========================\n")
+            
+            return bull_genes, missing_bulls
+                
+        except Exception as e:
+            logging.error(f"查询公牛基因信息失败: {e}")
+            print(f"查询失败，错误信息: {e}")
+            print(f"要查询的公牛ID: {bull_ids}")
+            return {}, list(bull_ids) 

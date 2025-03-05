@@ -21,8 +21,14 @@ class InbreedingDetailModel(QAbstractTableModel):
             '耳号': '耳号',
             '父号': '父号',
             '配种公牛': '配种公牛',
-            **{gene: gene for gene in self.defect_genes}
+            '近交系数': '近交系数',
         }
+        
+        # 添加基因列和原始值列
+        for gene in self.defect_genes:
+            self.column_names[gene] = gene
+            self.column_names[f"{gene}(母)"] = f"{gene}(母)"
+            self.column_names[f"{gene}(公)"] = f"{gene}(公)"
         
         # 定义状态颜色映射
         self.status_colors = {
