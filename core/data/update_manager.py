@@ -11,6 +11,9 @@ import pandas as pd
 import urllib.parse
 from typing import Callable, Optional
 
+# 导入系谱库管理模块
+from core.inbreeding.pedigree_database import load_or_build_pedigree, update_pedigree, PedigreeDatabase
+
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -47,6 +50,7 @@ PROJECT_ROOT = get_project_root()
 LOCAL_DB_DIR = PROJECT_ROOT  # 直接使用项目根目录
 LOCAL_DB_PATH = LOCAL_DB_DIR / 'local_bull_library.db'  # 本地数据库文件路径
 LOCAL_DB_URI = f'sqlite:///{LOCAL_DB_PATH}'
+PEDIGREE_CACHE_PATH = LOCAL_DB_DIR / 'pedigree_cache.pkl'  # 系谱库缓存路径
 
 logging.info(f"本地数据库路径: {LOCAL_DB_PATH}")
 
@@ -71,6 +75,44 @@ db_version_table = Table(
 # 设置 SQLAlchemy 引擎用于云端 MySQL
 CLOUD_DB_URI = f"mysql+pymysql://{CLOUD_DB_USER}:{CLOUD_DB_PASSWORD}@{CLOUD_DB_HOST}:{CLOUD_DB_PORT}/{CLOUD_DB_NAME}?charset=utf8mb4"
 cloud_engine = create_engine(CLOUD_DB_URI, echo=False)
+
+# 全局系谱库管理器实例
+pedigree_db_instance = None
+
+def get_pedigree_db(force_update=False, progress_callback=None):
+    """
+    获取系谱库管理器实例，如果不存在则创建
+    
+    Args:
+        force_update: 是否强制更新系谱库
+        progress_callback: 进度回调函数
+        
+    Returns:
+        PedigreeDatabase: 系谱库管理器实例
+    """
+    global pedigree_db_instance
+    
+    try:
+        if force_update or pedigree_db_instance is None:
+            if force_update:
+                logging.info("强制更新系谱库")
+                pedigree_db_instance = update_pedigree(
+                    db_path=LOCAL_DB_PATH,
+                    pedigree_cache_path=PEDIGREE_CACHE_PATH,
+                    progress_callback=progress_callback
+                )
+            else:
+                logging.info("加载或构建系谱库")
+                pedigree_db_instance = load_or_build_pedigree(
+                    db_path=LOCAL_DB_PATH,
+                    pedigree_cache_path=PEDIGREE_CACHE_PATH,
+                    progress_callback=progress_callback
+                )
+                
+        return pedigree_db_instance
+    except Exception as e:
+        logging.error(f"获取系谱库失败: {e}")
+        raise
 
 def initialize_local_db():
     """
@@ -236,10 +278,10 @@ def update_local_bull_library(df: pd.DataFrame):
         logging.error(f"更新本地 SQLite 数据库的 bull_library 表失败: {e}")
         raise
 
-
 def check_and_update_database(progress_callback=None):
     """
     检查本地和云端数据库的版本号，如果不一致，则从云端更新本地数据库。
+    成功更新后，同时更新系谱库。
     """
     try:
         if progress_callback:
@@ -299,21 +341,39 @@ def check_and_update_database(progress_callback=None):
             update_local_bull_library(cloud_bull_library_df)
 
             if progress_callback:
-                progress_callback(80, "更新本地数据库版本号...")
+                progress_callback(70, "更新本地数据库版本号...")
 
             # 更新本地数据库的版本号
             set_local_db_version(cloud_version)
             print(f"本地数据库已更新到版本: {cloud_version}")
             logging.info(f"本地数据库已更新到版本: {cloud_version}")
-
+            
+            # 数据库更新后，更新系谱库
             if progress_callback:
-                progress_callback(100, "本地数据库已更新到最新版本。")
+                progress_callback(75, "开始更新系谱库...")
+            
+            # 强制更新系谱库
+            get_pedigree_db(force_update=True, progress_callback=lambda p, m: progress_callback(75 + int(p * 0.25), m) if progress_callback else None)
+            
+            if progress_callback:
+                progress_callback(100, "本地数据库和系谱库已更新到最新版本。")
         else:
             print("本地数据库版本与云端数据库版本一致，无需更新。")
             logging.info("本地数据库版本与云端数据库版本一致，无需更新。")
-
-            if progress_callback:
-                progress_callback(100, "本地数据库版本与云端数据库版本一致，无需更新。")
+            
+            # 检查系谱库是否存在，不存在则创建
+            if not PEDIGREE_CACHE_PATH.exists():
+                if progress_callback:
+                    progress_callback(60, "系谱库缓存不存在，开始构建系谱库...")
+                
+                # 加载或构建系谱库
+                get_pedigree_db(progress_callback=lambda p, m: progress_callback(60 + int(p * 0.4), m) if progress_callback else None)
+                
+                if progress_callback:
+                    progress_callback(100, "系谱库已构建完成。")
+            else:
+                if progress_callback:
+                    progress_callback(100, "本地数据库版本与云端数据库版本一致，无需更新。")
     except Exception as e:
         logging.error(f"检查和更新数据库时发生错误: {e}")
         if progress_callback:
@@ -373,3 +433,8 @@ if __name__ == "__main__":
     
     # 执行版本检查和更新
     check_and_update_database()
+    
+    # 获取并打印系谱库信息
+    pedigree_db = get_pedigree_db()
+    print(f"系谱库包含动物数量: {len(pedigree_db.pedigree)}")
+    print(f"系谱库包含虚拟节点数量: {len(pedigree_db.virtual_nodes)}")
