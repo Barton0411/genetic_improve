@@ -1,0 +1,12 @@
+animal_id,sire_id,dam_id,type
+Cow001,Bull001,Cow006,cow
+Cow006,Bull005,Cow010,cow
+Cow010,Bull009,0,cow
+Cow002,001HO12345,Cow007,cow
+Cow007,Bull006,0,cow
+Cow003,Bull003,0,cow
+Cow004,Bull004,Cow008,cow
+Cow008,Bull007,Cow011,cow
+Cow011,Bull010,0,cow
+Cow005,0,Cow009,cow
+Cow009,Bull008,0,cow

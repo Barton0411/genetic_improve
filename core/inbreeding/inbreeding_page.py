@@ -19,7 +19,7 @@ from typing import List, Dict, Tuple, Set, Optional
 from .models import InbreedingDetailModel, AbnormalDetailModel, StatisticsModel
 from core.data.update_manager import (
     CLOUD_DB_HOST, CLOUD_DB_PORT, CLOUD_DB_USER, 
-    CLOUD_DB_PASSWORD, CLOUD_DB_NAME, LOCAL_DB_PATH
+    CLOUD_DB_PASSWORD, CLOUD_DB_NAME, LOCAL_DB_PATH, get_pedigree_db
 )
 
 class PedigreeDialog(QDialog):
@@ -691,11 +691,53 @@ class InbreedingPage(QWidget):
         QApplication.processEvents()
         
         try:
+            # 获取系谱库实例并构建包含母牛数据的完整系谱库
+            from core.data.update_manager import get_pedigree_db
+            from pathlib import Path
+            
+            # 更新进度
+            progress.setValue(5)
+            progress.setLabelText("获取系谱库...")
+            QApplication.processEvents()
+            
+            # 获取系谱库实例
+            pedigree_db = get_pedigree_db()
+            
+            # 获取母牛数据文件路径
+            cow_file = project_path / "standardized_data" / "processed_cow_data.xlsx"
+            
+            # 更新进度
+            progress.setValue(10)
+            progress.setLabelText("构建母牛系谱库...")
+            QApplication.processEvents()
+            
+            # 构建母牛系谱库并合并
+            def update_progress(value, message):
+                if isinstance(value, int):
+                    # 将系谱库构建进度(0-100)映射到总进度的10-25区间
+                    mapped_value = 10 + int(value * 0.15)
+                    progress.setValue(mapped_value)
+                progress.setLabelText(message)
+                QApplication.processEvents()
+                return not progress.wasCanceled()
+            
+            # 检查母牛数据文件是否存在
+            if not cow_file.exists():
+                print(f"母牛数据文件不存在: {cow_file}")
+                QMessageBox.warning(self, "错误", f"母牛数据文件不存在: {cow_file}\n请确保已上传并处理母牛数据。")
+                progress.close()
+                return
+                
+            # 构建母牛系谱库
+            print("开始构建母牛系谱库...")
+            pedigree_db.build_cow_pedigree(cow_file, update_progress)
+            print("母牛系谱库构建完成")
+                
             # 收集所需的公牛号
             print("开始收集所需的公牛号...")
             required_bulls = self.collect_required_bulls(analysis_type, project_path)
             print(f"收集到{len(required_bulls)}个公牛号")
-            progress.setValue(10)
+            progress.setValue(30)
             QApplication.processEvents()
             
             if progress.wasCanceled():
@@ -706,7 +748,7 @@ class InbreedingPage(QWidget):
             print("开始查询公牛基因信息...")
             bull_genes, missing_bulls = self.query_bull_genes(required_bulls)
             print(f"查询到{len(bull_genes)}个公牛的基因信息，有{len(missing_bulls)}个公牛未找到")
-            progress.setValue(30)
+            progress.setValue(40)
             QApplication.processEvents()
             
             if progress.wasCanceled():
