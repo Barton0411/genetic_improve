@@ -195,9 +195,9 @@ class PedigreeDatabase:
             self.pedigree = {}
             self.virtual_nodes = set()
             
-            # 查询所有公牛记录
+            # 查询所有公牛记录，增加GIB字段
             query = """
-            SELECT `BULL REG`, `SIRE REG`, `MGS REG`, `MMGS REG` 
+            SELECT `BULL REG`, `SIRE REG`, `MGS REG`, `MMGS REG`, `GIB` 
             FROM bull_library 
             WHERE `BULL REG` IS NOT NULL
             """
@@ -217,6 +217,21 @@ class PedigreeDatabase:
                 mgs_reg = str(row['MGS REG']).strip() if pd.notna(row['MGS REG']) else None
                 mmgs_reg = str(row['MMGS REG']).strip() if pd.notna(row['MMGS REG']) else None
                 
+                # 处理GIB值（百分比格式）
+                gib_value = None
+                if pd.notna(row['GIB']):
+                    try:
+                        gib_percentage = float(row['GIB'])
+                        # 将百分比转换为小数形式 (70 -> 0.7)
+                        gib_value = gib_percentage / 100.0
+                        # 验证值是否在合理范围内
+                        if gib_value < 0 or gib_value > 1:
+                            logging.warning(f"公牛 {bull_reg} 的GIB值 {gib_percentage}% 超出正常范围(0-100)，将不使用此值")
+                            gib_value = None
+                    except (ValueError, TypeError):
+                        logging.warning(f"公牛 {bull_reg} 的GIB值 '{row['GIB']}' 无法转换为数值，将不使用此值")
+                        gib_value = None
+                
                 if not bull_reg:
                     continue
                 
@@ -224,18 +239,20 @@ class PedigreeDatabase:
                 virtual_dam_id = f"{bull_reg}_dam"
                 virtual_mgd_id = f"{bull_reg}_mgd"
                 
-                # 添加公牛本身
+                # 添加公牛本身，增加gib字段
                 self.pedigree[bull_reg] = {
                     'sire': sire_reg if sire_reg else "",
                     'dam': virtual_dam_id,
-                    'type': 'bull'
+                    'type': 'bull',
+                    'gib': gib_value  # 添加GIB值
                 }
                 
                 # 添加虚拟母亲
                 self.pedigree[virtual_dam_id] = {
                     'sire': mgs_reg if mgs_reg else "",
                     'dam': virtual_mgd_id,
-                    'type': 'virtual_cow'
+                    'type': 'virtual_cow',
+                    'gib': None  # 虚拟节点没有GIB值
                 }
                 self.virtual_nodes.add(virtual_dam_id)
                 
@@ -243,7 +260,8 @@ class PedigreeDatabase:
                 self.pedigree[virtual_mgd_id] = {
                     'sire': mmgs_reg if mmgs_reg else "",
                     'dam': "",
-                    'type': 'virtual_cow'
+                    'type': 'virtual_cow',
+                    'gib': None  # 虚拟节点没有GIB值
                 }
                 self.virtual_nodes.add(virtual_mgd_id)
                 
@@ -263,17 +281,23 @@ class PedigreeDatabase:
     
     def export_pedigree_file(self, output_path: Path):
         """
-        导出系谱文件，格式为: animal_id sire_id dam_id
+        导出系谱文件，格式为: animal_id sire_id dam_id [gib]
         
         Args:
             output_path: 输出文件路径
         """
         try:
             with open(output_path, 'w') as f:
+                # 添加表头
+                f.write("animal_id sire_id dam_id gib type\n")
+                
                 for animal_id, info in self.pedigree.items():
                     sire = info['sire'] if info['sire'] else "0"
                     dam = info['dam'] if info['dam'] else "0"
-                    f.write(f"{animal_id} {sire} {dam}\n")
+                    gib = f"{info.get('gib', 'NA')}" if info.get('gib') is not None else "NA"
+                    animal_type = info.get('type', 'unknown')
+                    
+                    f.write(f"{animal_id} {sire} {dam} {gib} {animal_type}\n")
             
             logging.info(f"系谱文件已导出到: {output_path}")
         except Exception as e:
@@ -477,7 +501,8 @@ class PedigreeDatabase:
                 cow_pedigree[cow_id] = {
                     'sire': sire_id,
                     'dam': dam_id,
-                    'type': 'cow'
+                    'type': 'cow',
+                    'gib': None  # 母牛通常没有GIB值
                 }
                 
                 # 处理母牛的母亲（如果母亲不在现有数据中）
@@ -488,7 +513,8 @@ class PedigreeDatabase:
                     cow_pedigree[dam_id] = {
                         'sire': mgs_id,
                         'dam': mgd_id,
-                        'type': 'cow'
+                        'type': 'cow',
+                        'gib': None  # 母牛通常没有GIB值
                     }
                     
                     # 处理外祖母（如果外祖母不在现有数据中）
@@ -497,8 +523,9 @@ class PedigreeDatabase:
                         
                         cow_pedigree[mgd_id] = {
                             'sire': mmgs_id,
-                            'dam': "",  # 通常不会有这一代的信息
-                            'type': 'cow'
+                            'dam': "",
+                            'type': 'cow',
+                            'gib': None  # 母牛通常没有GIB值
                         }
             
             logging.info(f"母牛系谱处理完成，共构建了{len(cow_pedigree)}个节点")
@@ -554,14 +581,19 @@ class PedigreeDatabase:
                 # 情况1：ID已存在于公牛系谱且不是虚拟节点
                 if animal_id in self.pedigree and animal_id not in self.virtual_nodes:
                     # 公牛数据优先，不修改
+                    # 但如果原来没有GIB值而新数据有，则更新GIB
+                    if self.pedigree[animal_id].get('gib') is None and info.get('gib') is not None:
+                        self.pedigree[animal_id]['gib'] = info['gib']
                     stats['preserved'] += 1
                     continue
                     
                 # 情况2：ID是虚拟节点，用实际信息替换
                 elif animal_id in self.virtual_nodes:
-                    # 更新父母信息，但保留虚拟节点标记
+                    # 更新父母信息和GIB值，但保留虚拟节点标记
                     self.pedigree[animal_id]['sire'] = info['sire']
                     self.pedigree[animal_id]['dam'] = info['dam']
+                    if info.get('gib') is not None:
+                        self.pedigree[animal_id]['gib'] = info['gib']
                     stats['replaced_virtual'] += 1
                     
                 # 情况3：全新的ID，直接添加
@@ -585,12 +617,13 @@ class PedigreeDatabase:
         """
         try:
             with open(output_path, 'w') as f:
-                f.write("animal_id,sire_id,dam_id,type\n")  # 添加表头
+                f.write("animal_id,sire_id,dam_id,type,gib\n")  # 添加表头
                 for animal_id, info in cow_pedigree.items():
                     sire = info['sire'] if info['sire'] else "0"
                     dam = info['dam'] if info['dam'] else "0"
                     animal_type = info['type']
-                    f.write(f"{animal_id},{sire},{dam},{animal_type}\n")
+                    gib = f"{info.get('gib', 'NA')}" if info.get('gib') is not None else "NA"
+                    f.write(f"{animal_id},{sire},{dam},{animal_type},{gib}\n")
             
             logging.info(f"母牛系谱文件已导出到: {output_path}")
         except Exception as e:
