@@ -154,8 +154,8 @@ class InbreedingDetailModel(QAbstractTableModel):
         if '后代近交系数' in df.columns:
             display_columns.append('后代近交系数')
             
-        # 添加基因列
-        for gene in ['HH1', 'HH2', 'HH3', 'HH4', 'HH5', 'HH6', 'CVM']:
+        # 添加所有隐性基因列
+        for gene in self.defect_genes:
             if gene in df.columns:
                 display_columns.append(gene)
                 
@@ -224,9 +224,19 @@ class AbnormalDetailModel(QAbstractTableModel):
             return str(value)
             
         elif role == Qt.ItemDataRole.BackgroundRole:
-            # 如果是NO safe状态，显示红色背景
-            if index.column() == list(self.column_names.keys()).index('状态'):
-                value = self.df.iloc[index.row(), index.column()]
+            # 获取异常类型列的索引
+            type_index = list(self.column_names.keys()).index('异常类型')
+            status_index = list(self.column_names.keys()).index('状态')
+            
+            abnormal_type = self.df.iloc[index.row(), type_index]
+            
+            # 根据异常类型设置不同的背景色
+            if abnormal_type == '近交系数过高':
+                # 为近交系数过高的行设置橙色背景
+                return QBrush(QColor(255, 165, 0))  # 橙色
+            elif index.column() == status_index:
+                # 对于其他类型的异常，如果状态为NO safe，则显示红色
+                value = self.df.iloc[index.row(), status_index]
                 if value == 'NO safe':
                     return QBrush(Qt.GlobalColor.red)
                     

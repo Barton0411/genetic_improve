@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QTableView, QFrame, QSplitter, QMessageBox, QApplication,
     QProgressDialog, QMainWindow, QDialog, QTabWidget, QComboBox, QListWidget, QTextEdit, QHeaderView, QMenu
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QBrush, QColor, QStandardItemModel, QStandardItem
 import pandas as pd
 import logging
@@ -13,9 +13,11 @@ import datetime
 import networkx as nx
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 from typing import List, Dict, Tuple, Set, Optional
 import math
+import time
 
 from .models import InbreedingDetailModel, AbnormalDetailModel, StatisticsModel
 from core.data.update_manager import (
@@ -248,7 +250,7 @@ class PedigreeDialog(QDialog):
             
             # 节点尺寸和间距
             node_width = 5.0   # 进一步增加方框宽度
-            node_height = 2.8   # 进一步增加方框高度
+            node_height = 3.5   # 增加方框高度
             h_spacing = 6.0    # 增加水平间距
             min_spacing = 0.6   # 增加最小垂直间距
             
@@ -483,10 +485,23 @@ class PedigreeDialog(QDialog):
                 display_text = str(node_id)
                 naab_text = str(naab) if naab else ""
                 
-                # 在方框中显示REG号（字号为NAAB的2/3）
-                reg_fontsize = 6 if gen <= 2 else 5
+                # 设置文本大小
+                naab_fontsize = 9 if gen <= 2 else 7.5  # NAAB号字体大小
+                reg_fontsize = 6 if gen <= 2 else 5     # REG号字体大小
+                
+                # 计算文本垂直位置
+                # 框高为node_height，框的中心点为y
+                # 框的上边界为y+node_height/2，下边界为y-node_height/2
+                
+                # REG位于下部，从框下边界向上17.5%处，即下边界+0.175*node_height
+                reg_y_position = y - node_height/2 + node_height * 0.175
+                
+                # NAAB位于上部，从框上边界向下32.5%处，即上边界-0.325*node_height
+                naab_y_position = y + node_height/2 - node_height * 0.325
+                
+                # 在方框中显示REG号（下部）
                 ax.text(
-                    x, y - node_height/4,  # 增加垂直间距
+                    x, reg_y_position,  # REG号位置，框的下部
                     display_text,
                     family='SimHei',
                     ha='center',
@@ -496,11 +511,10 @@ class PedigreeDialog(QDialog):
                     zorder=3
                 )
                 
-                # 在方框中显示NAAB号（加粗显示）
+                # 在方框中显示NAAB号（上部）（加粗显示）
                 if naab and node_id not in ["预期后代", "父亲未知", "母亲未知"]:
-                    naab_fontsize = 9 if gen <= 2 else 7.5
                     ax.text(
-                        x, y + node_height/4,  # 增加垂直间距
+                        x, naab_y_position,  # NAAB号位置，框的上部
                         naab_text,
                         family='SimHei',
                         ha='center',
@@ -557,7 +571,7 @@ class PedigreeDialog(QDialog):
                 self.canvas.draw()
             
             # 添加滚轮事件
-            self.canvas.mpl_connect('scroll_event', on_scroll)
+            self.canvas.mpl_connect('scroll_event', lambda event: on_scroll(event))
             
             # 添加鼠标平移功能
             self.pan_enabled = False
@@ -575,30 +589,30 @@ class PedigreeDialog(QDialog):
                     self.pan_enabled = False
                     self.pan_start_xy = None
             
-            def on_motion(event):
+            def on_motion(self, event):
                 """鼠标移动事件处理"""
                 if self.pan_enabled and self.pan_start_xy is not None:
-                    # 计算移动距离
-                    if event.xdata is None or event.ydata is None or self.pan_start_xy[0] is None or self.pan_start_xy[1] is None:
+                    ax = self.figure.get_axes()[0]
+                    
+                    if event.xdata is None or event.ydata is None:
                         return
                         
                     dx = event.xdata - self.pan_start_xy[0]
                     dy = event.ydata - self.pan_start_xy[1]
                     
-                    # 更新坐标轴范围
-                    ax.set_xlim(ax.get_xlim() - dx)
-                    ax.set_ylim(ax.get_ylim() - dy)
+                    cur_xlim = ax.get_xlim()
+                    cur_ylim = ax.get_ylim()
                     
-                    # 更新起始点
+                    ax.set_xlim([cur_xlim[0] - dx, cur_xlim[1] - dx])
+                    ax.set_ylim([cur_ylim[0] - dy, cur_ylim[1] - dy])
+                    
                     self.pan_start_xy = (event.xdata, event.ydata)
-                    
-                    # 重新绘制图表
                     self.canvas.draw()
             
             # 添加鼠标事件监听
             self.canvas.mpl_connect('button_press_event', on_press)
             self.canvas.mpl_connect('button_release_event', on_release)
-            self.canvas.mpl_connect('motion_notify_event', on_motion)
+            self.canvas.mpl_connect('motion_notify_event', lambda event: on_motion(self, event))
             
             # 创建图例
             legend_elements = [
@@ -610,21 +624,34 @@ class PedigreeDialog(QDialog):
             # 添加共同祖先颜色到图例
             for i, (ancestor, color) in enumerate(common_ancestor_colors.items()):
                 if i < 4:  # 最多显示4个共同祖先在图例中
-                    display_name = ancestor
-                    if len(ancestor) > 12:  # 增加显示长度
-                        # 保留末尾部分的REG号，这通常是最有识别度的部分
-                        display_name = "..." + ancestor[-10:]
+                    # 获取NAAB号
+                    naab = naab_dict.get(ancestor, "")
+                    # 显示完整的REG和NAAB号
+                    if naab:
+                        display_name = f"{ancestor} (NAAB: {naab})"
+                    else:
+                        display_name = ancestor
+                    
                     legend_elements.append(
                         plt.Rectangle((0, 0), 1, 1, facecolor=color, edgecolor='green', label=f'共同祖先: {display_name}')
                     )
             
-            # 添加图例到图表右上角
-            ax.legend(handles=legend_elements, loc='upper right', fontsize='x-small')
+            # 添加图例到图表右上角 - 使用固定大小，不随缩放变化
+            legend_font_size = 9  # 使用固定大小的图例字体
+            legend = ax.legend(handles=legend_elements, loc='upper right', prop={'size': legend_font_size})
             
-            # 更新后代近交系数标签（如果存在）
-            if hasattr(self, 'offspring_label'):
-                offspring_inbreeding = self.offspring_details.get('system', 0.0) if self.offspring_details else 0.0
-                self.offspring_label.setText(f"潜在后代近交系数: {offspring_inbreeding:.2%}")
+            # 不将图例文本添加到text_elements，这样它们就不会随缩放变化大小
+            # 移除这部分代码:
+            # for text in legend.get_texts():
+            #    self.text_elements.append({
+            #        'text_obj': text,
+            #        'base_size': self.node_height*2.7,
+            #        'type': 'legend'
+            #    })
+            
+            # 连接缩放事件
+            # self.cid_xlim = ax.callbacks.connect('xlim_changed', self.on_lim_change)
+            # self.cid_ylim = ax.callbacks.connect('ylim_changed', self.on_lim_change)
             
         except Exception as e:
             logging.error(f"绘制血缘关系图时出错: {str(e)}")
@@ -695,6 +722,11 @@ class PedigreeDialog(QDialog):
             
         return naab_dict
 
+    # 添加一个空的on_lim_change方法，以防止报错
+    def on_lim_change(self, event=None):
+        """防止报错的空方法"""
+        pass
+
 # 添加最大化对话框类
 class MaximizedPedigreeDialog(QDialog):
     """最大化血缘图对话框"""
@@ -710,11 +742,60 @@ class MaximizedPedigreeDialog(QDialog):
         self.bull_id = bull_id
         self.offspring_details = offspring_details
         
+        # 血统图属性
+        self.base_node_height = 7.0  # 基础节点高度，用于计算字体大小
+        
+        # 缩放监听相关
+        self.text_elements = []  # 存储文本元素引用
+        self.base_xlim = None    # 初始x轴范围
+        self.base_ylim = None    # 初始y轴范围
+        self.last_update_time = 0  # 上次更新时间
+        self.update_delay = 50   # 更新延迟(毫秒)
+        self.update_pending = False  # 是否有待处理的更新
+        
         layout = QVBoxLayout(self)
         
         # 创建新的图形和画布
         self.figure = Figure(figsize=(12, 10))  # 设置合适的画布大小
         self.canvas = FigureCanvas(self.figure)
+        
+        # 添加简化的功能按钮
+        btn_layout = QHBoxLayout()
+        
+        # 放大按钮
+        zoom_in_btn = QPushButton("+")
+        zoom_in_btn.setToolTip("放大")
+        zoom_in_btn.setFixedSize(40, 40)
+        zoom_in_btn.setStyleSheet("font-size: 18px; font-weight: bold;")
+        zoom_in_btn.clicked.connect(self.zoom_in)
+        
+        # 缩小按钮
+        zoom_out_btn = QPushButton("-")
+        zoom_out_btn.setToolTip("缩小")
+        zoom_out_btn.setFixedSize(40, 40)
+        zoom_out_btn.setStyleSheet("font-size: 18px; font-weight: bold;")
+        zoom_out_btn.clicked.connect(self.zoom_out)
+        
+        # 保存按钮
+        save_btn = QPushButton("保存图片")
+        save_btn.setToolTip("保存血缘图为图片文件")
+        save_btn.clicked.connect(self.save_figure)
+        
+        # 添加手型拖动按钮（切换模式）
+        self.pan_btn = QPushButton("👋")
+        self.pan_btn.setToolTip("拖动视图")
+        self.pan_btn.setFixedSize(40, 40)
+        self.pan_btn.setStyleSheet("font-size: 18px;")
+        self.pan_btn.setCheckable(True)
+        self.pan_btn.clicked.connect(self.toggle_pan_mode)
+        
+        btn_layout.addWidget(zoom_in_btn)
+        btn_layout.addWidget(zoom_out_btn)
+        btn_layout.addWidget(self.pan_btn)
+        btn_layout.addWidget(save_btn)
+        btn_layout.addStretch()
+        
+        layout.addLayout(btn_layout)
         layout.addWidget(self.canvas)
         
         # 添加关闭按钮
@@ -722,30 +803,66 @@ class MaximizedPedigreeDialog(QDialog):
         close_button.clicked.connect(self.on_close)
         layout.addWidget(close_button)
         
-        # 启用互动功能
-        self.canvas.setFocusPolicy(Qt.FocusPolicy.WheelFocus)
-        self.canvas.setMouseTracking(True)
-        
-        # 连接事件处理函数
-        self.canvas.mpl_connect('scroll_event', self.on_scroll)
-        self.canvas.mpl_connect('button_press_event', self.on_press)
-        self.canvas.mpl_connect('button_release_event', self.on_release)
-        self.canvas.mpl_connect('motion_notify_event', self.on_motion)
-        
         # 添加右键菜单
         self.canvas.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.canvas.customContextMenuRequested.connect(self.show_context_menu)
         
-        # 平移和缩放状态
-        self.pan_enabled = False
-        self.pan_start_xy = None
-        self.current_scale = 1.0
-        self.zoom_factor = 1.2
-        self.min_zoom = 0.1
-        self.max_zoom = 5.0
+        # 启用matplotlib的拖拽功能
+        self.pan_cid = None  # 保存连接ID用于启用/禁用拖拽
         
         # 绘制完整的6代系谱图
         self.draw_pedigree()
+        
+    def toggle_pan_mode(self):
+        """切换拖动模式"""
+        if self.pan_btn.isChecked():
+            # 启用拖动模式
+            self.canvas.setCursor(Qt.CursorShape.OpenHandCursor)
+            if not self.pan_cid:
+                self.pan_cid = self.canvas.mpl_connect('button_press_event', self.on_press)
+                self.canvas.mpl_connect('button_release_event', self.on_release)
+                self.canvas.mpl_connect('motion_notify_event', self.on_motion)
+        else:
+            # 禁用拖动模式
+            self.canvas.setCursor(Qt.CursorShape.ArrowCursor)
+            if self.pan_cid:
+                self.canvas.mpl_disconnect(self.pan_cid)
+                self.pan_cid = None
+    
+    def on_press(self, event):
+        """鼠标按下事件处理"""
+        if event.button == 1:  # 左键
+            self.pan_start = (event.xdata, event.ydata)
+            self.canvas.setCursor(Qt.CursorShape.ClosedHandCursor)  # 改为抓取状态的手型
+    
+    def on_release(self, event):
+        """鼠标释放事件处理"""
+        if event.button == 1:  # 左键
+            self.pan_start = None
+            if self.pan_btn.isChecked():
+                self.canvas.setCursor(Qt.CursorShape.OpenHandCursor)  # 恢复为打开状态的手型
+    
+    def on_motion(self, event):
+        """鼠标移动事件处理"""
+        if self.pan_start and event.xdata and event.ydata:
+            # 计算移动距离
+            dx = self.pan_start[0] - event.xdata
+            dy = self.pan_start[1] - event.ydata
+            
+            # 获取当前视图范围
+            ax = self.figure.gca()
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            
+            # 移动视图
+            ax.set_xlim(xlim[0] + dx, xlim[1] + dx)
+            ax.set_ylim(ylim[0] + dy, ylim[1] + dy)
+            
+            # 更新起始位置
+            self.pan_start = (event.xdata, event.ydata)
+            
+            # 更新画布
+            self.canvas.draw_idle()
     
     def show_context_menu(self, pos):
         """显示右键菜单"""
@@ -760,9 +877,12 @@ class MaximizedPedigreeDialog(QDialog):
         """保存图形为图片文件"""
         from PyQt6.QtWidgets import QFileDialog
         
+        # 设置默认文件名
+        default_filename = f"{self.bull_id}+{self.cow_id}_6代血缘图"
+        
         # 获取保存的文件名
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "保存血缘关系图", "", 
+            self, "保存血缘关系图", default_filename, 
             "PNG 图片 (*.png);;JPEG 图片 (*.jpg);;PDF 文档 (*.pdf);;SVG 矢量图 (*.svg)"
         )
         
@@ -778,12 +898,57 @@ class MaximizedPedigreeDialog(QDialog):
                 QMessageBox.information(self, "保存成功", f"血缘关系图已保存至:\n{file_path}")
             except Exception as e:
                 QMessageBox.warning(self, "保存失败", f"无法保存图片: {str(e)}")
-                
+    
+    def zoom_in(self):
+        """放大图表"""
+        ax = self.figure.gca()
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        
+        # 计算新的范围 - 缩小25%
+        xrange = (xlim[1] - xlim[0]) * 0.25
+        yrange = (ylim[1] - ylim[0]) * 0.25
+        
+        # 设置新的范围
+        ax.set_xlim([xlim[0] + xrange, xlim[1] - xrange])
+        ax.set_ylim([ylim[0] + yrange, ylim[1] - yrange])
+        
+        # 更新画布
+        self.canvas.draw_idle()
+        
+    def zoom_out(self):
+        """缩小图表"""
+        ax = self.figure.gca()
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        
+        # 计算新的范围 - 扩大33%
+        xrange = (xlim[1] - xlim[0]) * 0.33
+        yrange = (ylim[1] - ylim[0]) * 0.33
+        
+        # 设置新的范围
+        ax.set_xlim([xlim[0] - xrange, xlim[1] + xrange])
+        ax.set_ylim([ylim[0] - yrange, ylim[1] + yrange])
+        
+        # 更新画布
+        self.canvas.draw_idle()
+        
+    def zoom_reset(self):
+        """重置缩放"""
+        if self.base_xlim and self.base_ylim:
+            ax = self.figure.gca()
+            ax.set_xlim(self.base_xlim)
+            ax.set_ylim(self.base_ylim)
+            self.canvas.draw_idle()
+    
     def draw_pedigree(self):
         """绘制完整的6代系谱图 - 采用固定画布大小和均匀分布节点"""
         # 创建新的图形和画布
         self.figure.clear()
         ax = self.figure.add_subplot(111)
+        
+        # 清空文本元素列表
+        self.text_elements = []
         
         try:
             # 配置中文字体支持
@@ -811,14 +976,14 @@ class MaximizedPedigreeDialog(QDialog):
                 common_ancestor_colors[ancestor] = color_options[color_idx]
             
             # 设置节点尺寸和间距
-            node_width = 10.0   # 保持适当节点宽度
-            node_height = 2.8   # 固定节点高度
-            min_v_spacing = 1.2  # 最小垂直间距
-            h_spacing = 15.0    # 水平间距
+            self.node_width = 0.5   # 节点宽度减半
+            self.node_height = self.base_node_height  # 使用基础节点高度
+            min_v_spacing = 1.5  # 最小垂直间距
+            h_spacing = 1.0    # 减小水平间距，使各代更紧凑
             
             # 计算画布总高度 - 根据第6代节点数(64)
             total_nodes_last_gen = 2 ** 6  # 64个节点
-            canvas_height = (node_height + min_v_spacing) * total_nodes_last_gen
+            canvas_height = (self.node_height + min_v_spacing) * total_nodes_last_gen
             
             # 节点集合，格式为：{(代数,位置ID): (x坐标,y坐标,节点ID)}
             nodes = {}
@@ -907,13 +1072,14 @@ class MaximizedPedigreeDialog(QDialog):
                     parent_x, parent_y, _ = nodes[(parent_gen, parent_pos)]
                     
                     # 添加连接线
-                    edges.append((parent_x + node_width/2, parent_y, x - node_width/2, y))
+                    edges.append((parent_x + self.node_width/2, parent_y, x - self.node_width/2, y))
             
             # 绘制边（连接线）
             for start_x, start_y, end_x, end_y in edges:
                 ax.plot([start_x, end_x], [start_y, end_y], color='green', linewidth=1.0, zorder=1)
             
-            # 绘制节点（方框）
+            # 绘制节点（方框）和文字
+            self.node_rects = []  # 存储节点矩形
             for (gen, pos), (x, y, animal_id) in nodes.items():
                 # 确定方框颜色
                 if animal_id == "预期后代":
@@ -935,8 +1101,8 @@ class MaximizedPedigreeDialog(QDialog):
                 
                 # 绘制方框
                 rect = plt.Rectangle(
-                    (x - node_width/2, y - node_height/2),
-                    node_width, node_height,
+                    (x - self.node_width/2, y - self.node_height/2),
+                    self.node_width, self.node_height,
                     facecolor=facecolor,
                     edgecolor=edgecolor,
                     linewidth=1.0,
@@ -944,6 +1110,7 @@ class MaximizedPedigreeDialog(QDialog):
                     alpha=0.9,
                 )
                 ax.add_patch(rect)
+                self.node_rects.append(rect)
                 
                 # 获取NAAB号
                 naab = naab_dict.get(animal_id, "")
@@ -952,47 +1119,72 @@ class MaximizedPedigreeDialog(QDialog):
                 display_text = str(animal_id)
                 naab_text = str(naab) if naab else ""
                 
-                # 使用固定字体大小，根据文本长度控制
-                reg_fontsize = min(8, 8 * 8 / max(len(display_text), 8))  # REG号字体大小上限8
-                naab_fontsize = min(10, 10 * 8 / max(len(naab_text), 8))  # NAAB号字体大小上限10
+                # 设置初始文本大小
+                self.base_naab_size = self.node_height * 0.55  # NAAB文本大小为节点高度的55%
+                self.base_node_text_size = self.node_height * 0.3   # REG文本大小为节点高度的30%
                 
-                # 在方框中显示REG号
-                ax.text(
-                    x, y - node_height/4,  # 设置垂直位置
+                # 计算文本垂直位置
+                reg_y_position = y - self.node_height/2 + self.node_height * 0.175
+                naab_y_position = y + self.node_height/2 - self.node_height * 0.325
+                
+                # 在方框中显示REG号（下部）
+                reg_text = ax.text(
+                    x, reg_y_position,
                     display_text,
                     family='SimHei',
                     ha='center',
                     va='center',
-                    fontsize=reg_fontsize,
+                    size=self.base_node_text_size,
                     color=text_color,
                     zorder=3
                 )
+                self.text_elements.append({
+                    'text_obj': reg_text,
+                    'base_size': self.base_node_text_size,
+                    'type': 'reg'
+                })
                 
-                # 在方框中显示NAAB号（加粗显示）
+                # 在方框中显示NAAB号（上部）（加粗显示）
                 if naab and animal_id not in ["预期后代", "父亲未知", "母亲未知"]:
-                    ax.text(
-                        x, y + node_height/4,  # 设置垂直位置
+                    naab_text_obj = ax.text(
+                        x, naab_y_position,
                         naab_text,
                         family='SimHei',
                         ha='center',
                         va='center',
-                        fontsize=naab_fontsize,
+                        size=self.base_naab_size,
                         fontweight='bold',
                         color=text_color,
                         zorder=3
                     )
+                    self.text_elements.append({
+                        'text_obj': naab_text_obj,
+                        'base_size': self.base_naab_size,
+                        'type': 'naab'
+                    })
             
             # 设置图表属性
-            ax.set_title("血缘关系图 (6代完整视图)", fontsize=18, fontfamily='SimHei')
+            title_size = self.node_height * 3
+            title_obj = ax.set_title("血缘关系图 (6代完整视图)", size=title_size, fontfamily='SimHei')
+            self.text_elements.append({
+                'text_obj': title_obj,
+                'base_size': title_size,
+                'type': 'title'
+            })
+            
             ax.axis('off')  # 隐藏坐标轴
             
-            # 自动调整布局，适应所有节点
-            # 确保有足够的边距
-            x_margin = node_width
-            y_margin = node_height * 2
+            # 设置视图范围
+            x_margin = self.node_width
+            y_margin = self.node_height * 2
             
-            ax.set_xlim(-x_margin, 6 * h_spacing + node_width + x_margin)
-            ax.set_ylim(-canvas_height/2 - y_margin, canvas_height/2 + y_margin)
+            # 保存初始视图范围
+            self.base_xlim = [-x_margin, 6 * h_spacing + self.node_width + x_margin]
+            self.base_ylim = [-canvas_height/2 - y_margin, canvas_height/2 + y_margin]
+            
+            # 设置初始视图范围
+            ax.set_xlim(self.base_xlim)
+            ax.set_ylim(self.base_ylim)
             
             # 创建图例
             legend_elements = [
@@ -1004,16 +1196,25 @@ class MaximizedPedigreeDialog(QDialog):
             # 添加共同祖先颜色到图例
             for i, (ancestor, color) in enumerate(common_ancestor_colors.items()):
                 if i < 4:  # 最多显示4个共同祖先在图例中
-                    display_name = ancestor
-                    if len(display_name) > 15:  # 增加显示长度
-                        # 保留末尾部分的REG号，这通常是最有识别度的部分
-                        display_name = "..." + display_name[-12:]
+                    # 获取NAAB号
+                    naab = naab_dict.get(ancestor, "")
+                    # 显示完整的REG和NAAB号
+                    if naab:
+                        display_name = f"{ancestor} (NAAB: {naab})"
+                    else:
+                        display_name = ancestor
+                    
                     legend_elements.append(
-                        plt.Rectangle((0, 0), 1, 1, facecolor=color, edgecolor='red', label=f'共同祖先: {display_name}')
+                        plt.Rectangle((0, 0), 1, 1, facecolor=color, edgecolor='green', label=f'共同祖先: {display_name}')
                     )
             
-            # 添加图例到图表右上角
-            legend = ax.legend(handles=legend_elements, loc='upper right', fontsize='medium')
+            # 添加图例到图表右上角 - 使用固定大小，不随缩放变化
+            legend_font_size = 9  # 使用固定大小的图例字体
+            legend = ax.legend(handles=legend_elements, loc='upper right', prop={'size': legend_font_size})
+            
+            # 连接缩放事件
+            self.cid_xlim = ax.callbacks.connect('xlim_changed', self.on_lim_change)
+            self.cid_ylim = ax.callbacks.connect('ylim_changed', self.on_lim_change)
             
         except Exception as e:
             logging.error(f"绘制完整血缘关系图时出错: {str(e)}")
@@ -1025,88 +1226,57 @@ class MaximizedPedigreeDialog(QDialog):
         # 绘制
         self.canvas.draw()
     
-    def on_scroll(self, event):
-        """滚轮缩放事件处理 - 简单的整体缩放，保持固定字体大小"""
-        ax = self.figure.get_axes()[0]
+    def on_lim_change(self, event=None):
+        """处理坐标轴范围变化事件，用于动态调整文本大小"""
+        # 使用节流控制，避免频繁更新
+        current_time = int(time.time() * 1000)
+        time_since_last_update = current_time - self.last_update_time
         
+        if time_since_last_update < self.update_delay and not self.update_pending:
+            # 还未到更新时间，设置定时器延迟更新
+            self.update_pending = True
+            QTimer.singleShot(self.update_delay - time_since_last_update, self.update_text_sizes)
+        elif time_since_last_update >= self.update_delay:
+            # 已经过了足够的时间，立即更新
+            self.update_text_sizes()
+    
+    def update_text_sizes(self):
+        """更新所有文本元素的大小基于当前缩放"""
         # 获取当前视图范围
-        cur_xlim = ax.get_xlim()
-        cur_ylim = ax.get_ylim()
+        ax = self.figure.get_axes()[0]
+        current_xlim = ax.get_xlim()
+        current_ylim = ax.get_ylim()
         
-        # 获取鼠标位置
-        xdata = event.xdata
-        ydata = event.ydata
+        # 计算缩放比例 - 使用视图宽度比较
+        base_width = self.base_xlim[1] - self.base_xlim[0]
+        current_width = current_xlim[1] - current_xlim[0]
+        zoom_ratio = base_width / current_width
         
-        if xdata is None or ydata is None:
-            return
+        # 更新文本大小 - 跳过图例文本
+        for text_info in self.text_elements:
+            text_obj = text_info['text_obj']
+            base_size = text_info['base_size']
             
-        # 计算缩放
-        if event.button == 'up':
-            scale_factor = 1.0 / self.zoom_factor
-            self.current_scale *= self.zoom_factor
-        else:
-            scale_factor = self.zoom_factor
-            self.current_scale /= self.zoom_factor
+            # 跳过图例文本 (虽然现在已经不添加图例文本了，但为了安全起见)
+            if text_info.get('type') == 'legend':
+                continue
+            
+            # 根据缩放比例计算新的文本大小
+            new_size = base_size * zoom_ratio
+            
+            # 应用新的文本大小
+            text_obj.set_fontsize(new_size)
         
-        # 限制缩放范围
-        if self.current_scale < self.min_zoom:
-            scale_factor = self.min_zoom / (self.current_scale * self.zoom_factor)
-            self.current_scale = self.min_zoom
-        elif self.current_scale > self.max_zoom:
-            scale_factor = self.max_zoom / (self.current_scale / self.zoom_factor)
-            self.current_scale = self.max_zoom
-        
-        # 更新视图范围
-        new_width = (cur_xlim[1] - cur_xlim[0]) * scale_factor
-        new_height = (cur_ylim[1] - cur_ylim[0]) * scale_factor
-        
-        ax.set_xlim([xdata - new_width * (xdata - cur_xlim[0]) / (cur_xlim[1] - cur_xlim[0]),
-                     xdata + new_width * (cur_xlim[1] - xdata) / (cur_xlim[1] - cur_xlim[0])])
-        ax.set_ylim([ydata - new_height * (ydata - cur_ylim[0]) / (cur_ylim[1] - cur_ylim[0]),
-                     ydata + new_height * (cur_ylim[1] - ydata) / (cur_ylim[1] - cur_ylim[0])])
-        
-        # 重新绘制图表，不调整字体大小
+        # 重新绘制画布 - 只更新文本，不重新计算布局
         self.canvas.draw_idle()
-    
-    def on_press(self, event):
-        """鼠标按下事件处理"""
-        if event.button == 1:
-            self.pan_enabled = True
-            self.pan_start_xy = (event.xdata, event.ydata)
-            self.canvas.setCursor(Qt.CursorShape.ClosedHandCursor)
-    
-    def on_release(self, event):
-        """鼠标释放事件处理"""
-        if event.button == 1:
-            self.pan_enabled = False
-            self.pan_start_xy = None
-            self.canvas.setCursor(Qt.CursorShape.ArrowCursor)
-    
-    def on_motion(self, event):
-        """鼠标移动事件处理"""
-        if self.pan_enabled and self.pan_start_xy is not None:
-            ax = self.figure.get_axes()[0]
-            
-            if event.xdata is None or event.ydata is None:
-                return
-                
-            dx = event.xdata - self.pan_start_xy[0]
-            dy = event.ydata - self.pan_start_xy[1]
-            
-            cur_xlim = ax.get_xlim()
-            cur_ylim = ax.get_ylim()
-            
-            ax.set_xlim([cur_xlim[0] - dx, cur_xlim[1] - dx])
-            ax.set_ylim([cur_ylim[0] - dy, cur_ylim[1] - dy])
-            
-            self.pan_start_xy = (event.xdata, event.ydata)
-            self.canvas.draw_idle()
+        
+        # 更新时间戳和状态
+        self.last_update_time = int(time.time() * 1000)
+        self.update_pending = False
     
     def on_close(self):
-        """关闭对话框时的处理"""
-        self.accept()
-        # 重新绘制父窗口的3代系谱图
-        self.parent_widget.draw_pedigree(max_generations=3)
+        """关闭对话框"""
+        self.close()
 
 class InbreedingPage(QWidget):
     """隐性基因分析页面"""
@@ -1687,8 +1857,10 @@ class InbreedingPage(QWidget):
         """收集异常配对和统计信息"""
         abnormal_records = []
         gene_stats = {gene: 0 for gene in self.defect_genes}
+        inbreeding_count = 0  # 统计近交系数过高的数量
         
         for result in results:
+            # 检测隐性基因问题
             for gene in self.defect_genes:
                 if result[gene] == 'NO safe':
                     abnormal_records.append({
@@ -1696,19 +1868,45 @@ class InbreedingPage(QWidget):
                         '父号': result['父号'],
                         '公牛号': result.get('配种公牛号', result.get('备选公牛号')),
                         '异常类型': gene,
-                        '状态': 'NO safe'
+                        '状态': '公牛与母牛父亲共同携带隐性基因'
                     })
                     gene_stats[gene] += 1
+            
+            # 检测近交系数过高的情况
+            if '后代近交系数' in result:
+                # 从格式化的百分比字符串中提取数值
+                inbreeding_str = result['后代近交系数']
+                try:
+                    # 去掉百分号并转换为浮点数
+                    inbreeding_value = float(inbreeding_str.strip('%')) / 100
+                    if inbreeding_value > 0.0625:  # 近交系数 > 6.25%
+                        abnormal_records.append({
+                            '母牛号': result['母牛号'],
+                            '父号': result['父号'],
+                            '公牛号': result.get('配种公牛号', result.get('备选公牛号')),
+                            '异常类型': '近交系数过高',
+                            '状态': f'{inbreeding_value:.2%}'
+                        })
+                        inbreeding_count += 1
+                except (ValueError, TypeError):
+                    # 处理无法转换为浮点数的情况
+                    pass
         
         # 创建异常记录DataFrame
         abnormal_df = pd.DataFrame(abnormal_records)
         
         # 创建统计信息DataFrame
-        stats_df = pd.DataFrame([
+        stats_records = [
             {'异常类型': gene, '数量': count}
             for gene, count in gene_stats.items()
             if count > 0
-        ])
+        ]
+        
+        # 添加近交系数过高的统计
+        if inbreeding_count > 0:
+            stats_records.append({'异常类型': '近交系数过高', '数量': inbreeding_count})
+        
+        stats_df = pd.DataFrame(stats_records)
         
         return abnormal_df, stats_df
 
