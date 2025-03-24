@@ -410,9 +410,9 @@ class PedigreeDialog(QDialog):
                             print(f"添加第{gen}代共同祖先(不过滤): {ca}")
                     else:
                         # 第3代及以上按照最近祖先进行过滤
-                    # 最近的共同祖先是列表中的第一个，因为祖先列表是从近到远
-                    nearest_ca = path_common_ancestors[0]
-                    filtered_common_ancestors.add(nearest_ca)
+                        # 最近的共同祖先是列表中的第一个，因为祖先列表是从近到远
+                        nearest_ca = path_common_ancestors[0]
+                        filtered_common_ancestors.add(nearest_ca)
                         print(f"添加第{gen}代最近共同祖先: {nearest_ca}")
                         if len(path_common_ancestors) > 1:
                             print(f"  过滤掉了以下更远共同祖先: {', '.join(path_common_ancestors[1:])}")
@@ -436,8 +436,7 @@ class PedigreeDialog(QDialog):
             common_ancestor_colors = {}
             color_options = ['#FF9999', '#99FF99', '#9999FF', '#FFFF99', '#FF99FF', '#99FFFF']
             
-            # 优先为过滤后的共同祖先分配颜色
-            for i, ancestor in enumerate(filtered_common_ancestors):
+            for i, ancestor in enumerate(common_ancestors):
                 color_idx = i % len(color_options)
                 common_ancestor_colors[ancestor] = color_options[color_idx]
             
@@ -805,10 +804,10 @@ class MaximizedPedigreeDialog(QDialog):
             
             # 为共同祖先分配颜色
             common_ancestor_colors = {}
-                    color_options = ['#FF9999', '#99FF99', '#9999FF', '#FFFF99', '#FF99FF', '#99FFFF']
-                    
+            color_options = ['#FF9999', '#99FF99', '#9999FF', '#FFFF99', '#FF99FF', '#99FFFF']
+            
             for i, ancestor in enumerate(common_ancestors):
-                            color_idx = i % len(color_options)
+                color_idx = i % len(color_options)
                 common_ancestor_colors[ancestor] = color_options[color_idx]
             
             # 设置节点尺寸和间距

@@ -538,7 +538,6 @@ class PathInbreedingCalculator:
             bull_inbreeding, _, _ = self.calculate_inbreeding_coefficient(bull_id)
             
             # 后代近交系数 = 0.25 * (1 + 父亲近交系数)
-            # 这里的0.25是正确的，因为直系亲属的路径系数就是0.25
             inbreeding_coef = 0.25 * (1 + bull_inbreeding)
             
             # 创建返回结果
@@ -686,7 +685,7 @@ class PathInbreedingCalculator:
                 # 公牛直接是母牛的某个祖先
                 for cow_path in cow_paths:
                     # 计算路径系数: (1/2)^(n+1) * (1 + F_ancestor)
-                    # 这种特殊情况下公式是正确的，因为只需要计算一条路径长度
+                    # 这里n是路径长度，+1是因为还要从公牛到后代
                     path_length = len(cow_path)
                     ancestor_inbreeding, _, _ = self.calculate_inbreeding_coefficient(ancestor)
                     path_coef = (0.5) ** (path_length + 1) * (1 + ancestor_inbreeding)
@@ -700,14 +699,13 @@ class PathInbreedingCalculator:
                     
                     ancestor_contribution += path_coef
                     all_path_details.append((path_str, path_coef))
-            
+                    
             # 特殊情况处理：如果祖先就是母牛自己
             elif ancestor == cow_id:
                 print(f"[INFO] 特殊情况: 母牛 {cow_id} 自身是共同祖先")
                 # 母牛直接是公牛的某个祖先（非常罕见）
                 for bull_path in bull_paths:
                     # 计算路径系数: (1/2)^(n+1) * (1 + F_ancestor)
-                    # 这种特殊情况下公式是正确的，因为只需要计算一条路径长度
                     path_length = len(bull_path)
                     ancestor_inbreeding, _, _ = self.calculate_inbreeding_coefficient(ancestor)
                     path_coef = (0.5) ** (path_length + 1) * (1 + ancestor_inbreeding)
@@ -728,7 +726,6 @@ class PathInbreedingCalculator:
                 for bull_path in bull_paths:
                     for cow_path in cow_paths:
                         # 计算路径系数: (1/2)^(n1+n2+1) * (1 + F_ancestor)
-                        # 修正之前的算法错误：从(n1+n2+2)变为(n1+n2+1)
                         path_length = len(bull_path) + len(cow_path)
                         ancestor_inbreeding, _, _ = self.calculate_inbreeding_coefficient(ancestor)
                         path_coef = (0.5) ** (path_length + 1) * (1 + ancestor_inbreeding)
@@ -739,8 +736,6 @@ class PathInbreedingCalculator:
                         path_str += f" -> {ancestor} -> "
                         path_str += " -> ".join([str(p) for p in bull_path])
                         path_str += f" -> {bull_id} -> 子代"
-                        
-                        print(f"[DEBUG] 路径: {path_str}, 长度: {path_length}, 系数: {path_coef:.6f}")
                         
                         ancestor_contribution += path_coef
                         all_path_details.append((path_str, path_coef))
