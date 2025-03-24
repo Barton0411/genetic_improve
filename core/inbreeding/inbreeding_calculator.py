@@ -318,12 +318,22 @@ class InbreedingCalculator:
             ancestors = {}
             current_path = current_path + [pedigree['id']]
             
-            # 记录当前节点
-            # 1. 如果是公牛，直接查找 REG 号
+            # 记录当前节点（无论是公牛还是母牛，都直接添加到祖先集合中）
+            # 使用ID作为键
+            ancestors[pedigree['id']] = {
+                'path': current_path,
+                'gib': pedigree.get('gib', 0),
+                'generation': pedigree['generation'],
+                'naab': '',
+                'reg': pedigree['id']  # 使用ID作为REG
+            }
+            
+            # 如果是公牛，尝试查找REG号
             if pedigree.get('type') == 'bull':
                 bull_info = self.prepare_bull_id(pedigree['id'])
                 if bull_info and bull_info.get('reg'):
                     reg_no = bull_info['reg']
+                    # 如果能找到REG号，使用REG号作为键
                     ancestors[reg_no] = {
                         'path': current_path,
                         'gib': bull_info.get('gib'),
@@ -331,20 +341,6 @@ class InbreedingCalculator:
                         'naab': bull_info.get('naab'),
                         'reg': reg_no
                     }
-            # 2. 如果是母牛，检查其父亲的 REG 号
-            elif pedigree.get('type') == 'cow' and not pedigree['id'].startswith('unknown'):
-                cow_info = self.get_cow_info(pedigree['id'])
-                if cow_info is not None and not pd.isna(cow_info['sire']):
-                    bull_info = self.prepare_bull_id(cow_info['sire'])
-                    if bull_info and bull_info.get('reg'):
-                        reg_no = bull_info['reg']
-                        ancestors[reg_no] = {
-                            'path': current_path + [cow_info['sire']],
-                            'gib': bull_info.get('gib'),
-                            'generation': pedigree['generation'] + 1,
-                            'naab': bull_info.get('naab'),
-                            'reg': reg_no
-                        }
             
             # 递归查找父系和母系
             if pedigree.get('sire'):
@@ -358,9 +354,29 @@ class InbreedingCalculator:
         ancestors1 = collect_ancestors(pedigree1)
         ancestors2 = collect_ancestors(pedigree2)
         
-        # 使用 REG 号查找共同祖先
+        # 调试信息
+        print(f"系谱1祖先数量: {len(ancestors1)}")
+        print(f"系谱2祖先数量: {len(ancestors2)}")
+        
+        # 计算并显示前几代祖先
+        for i in range(1, 4):  # 显示前3代
+            gen1_ancestors = [a['reg'] for a in ancestors1.values() if a['generation'] == i]
+            gen2_ancestors = [a['reg'] for a in ancestors2.values() if a['generation'] == i]
+            print(f"第{i}代: 系谱1有{len(gen1_ancestors)}个祖先, 系谱2有{len(gen2_ancestors)}个祖先")
+            if i <= 2:  # 只显示前两代的祖先详情
+                print(f"  系谱1第{i}代祖先: {', '.join(gen1_ancestors)}")
+                print(f"  系谱2第{i}代祖先: {', '.join(gen2_ancestors)}")
+        
+        # 使用ID作为键查找共同祖先
+        common_ids = set(ancestors1.keys()) & set(ancestors2.keys())
+        print(f"找到{len(common_ids)}个共同祖先ID")
+        if common_ids:
+            # 显示前10个共同祖先
+            print(f"共同祖先ID: {', '.join(list(common_ids)[:10])}{'...' if len(common_ids) > 10 else ''}")
+        
+        # 整理共同祖先信息
         common_ancestors = []
-        for reg_no in set(ancestors1.keys()) & set(ancestors2.keys()):
+        for reg_no in common_ids:
             info1 = ancestors1[reg_no]
             info2 = ancestors2[reg_no]
             common_ancestors.append({
@@ -372,7 +388,15 @@ class InbreedingCalculator:
                 'total_generations': info1['generation'] + info2['generation']
             })
         
-        return sorted(common_ancestors, key=lambda x: x['total_generations'])
+        # 按总代数排序（代数越小表示祖先越近）
+        sorted_ancestors = sorted(common_ancestors, key=lambda x: x['total_generations'])
+        
+        # 显示排序后的共同祖先信息
+        print(f"按总代数排序后的共同祖先:")
+        for i, ancestor in enumerate(sorted_ancestors[:5]):  # 只显示前5个
+            print(f"  {i+1}. {ancestor['reg']}, 总代数: {ancestor['total_generations']}")
+        
+        return sorted_ancestors
 
     def calculate_inbreeding_coefficient(self, animal_id: str) -> Tuple[float, str, str]:
         """计算近交系数"""

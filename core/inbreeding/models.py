@@ -146,7 +146,7 @@ class InbreedingDetailModel(QAbstractTableModel):
         display_columns = []
         
         # 先添加基本信息列
-        for col in ['母牛号', '父号', '配种公牛号', '近交系数']:
+        for col in ['母牛号', '父号', '配种公牛号']:
             if col in df.columns:
                 display_columns.append(col)
                 

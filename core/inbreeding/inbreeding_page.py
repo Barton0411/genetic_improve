@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
     QTableView, QFrame, QSplitter, QMessageBox, QApplication,
-    QProgressDialog, QMainWindow, QDialog, QTabWidget, QComboBox, QListWidget, QTextEdit, QHeaderView
+    QProgressDialog, QMainWindow, QDialog, QTabWidget, QComboBox, QListWidget, QTextEdit, QHeaderView, QMenu
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QBrush, QColor, QStandardItemModel, QStandardItem
@@ -38,7 +38,7 @@ class PedigreeDialog(QDialog):
     def setup_ui(self):
         """初始化UI"""
         self.setWindowTitle(f"血缘关系图 - 母牛: {self.cow_id}")
-        self.resize(900, 700)
+        self.resize(1200, 800)  # 增加默认窗口大小
         
         layout = QVBoxLayout(self)
         
@@ -54,16 +54,6 @@ class PedigreeDialog(QDialog):
         # 上部分 - 近交系数信息
         upper_widget = QWidget()
         upper_layout = QVBoxLayout(upper_widget)
-        
-        # 添加近交系数显示
-        inbreeding_coef = 0.0
-        if self.inbreeding_details and 'system' in self.inbreeding_details:
-            inbreeding_coef = self.inbreeding_details['system']
-            
-        self.inbreeding_label = QLabel(f"母牛近交系数: {inbreeding_coef:.2%}")
-        self.inbreeding_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.inbreeding_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        upper_layout.addWidget(self.inbreeding_label)
         
         # 添加后代近交系数显示
         offspring_inbreeding = 0.0
@@ -88,7 +78,7 @@ class PedigreeDialog(QDialog):
                 upper_layout.addWidget(warning_label)
         
         # 创建图形画布
-        self.figure = Figure(figsize=(8, 6))
+        self.figure = Figure(figsize=(10, 8))  # 增加画布大小
         self.canvas = FigureCanvas(self.figure)
         upper_layout.addWidget(self.canvas)
         
@@ -104,12 +94,6 @@ class PedigreeDialog(QDialog):
         # 创建标签页
         tab_widget = QTabWidget()
         lower_layout.addWidget(tab_widget)
-        
-        # 母牛近交详情标签页
-        cow_tab = QWidget()
-        cow_layout = QVBoxLayout(cow_tab)
-        self.create_inbreeding_details_widget(cow_layout, self.inbreeding_details, "母牛近交详情")
-        tab_widget.addTab(cow_tab, "母牛近交详情")
         
         # 潜在后代近交详情标签页
         if self.bull_id and self.offspring_details:
@@ -130,7 +114,7 @@ class PedigreeDialog(QDialog):
         layout.addWidget(close_button)
         
         # 绘制血缘关系图
-        self.draw_pedigree()
+        self.draw_pedigree(max_generations=3)  # 默认显示3代
     
     def create_inbreeding_details_widget(self, layout, details, title):
         """创建显示近交详情的组件"""
@@ -232,7 +216,7 @@ class PedigreeDialog(QDialog):
             return self.parent_widget.get_project_path()
         return None
         
-    def draw_pedigree(self):
+    def draw_pedigree(self, max_generations=3):
         """绘制血缘关系图 - 横向展开，父亲在上，母亲在下"""
         # 清空现有的图表
         self.figure.clear()
@@ -252,11 +236,8 @@ class PedigreeDialog(QDialog):
             
             # 初始化共同祖先集合
             common_ancestors = set()
-            if self.inbreeding_details and 'common_ancestors' in self.inbreeding_details:
-                common_ancestors = set(self.inbreeding_details['common_ancestors'].keys())
-            
             if self.offspring_details and 'common_ancestors' in self.offspring_details:
-                common_ancestors.update(self.offspring_details['common_ancestors'].keys())
+                common_ancestors = set(self.offspring_details['common_ancestors'].keys())
             
             # 检查特殊情况：如果配种公牛就是母牛的父亲，添加到共同祖先
             cow_info = pedigree_db.pedigree.get(self.cow_id, {})
@@ -265,26 +246,21 @@ class PedigreeDialog(QDialog):
                 common_ancestors.add(self.bull_id)
                 print(f"检测到直系血亲关系：公牛 {self.bull_id} 是母牛 {self.cow_id} 的父亲，将其添加为共同祖先")
             
-            # 设置最大代数
-            max_generations = 6
-            
             # 节点尺寸和间距
-            node_width = 4.0   # 方框宽度
-            node_height = 2.8 # 增加高度以容纳NAAB号码
-            h_spacing = 6.0    # 代际之间的水平间距
-            min_spacing = 0.2  # 最小垂直间距
+            node_width = 5.0   # 进一步增加方框宽度
+            node_height = 2.8   # 进一步增加方框高度
+            h_spacing = 6.0    # 增加水平间距
+            min_spacing = 0.6   # 增加最小垂直间距
             
-            # 计算画布总高度 - 基于第6代的节点数
-            last_gen_nodes = 2 ** max_generations  # 第6代节点数 = 64
-            total_height = (node_height + min_spacing) * last_gen_nodes  # 89.6 = (1.2 + 0.2) * 64
+            # 计算画布总高度
+            last_gen_nodes = 2 ** max_generations
+            total_height = (node_height + min_spacing) * last_gen_nodes
             
             # 计算每代节点的间距
             v_spacings = {}
             for gen in range(1, max_generations + 1):
                 nodes_in_gen = 2 ** gen
-                # 每个节点分配的总高度
                 node_alloc_height = total_height / nodes_in_gen
-                # 节点间的垂直间距（上下各一半）
                 v_spacings[gen] = node_alloc_height - node_height
             
             # 节点集合，格式为：{(代数,位置ID): (x坐标,y坐标,节点ID)}
@@ -294,9 +270,18 @@ class PedigreeDialog(QDialog):
             # 边集合，格式为：[(起点x, 起点y, 终点x, 终点y)]
             edges = []
             
+            # 构建节点之间的父子关系字典
+            # 用于后续过滤共同祖先，避免标记同一条线上多个祖先
+            parent_child_paths = {}  # 存储 (子节点,父/母节点) -> 路径索引
+            
+            # 记录每个位置节点的祖先路径
+            # 格式: {(gen, pos): [ancestor1, ancestor2, ...]}，用于确定共同祖先是否在同一线上
+            node_ancestors = {}
+            
             # 逐代处理所有节点
             # 初始化第0代 - 预期后代
             self.nodes[(0, 0)] = (0, 0, "预期后代")
+            node_ancestors[(0, 0)] = []
             
             # 第1代 - 父亲和母亲
             # 计算第1代的节点分配高度和垂直间距
@@ -305,12 +290,18 @@ class PedigreeDialog(QDialog):
             
             # 父亲位置（上方）
             self.nodes[(1, 0)] = (h_spacing, half_spacing, self.bull_id)
+            node_ancestors[(1, 0)] = [self.bull_id]
+            
             # 母亲位置（下方）
             self.nodes[(1, 1)] = (h_spacing, -half_spacing, self.cow_id)
+            node_ancestors[(1, 1)] = [self.cow_id]
             
             # 添加从预期后代到父母的连接
             edges.append((node_width/2, 0, h_spacing-node_width/2, half_spacing))    # 到父亲
+            parent_child_paths[((0, 0), (1, 0))] = 0  # 添加路径索引
+            
             edges.append((node_width/2, 0, h_spacing-node_width/2, -half_spacing))   # 到母亲
+            parent_child_paths[((0, 0), (1, 1))] = 1  # 添加路径索引
             
             # 递归构建系谱树
             def build_pedigree(gen, position, animal_id):
@@ -323,8 +314,9 @@ class PedigreeDialog(QDialog):
                 if gen >= max_generations:
                     return
                 
-                # 获取当前节点的坐标
+                # 获取当前节点的坐标和祖先列表
                 x, y, _ = self.nodes[(gen, position)]
+                current_ancestors = node_ancestors.get((gen, position), [])
                 
                 # 获取祖先信息
                 node_info = pedigree_db.pedigree.get(animal_id, {})
@@ -349,6 +341,10 @@ class PedigreeDialog(QDialog):
                 sire_y = (total_height / 2) - (sire_global_pos + grid_size / 2) * (node_height + min_spacing)
                 self.nodes[(next_gen, sire_position)] = (next_x, sire_y, sire_id)
                 
+                # 创建父亲节点的祖先列表 (当前祖先 + 父亲自己)
+                sire_ancestors = current_ancestors + [sire_id]
+                node_ancestors[(next_gen, sire_position)] = sire_ancestors
+                
                 # 母亲位置（下方）
                 dam_position = position * 2 + 1
                 # 计算在全局布局中的位置
@@ -357,9 +353,16 @@ class PedigreeDialog(QDialog):
                 dam_y = (total_height / 2) - (dam_global_pos + grid_size / 2) * (node_height + min_spacing)
                 self.nodes[(next_gen, dam_position)] = (next_x, dam_y, dam_id)
                 
+                # 创建母亲节点的祖先列表 (当前祖先 + 母亲自己)
+                dam_ancestors = current_ancestors + [dam_id]
+                node_ancestors[(next_gen, dam_position)] = dam_ancestors
+                
                 # 添加连接线
                 edges.append((x+node_width/2, y, next_x-node_width/2, sire_y))    # 到父亲
+                parent_child_paths[((gen, position), (next_gen, sire_position))] = len(edges) - 1
+                
                 edges.append((x+node_width/2, y, next_x-node_width/2, dam_y))     # 到母亲
+                parent_child_paths[((gen, position), (next_gen, dam_position))] = len(edges) - 1
                 
                 # 递归处理下一代
                 build_pedigree(next_gen, sire_position, sire_id)
@@ -369,11 +372,72 @@ class PedigreeDialog(QDialog):
             build_pedigree(1, 0, self.bull_id)  # 从父亲开始
             build_pedigree(1, 1, self.cow_id)   # 从母亲开始
             
+            # 过滤共同祖先，每条血缘路径上只保留最接近的一个
+            filtered_common_ancestors = set()
+            
+            # 保存前3代共同祖先的调试信息
+            early_gen_ancestors = []
+            for gen in range(1, 4):  # 前3代
+                gen_ancestors = []
+                for (g, pos), ancestors in node_ancestors.items():
+                    if g == gen:
+                        # 找出这个节点中的所有共同祖先
+                        ca_in_node = [a for a in ancestors if a in common_ancestors]
+                        if ca_in_node:
+                            gen_ancestors.extend(ca_in_node)
+                if gen_ancestors:
+                    early_gen_ancestors.append((gen, list(set(gen_ancestors))))
+            
+            # 打印前3代共同祖先
+            print("前3代的共同祖先检查:")
+            for gen, ancestors in early_gen_ancestors:
+                print(f"  第{gen}代共同祖先: {', '.join(ancestors)}")
+            
+            # 为每个节点找出血缘路径上最近的共同祖先
+            for (gen, pos), ancestors in node_ancestors.items():
+                # 找出当前节点祖先路径上的所有共同祖先
+                path_common_ancestors = [a for a in ancestors if a in common_ancestors]
+                # 记录这个节点上全部找到的共同祖先
+                if path_common_ancestors and gen <= 3:  # 前3代显示更多调试信息
+                    print(f"节点({gen},{pos})的共同祖先: {', '.join(path_common_ancestors)}")
+                
+                # 如果有共同祖先，只保留最近的一个
+                if path_common_ancestors:
+                    # 第1-2代的所有共同祖先都保留，不过滤
+                    if gen <= 2:
+                        for ca in path_common_ancestors:
+                            filtered_common_ancestors.add(ca)
+                            print(f"添加第{gen}代共同祖先(不过滤): {ca}")
+                    else:
+                        # 第3代及以上按照最近祖先进行过滤
+                    # 最近的共同祖先是列表中的第一个，因为祖先列表是从近到远
+                    nearest_ca = path_common_ancestors[0]
+                    filtered_common_ancestors.add(nearest_ca)
+                        print(f"添加第{gen}代最近共同祖先: {nearest_ca}")
+                        if len(path_common_ancestors) > 1:
+                            print(f"  过滤掉了以下更远共同祖先: {', '.join(path_common_ancestors[1:])}")
+            
+            # 确保公牛和母牛如果是共同祖先，也被包含在过滤后的集合中
+            if self.bull_id in common_ancestors:
+                filtered_common_ancestors.add(self.bull_id)
+                print(f"添加公牛 {self.bull_id} 到过滤后的共同祖先集合")
+            
+            if self.cow_id in common_ancestors:
+                filtered_common_ancestors.add(self.cow_id)
+                print(f"添加母牛 {self.cow_id} 到过滤后的共同祖先集合")
+            
+            # 最终共同祖先列表
+            print(f"过滤前共同祖先数量: {len(common_ancestors)}")
+            print(f"过滤后共同祖先数量: {len(filtered_common_ancestors)}")
+            if len(filtered_common_ancestors) > 0:
+                print(f"过滤后共同祖先列表: {', '.join(filtered_common_ancestors)}")
+            
             # 为共同祖先分配颜色
             common_ancestor_colors = {}
             color_options = ['#FF9999', '#99FF99', '#9999FF', '#FFFF99', '#FF99FF', '#99FFFF']
             
-            for i, ancestor in enumerate(common_ancestors):
+            # 优先为过滤后的共同祖先分配颜色
+            for i, ancestor in enumerate(filtered_common_ancestors):
                 color_idx = i % len(color_options)
                 common_ancestor_colors[ancestor] = color_options[color_idx]
             
@@ -386,23 +450,27 @@ class PedigreeDialog(QDialog):
                 # 确定方框颜色
                 if node_id == "预期后代":
                     facecolor = 'lightgreen'
-                elif node_id == self.bull_id:
-                    facecolor = 'skyblue'
-                elif node_id == self.cow_id:
-                    facecolor = 'pink'
-                elif node_id in common_ancestors:
+                    edgecolor = 'green'
+                    text_color = 'black'
+                elif node_id in filtered_common_ancestors:
                     facecolor = common_ancestor_colors[node_id]
+                    edgecolor = 'red'  # 共同祖先使用红色边框
+                    text_color = 'black'
                 elif pos % 2 == 0:  # 父系（偶数位置）
-                    facecolor = 'skyblue'
+                    facecolor = '#444444'  # 深灰色
+                    edgecolor = '#333333'
+                    text_color = 'white'
                 else:  # 母系（奇数位置）
-                    facecolor = 'pink'
+                    facecolor = 'white'  # 无底色
+                    edgecolor = 'gray'
+                    text_color = 'black'
                 
                 # 绘制方框
                 rect = plt.Rectangle(
                     (x - node_width/2, y - node_height/2),
                     node_width, node_height,
                     facecolor=facecolor,
-                    edgecolor='green',
+                    edgecolor=edgecolor,
                     linewidth=1.0,
                     zorder=2,
                     alpha=0.9,
@@ -412,45 +480,35 @@ class PedigreeDialog(QDialog):
                 # 获取NAAB号
                 naab = naab_dict.get(node_id, "")
                 
-                # 截断长ID，并添加文本
-                display_text = node_id
-                naab_text = naab
-                max_length = 15 if gen <= 2 else (12 if gen <= 4 else 10)
+                # 显示完整的ID和NAAB号
+                display_text = str(node_id)
+                naab_text = str(naab) if naab else ""
                 
-                if len(str(node_id)) > max_length and node_id not in ["预期后代", "父亲未知", "母亲未知"]:
-                    # 公牛ID通常是数字和字母的组合，保留后几位更有识别度
-                    if node_id in common_ancestors:
-                        # 对于共同祖先，我们需要确保其ID更清晰可见
-                        display_text = "..." + str(node_id)[-(max_length-3):]
-                    else:
-                        # 普通节点显示REG的最后几位
-                        display_text = "..." + str(node_id)[-(max_length-3):]
-                
-                if len(str(naab)) > max_length:
-                    naab_text = str(naab)[:max_length] + "..."
-                
-                # 在方框中显示REG号
+                # 在方框中显示REG号（字号为NAAB的2/3）
+                reg_fontsize = 6 if gen <= 2 else 5
                 ax.text(
-                    x, y - node_height/6,
+                    x, y - node_height/4,  # 增加垂直间距
                     display_text,
                     family='SimHei',
                     ha='center',
                     va='center',
-                    fontsize=10 if gen <= 1 else (8 if gen <= 3 else 7),
-                    fontweight='bold',
+                    fontsize=reg_fontsize,
+                    color=text_color,
                     zorder=3
                 )
                 
-                # 在方框中显示NAAB号
+                # 在方框中显示NAAB号（加粗显示）
                 if naab and node_id not in ["预期后代", "父亲未知", "母亲未知"]:
+                    naab_fontsize = 9 if gen <= 2 else 7.5
                     ax.text(
-                        x, y + node_height/6,
+                        x, y + node_height/4,  # 增加垂直间距
                         naab_text,
                         family='SimHei',
                         ha='center',
                         va='center',
-                        fontsize=9 if gen <= 1 else (7 if gen <= 3 else 6),
-                        color='#555555',
+                        fontsize=naab_fontsize,
+                        fontweight='bold',
+                        color=text_color,
                         zorder=3
                     )
             
@@ -546,8 +604,8 @@ class PedigreeDialog(QDialog):
             # 创建图例
             legend_elements = [
                 plt.Rectangle((0, 0), 1, 1, facecolor='lightgreen', edgecolor='green', label='预期后代'),
-                plt.Rectangle((0, 0), 1, 1, facecolor='skyblue', edgecolor='green', label='父系'),
-                plt.Rectangle((0, 0), 1, 1, facecolor='pink', edgecolor='green', label='母系')
+                plt.Rectangle((0, 0), 1, 1, facecolor='#444444', edgecolor='#333333', label='父系'),
+                plt.Rectangle((0, 0), 1, 1, facecolor='white', edgecolor='gray', label='母系')
             ]
             
             # 添加共同祖先颜色到图例
@@ -564,11 +622,7 @@ class PedigreeDialog(QDialog):
             # 添加图例到图表右上角
             ax.legend(handles=legend_elements, loc='upper right', fontsize='x-small')
             
-            # 更新近交系数标签
-            inbreeding_coef = self.inbreeding_details.get('system', 0.0) if self.inbreeding_details else 0.0
-            self.inbreeding_label.setText(f"母牛近交系数: {inbreeding_coef:.2%}")
-            
-            # 如果有后代近交系数，也更新
+            # 更新后代近交系数标签（如果存在）
             if hasattr(self, 'offspring_label'):
                 offspring_inbreeding = self.offspring_details.get('system', 0.0) if self.offspring_details else 0.0
                 self.offspring_label.setText(f"潜在后代近交系数: {offspring_inbreeding:.2%}")
@@ -584,7 +638,8 @@ class PedigreeDialog(QDialog):
         """画布点击事件处理"""
         if event.dblclick:  # 检测双击事件
             # 创建并显示最大化图像对话框
-            max_dialog = MaximizedPedigreeDialog(self.figure, self)
+            max_dialog = MaximizedPedigreeDialog(self, self.cow_id, self.sire_id, self.bull_id, 
+                                               self.offspring_details)
             max_dialog.exec()
 
     def query_naab_numbers(self, pedigree_db):
@@ -644,152 +699,31 @@ class PedigreeDialog(QDialog):
 # 添加最大化对话框类
 class MaximizedPedigreeDialog(QDialog):
     """最大化血缘图对话框"""
-    def __init__(self, figure, parent=None):
+    def __init__(self, parent, cow_id, sire_id, bull_id, offspring_details):
         super().__init__(parent)
-        self.setWindowTitle("血缘关系图 (最大化视图)")
+        self.setWindowTitle("血缘关系图 (6代完整视图)")
         self.setWindowState(Qt.WindowState.WindowMaximized)
         
-        # 保存父对话框的nodes数据和原始注册号信息
+        # 保存必要的数据
         self.parent_widget = parent
+        self.cow_id = cow_id
+        self.sire_id = sire_id
+        self.bull_id = bull_id
+        self.offspring_details = offspring_details
         
         layout = QVBoxLayout(self)
         
-        # 复制原图形内容
-        self.figure = Figure(figsize=(16, 12))
-        for ax_orig in figure.get_axes():
-            ax_new = self.figure.add_subplot(111)
-            
-            # 复制线条和边
-            for item in ax_orig.get_children():
-                if hasattr(item, 'get_data'):
-                    x, y = item.get_data()
-                    ax_new.plot(x, y, color=item.get_color(), linewidth=item.get_linewidth(), zorder=item.get_zorder())
-                elif hasattr(item, 'get_xy'):
-                    # 对于方框等图形元素
-                    try:
-                        xy = item.get_xy()
-                        width = item.get_width()
-                        height = item.get_height()
-                        rect = plt.Rectangle(xy, width, height, 
-                                            facecolor=item.get_facecolor(), 
-                                            edgecolor=item.get_edgecolor(),
-                                            alpha=item.get_alpha(),
-                                            zorder=item.get_zorder())
-                        ax_new.add_patch(rect)
-                    except:
-                        pass  # 忽略无法复制的元素
-                elif hasattr(item, 'get_text') and item.get_text():
-                    # 对于文本元素
-                    try:
-                        text = item.get_text()
-                        fontsize = item.get_fontsize()
-                        color = item.get_color()
-                        family = item.get_family()
-                        pos = item.get_position()
-                        ha = item.get_ha()
-                        va = item.get_va()
-                        
-                        # 如果是截断的注册号文本，恢复为完整显示
-                        if text.startswith('...'):
-                            # 这是被截断的注册号，在父对话框中查找相应位置的完整注册号
-                            x_pos, y_pos = pos
-                            
-                            # 在父对话框中查找对应位置的节点
-                            if self.parent_widget and hasattr(self.parent_widget, 'nodes'):
-                                node_height = 1.6  # 节点高度与父对话框一致
-                                
-                                for (gen, node_pos), (node_x, node_y, node_id) in self.parent_widget.nodes.items():
-                                    # 计算节点上部和下部文本的y坐标
-                                    node_y_upper = node_y - node_height/6
-                                    node_y_lower = node_y + node_height/6
-                                    
-                                    # 判断当前文本是否位于某个节点的位置
-                                    if abs(x_pos - node_x) < 1.0:  # 水平位置接近，增大误差范围
-                                        if abs(y_pos - node_y_upper) < 1.0:  # 上部文本(REG号)，增大误差范围
-                                            if node_id not in ["预期后代", "父亲未知", "母亲未知"]:
-                                                text = str(node_id)  # 使用完整ID
-                                                break
-                        
-                        # 在最大化视图中增加文本大小
-                        fontsize = fontsize * 1.5  # 增加字体大小提高可读性
-                        
-                        ax_new.text(pos[0], pos[1], text,
-                                   family=family[0] if isinstance(family, list) else family,
-                                   ha=ha, va=va,
-                                   fontsize=fontsize,
-                                   color=color,
-                                   zorder=item.get_zorder())
-                    except:
-                        pass  # 忽略无法复制的元素
-            
-            # 复制轴的属性
-            ax_new.set_xlim(ax_orig.get_xlim())
-            ax_new.set_ylim(ax_orig.get_ylim())
-            ax_new.set_title("血缘关系图 (最大化视图)", fontsize=16)
-            ax_new.axis('off')
-            
-            # 手动重建图例
-            if self.parent_widget:
-                # 创建与原图中相同的图例
-                legend_elements = [
-                    plt.Rectangle((0, 0), 1, 1, facecolor='lightgreen', edgecolor='green', label='预期后代'),
-                    plt.Rectangle((0, 0), 1, 1, facecolor='skyblue', edgecolor='green', label='父系'),
-                    plt.Rectangle((0, 0), 1, 1, facecolor='pink', edgecolor='green', label='母系')
-                ]
-                
-                # 添加共同祖先
-                if hasattr(self.parent_widget, 'inbreeding_details') and self.parent_widget.inbreeding_details:
-                    common_ancestors = self.parent_widget.inbreeding_details.get('common_ancestors', {})
-                    color_options = ['#FF9999', '#99FF99', '#9999FF', '#FFFF99', '#FF99FF', '#99FFFF']
-                    
-                    i = 0
-                    for ancestor in common_ancestors:
-                        if i < 5:  # 最多显示5个共同祖先
-                            color_idx = i % len(color_options)
-                            color = color_options[color_idx]
-                            display_name = str(ancestor)
-                            if len(display_name) > 15:
-                                # 优先显示末尾部分，保留识别度
-                                display_name = "..." + display_name[-12:]
-                            legend_elements.append(
-                                plt.Rectangle((0, 0), 1, 1, facecolor=color, edgecolor='green', label=f'共同祖先: {display_name}')
-                            )
-                            i += 1
-                            
-                # 如果有后代近交详情，也添加其中的共同祖先
-                if hasattr(self.parent_widget, 'offspring_details') and self.parent_widget.offspring_details:
-                    offspring_common_ancestors = self.parent_widget.offspring_details.get('common_ancestors', {})
-                    for ancestor in offspring_common_ancestors:
-                        if ancestor not in common_ancestors and i < 5:
-                            color_idx = i % len(color_options)
-                            color = color_options[color_idx]
-                            display_name = str(ancestor)
-                            if len(display_name) > 15:
-                                # 优先显示末尾部分，保留识别度
-                                display_name = "..." + display_name[-12:]
-                            legend_elements.append(
-                                plt.Rectangle((0, 0), 1, 1, facecolor=color, edgecolor='green', label=f'共同祖先: {display_name}')
-                            )
-                            i += 1
-                
-                # 添加图例到图表右上角，字体更大
-                ax_new.legend(handles=legend_elements, loc='upper right', fontsize='medium')
-        
-        # 创建画布并显示
+        # 创建新的图形和画布
+        self.figure = Figure(figsize=(12, 10))  # 设置合适的画布大小
         self.canvas = FigureCanvas(self.figure)
         layout.addWidget(self.canvas)
         
         # 添加关闭按钮
         close_button = QPushButton("关闭")
-        close_button.clicked.connect(self.accept)
+        close_button.clicked.connect(self.on_close)
         layout.addWidget(close_button)
         
-        # 默认启用滚轮缩放
-        self.zoom_factor = 1.2
-        self.min_zoom = 0.1
-        self.max_zoom = 5.0
-        
-        # 启用互动功能，优化交互体验
+        # 启用互动功能
         self.canvas.setFocusPolicy(Qt.FocusPolicy.WheelFocus)
         self.canvas.setMouseTracking(True)
         
@@ -799,13 +733,301 @@ class MaximizedPedigreeDialog(QDialog):
         self.canvas.mpl_connect('button_release_event', self.on_release)
         self.canvas.mpl_connect('motion_notify_event', self.on_motion)
         
-        # 平移状态
+        # 添加右键菜单
+        self.canvas.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.canvas.customContextMenuRequested.connect(self.show_context_menu)
+        
+        # 平移和缩放状态
         self.pan_enabled = False
         self.pan_start_xy = None
-        self.current_scale = 1.0  # 当前缩放比例
+        self.current_scale = 1.0
+        self.zoom_factor = 1.2
+        self.min_zoom = 0.1
+        self.max_zoom = 5.0
+        
+        # 绘制完整的6代系谱图
+        self.draw_pedigree()
+    
+    def show_context_menu(self, pos):
+        """显示右键菜单"""
+        context_menu = QMenu(self)
+        save_action = context_menu.addAction("保存为图片")
+        
+        action = context_menu.exec(self.canvas.mapToGlobal(pos))
+        if action == save_action:
+            self.save_figure()
+    
+    def save_figure(self):
+        """保存图形为图片文件"""
+        from PyQt6.QtWidgets import QFileDialog
+        
+        # 获取保存的文件名
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "保存血缘关系图", "", 
+            "PNG 图片 (*.png);;JPEG 图片 (*.jpg);;PDF 文档 (*.pdf);;SVG 矢量图 (*.svg)"
+        )
+        
+        if file_path:
+            try:
+                self.figure.savefig(
+                    file_path, 
+                    dpi=300,  # 高分辨率
+                    bbox_inches='tight',  # 紧凑布局
+                    pad_inches=0.1,  # 适当的边距
+                    facecolor='white'  # 白色背景
+                )
+                QMessageBox.information(self, "保存成功", f"血缘关系图已保存至:\n{file_path}")
+            except Exception as e:
+                QMessageBox.warning(self, "保存失败", f"无法保存图片: {str(e)}")
+                
+    def draw_pedigree(self):
+        """绘制完整的6代系谱图 - 采用固定画布大小和均匀分布节点"""
+        # 创建新的图形和画布
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
+        
+        try:
+            # 配置中文字体支持
+            plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun', 'Heiti TC', 'Arial Unicode MS']
+            plt.rcParams['axes.unicode_minus'] = False  # 正确显示负号
+            
+            # 获取系谱库实例
+            from core.data.update_manager import get_pedigree_db
+            pedigree_db = get_pedigree_db()
+            
+            # 查询NAAB号码 - 复用父窗口的查询函数
+            naab_dict = self.parent_widget.query_naab_numbers(pedigree_db)
+            
+            # 初始化共同祖先集合
+            common_ancestors = set()
+            if self.offspring_details and 'common_ancestors' in self.offspring_details:
+                common_ancestors = set(self.offspring_details['common_ancestors'].keys())
+            
+            # 为共同祖先分配颜色
+            common_ancestor_colors = {}
+                    color_options = ['#FF9999', '#99FF99', '#9999FF', '#FFFF99', '#FF99FF', '#99FFFF']
+                    
+            for i, ancestor in enumerate(common_ancestors):
+                            color_idx = i % len(color_options)
+                common_ancestor_colors[ancestor] = color_options[color_idx]
+            
+            # 设置节点尺寸和间距
+            node_width = 10.0   # 保持适当节点宽度
+            node_height = 2.8   # 固定节点高度
+            min_v_spacing = 1.2  # 最小垂直间距
+            h_spacing = 15.0    # 水平间距
+            
+            # 计算画布总高度 - 根据第6代节点数(64)
+            total_nodes_last_gen = 2 ** 6  # 64个节点
+            canvas_height = (node_height + min_v_spacing) * total_nodes_last_gen
+            
+            # 节点集合，格式为：{(代数,位置ID): (x坐标,y坐标,节点ID)}
+            nodes = {}
+            
+            # 边集合，格式为：[(起点x, 起点y, 终点x, 终点y)]
+            edges = []
+            
+            # 计算各代节点位置的函数
+            def calculate_node_position(gen, pos, max_gen=6):
+                """计算节点位置
+                Args:
+                    gen: 代数 (0-6)
+                    pos: 在该代中的位置索引 (0-2^gen-1)
+                    max_gen: 最大代数
+                Returns:
+                    (x, y): 节点的坐标
+                """
+                # 计算水平位置 - 从左到右
+                x = gen * h_spacing
+                
+                # 计算垂直位置 - 均匀分布
+                nodes_in_gen = 2 ** gen
+                position_height = canvas_height / nodes_in_gen
+                # 计算中心位置，并考虑到节点索引从0开始
+                y = canvas_height/2 - (pos + 0.5) * position_height
+                
+                return (x, y)
+            
+            # 初始化系谱数据结构
+            # 存储格式: {(gen, pos): animal_id}
+            pedigree_structure = {}
+            
+            # 初始化第0代 - 预期后代
+            pedigree_structure[(0, 0)] = "预期后代"
+            
+            # 第1代 - 父亲和母亲
+            pedigree_structure[(1, 0)] = self.bull_id  # 父亲
+            pedigree_structure[(1, 1)] = self.cow_id   # 母亲
+            
+            # 递归构建系谱结构
+            def build_pedigree_structure(gen, pos, animal_id):
+                """递归构建系谱结构
+                Args:
+                    gen: 当前代数
+                    pos: 在该代中的位置索引
+                    animal_id: 动物ID
+                """
+                if gen >= 6:  # 最多构建到第6代
+                    return
+                
+                # 获取祖先信息
+                node_info = pedigree_db.pedigree.get(animal_id, {})
+                sire_id = node_info.get('sire', f'父亲未知')
+                dam_id = node_info.get('dam', f'母亲未知')
+                
+                # 计算下一代位置
+                next_gen = gen + 1
+                sire_pos = pos * 2       # 父亲位置
+                dam_pos = pos * 2 + 1    # 母亲位置
+                
+                # 存储父母ID
+                pedigree_structure[(next_gen, sire_pos)] = sire_id
+                pedigree_structure[(next_gen, dam_pos)] = dam_id
+                
+                # 递归处理下一代
+                build_pedigree_structure(next_gen, sire_pos, sire_id)
+                build_pedigree_structure(next_gen, dam_pos, dam_id)
+            
+            # 从第一代递归构建
+            build_pedigree_structure(1, 0, self.bull_id)  # 从父亲开始
+            build_pedigree_structure(1, 1, self.cow_id)   # 从母亲开始
+            
+            # 计算所有节点位置
+            for (gen, pos), animal_id in pedigree_structure.items():
+                x, y = calculate_node_position(gen, pos)
+                nodes[(gen, pos)] = (x, y, animal_id)
+            
+            # 计算连接线
+            for (gen, pos), (x, y, animal_id) in nodes.items():
+                if gen > 0:  # 非根节点
+                    # 找到父节点
+                    parent_gen = gen - 1
+                    parent_pos = pos // 2
+                    
+                    # 获取父节点坐标
+                    parent_x, parent_y, _ = nodes[(parent_gen, parent_pos)]
+                    
+                    # 添加连接线
+                    edges.append((parent_x + node_width/2, parent_y, x - node_width/2, y))
+            
+            # 绘制边（连接线）
+            for start_x, start_y, end_x, end_y in edges:
+                ax.plot([start_x, end_x], [start_y, end_y], color='green', linewidth=1.0, zorder=1)
+            
+            # 绘制节点（方框）
+            for (gen, pos), (x, y, animal_id) in nodes.items():
+                # 确定方框颜色
+                if animal_id == "预期后代":
+                    facecolor = 'lightgreen'
+                    edgecolor = 'green'
+                    text_color = 'black'
+                elif animal_id in common_ancestors:
+                    facecolor = common_ancestor_colors[animal_id]
+                    edgecolor = 'red'  # 共同祖先使用红色边框
+                    text_color = 'black'
+                elif pos % 2 == 0:  # 父系（偶数位置）
+                    facecolor = '#444444'  # 深灰色
+                    edgecolor = '#333333'
+                    text_color = 'white'
+                else:  # 母系（奇数位置）
+                    facecolor = 'white'  # 无底色
+                    edgecolor = 'gray'
+                    text_color = 'black'
+                
+                # 绘制方框
+                rect = plt.Rectangle(
+                    (x - node_width/2, y - node_height/2),
+                    node_width, node_height,
+                    facecolor=facecolor,
+                    edgecolor=edgecolor,
+                    linewidth=1.0,
+                    zorder=2,
+                    alpha=0.9,
+                )
+                ax.add_patch(rect)
+                
+                # 获取NAAB号
+                naab = naab_dict.get(animal_id, "")
+                
+                # 显示ID和NAAB号
+                display_text = str(animal_id)
+                naab_text = str(naab) if naab else ""
+                
+                # 使用固定字体大小，根据文本长度控制
+                reg_fontsize = min(8, 8 * 8 / max(len(display_text), 8))  # REG号字体大小上限8
+                naab_fontsize = min(10, 10 * 8 / max(len(naab_text), 8))  # NAAB号字体大小上限10
+                
+                # 在方框中显示REG号
+                ax.text(
+                    x, y - node_height/4,  # 设置垂直位置
+                    display_text,
+                    family='SimHei',
+                    ha='center',
+                    va='center',
+                    fontsize=reg_fontsize,
+                    color=text_color,
+                    zorder=3
+                )
+                
+                # 在方框中显示NAAB号（加粗显示）
+                if naab and animal_id not in ["预期后代", "父亲未知", "母亲未知"]:
+                    ax.text(
+                        x, y + node_height/4,  # 设置垂直位置
+                        naab_text,
+                        family='SimHei',
+                        ha='center',
+                        va='center',
+                        fontsize=naab_fontsize,
+                        fontweight='bold',
+                        color=text_color,
+                        zorder=3
+                    )
+            
+            # 设置图表属性
+            ax.set_title("血缘关系图 (6代完整视图)", fontsize=18, fontfamily='SimHei')
+            ax.axis('off')  # 隐藏坐标轴
+            
+            # 自动调整布局，适应所有节点
+            # 确保有足够的边距
+            x_margin = node_width
+            y_margin = node_height * 2
+            
+            ax.set_xlim(-x_margin, 6 * h_spacing + node_width + x_margin)
+            ax.set_ylim(-canvas_height/2 - y_margin, canvas_height/2 + y_margin)
+            
+            # 创建图例
+            legend_elements = [
+                plt.Rectangle((0, 0), 1, 1, facecolor='lightgreen', edgecolor='green', label='预期后代'),
+                plt.Rectangle((0, 0), 1, 1, facecolor='#444444', edgecolor='#333333', label='父系'),
+                plt.Rectangle((0, 0), 1, 1, facecolor='white', edgecolor='gray', label='母系')
+            ]
+            
+            # 添加共同祖先颜色到图例
+            for i, (ancestor, color) in enumerate(common_ancestor_colors.items()):
+                if i < 4:  # 最多显示4个共同祖先在图例中
+                    display_name = ancestor
+                    if len(display_name) > 15:  # 增加显示长度
+                        # 保留末尾部分的REG号，这通常是最有识别度的部分
+                        display_name = "..." + display_name[-12:]
+                    legend_elements.append(
+                        plt.Rectangle((0, 0), 1, 1, facecolor=color, edgecolor='red', label=f'共同祖先: {display_name}')
+                    )
+            
+            # 添加图例到图表右上角
+            legend = ax.legend(handles=legend_elements, loc='upper right', fontsize='medium')
+            
+        except Exception as e:
+            logging.error(f"绘制完整血缘关系图时出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            ax.text(0.5, 0.5, f"绘制血缘关系图时出错: {str(e)}", 
+                   horizontalalignment='center', verticalalignment='center')
+        
+        # 绘制
+        self.canvas.draw()
     
     def on_scroll(self, event):
-        """滚轮缩放事件处理，优化版本，使缩放更流畅"""
+        """滚轮缩放事件处理 - 简单的整体缩放，保持固定字体大小"""
         ax = self.figure.get_axes()[0]
         
         # 获取当前视图范围
@@ -819,21 +1041,11 @@ class MaximizedPedigreeDialog(QDialog):
         if xdata is None or ydata is None:
             return
             
-        # 视图中心
-        xcenter = (cur_xlim[0] + cur_xlim[1]) / 2
-        ycenter = (cur_ylim[0] + cur_ylim[1]) / 2
-        
-        # 计算鼠标位置相对于中心的偏移
-        xoffset = xdata - xcenter
-        yoffset = ydata - ycenter
-        
-        # 鼠标滚轮向上滚动(放大)还是向下滚动(缩小)
+        # 计算缩放
         if event.button == 'up':
-            # 放大
             scale_factor = 1.0 / self.zoom_factor
             self.current_scale *= self.zoom_factor
         else:
-            # 缩小
             scale_factor = self.zoom_factor
             self.current_scale /= self.zoom_factor
         
@@ -845,63 +1057,57 @@ class MaximizedPedigreeDialog(QDialog):
             scale_factor = self.max_zoom / (self.current_scale / self.zoom_factor)
             self.current_scale = self.max_zoom
         
-        # 计算新的视图范围
+        # 更新视图范围
         new_width = (cur_xlim[1] - cur_xlim[0]) * scale_factor
         new_height = (cur_ylim[1] - cur_ylim[0]) * scale_factor
         
-        # 设置新的视图范围，以鼠标位置为焦点
-        ax.set_xlim([xcenter - new_width/2 + xoffset*(1-scale_factor),
-                   xcenter + new_width/2 + xoffset*(1-scale_factor)])
-        ax.set_ylim([ycenter - new_height/2 + yoffset*(1-scale_factor),
-                   ycenter + new_height/2 + yoffset*(1-scale_factor)])
+        ax.set_xlim([xdata - new_width * (xdata - cur_xlim[0]) / (cur_xlim[1] - cur_xlim[0]),
+                     xdata + new_width * (cur_xlim[1] - xdata) / (cur_xlim[1] - cur_xlim[0])])
+        ax.set_ylim([ydata - new_height * (ydata - cur_ylim[0]) / (cur_ylim[1] - cur_ylim[0]),
+                     ydata + new_height * (cur_ylim[1] - ydata) / (cur_ylim[1] - cur_ylim[0])])
         
-        # 重新绘制图表
+        # 重新绘制图表，不调整字体大小
         self.canvas.draw_idle()
     
     def on_press(self, event):
         """鼠标按下事件处理"""
-        if event.button == 1:  # 左键按下开始平移
+        if event.button == 1:
             self.pan_enabled = True
             self.pan_start_xy = (event.xdata, event.ydata)
-            self.canvas.setCursor(Qt.CursorShape.ClosedHandCursor)  # 改变鼠标指针为抓取状态
+            self.canvas.setCursor(Qt.CursorShape.ClosedHandCursor)
     
     def on_release(self, event):
         """鼠标释放事件处理"""
-        if event.button == 1:  # 左键释放结束平移
+        if event.button == 1:
             self.pan_enabled = False
             self.pan_start_xy = None
-            self.canvas.setCursor(Qt.CursorShape.ArrowCursor)  # 恢复鼠标指针
+            self.canvas.setCursor(Qt.CursorShape.ArrowCursor)
     
     def on_motion(self, event):
-        """鼠标移动事件处理，优化版本，使平移更流畅"""
+        """鼠标移动事件处理"""
         if self.pan_enabled and self.pan_start_xy is not None:
             ax = self.figure.get_axes()[0]
             
-            # 确保有有效的坐标数据
-            if event.xdata is None or event.ydata is None or self.pan_start_xy[0] is None or self.pan_start_xy[1] is None:
+            if event.xdata is None or event.ydata is None:
                 return
                 
-            # 计算移动距离
             dx = event.xdata - self.pan_start_xy[0]
             dy = event.ydata - self.pan_start_xy[1]
             
-            # 如果移动距离太小，忽略以避免抖动
-            if abs(dx) < 0.01 and abs(dy) < 0.01:
-                return
-                
-            # 更新坐标轴范围
             cur_xlim = ax.get_xlim()
             cur_ylim = ax.get_ylim()
             
-            # 设置新的视图范围
             ax.set_xlim([cur_xlim[0] - dx, cur_xlim[1] - dx])
             ax.set_ylim([cur_ylim[0] - dy, cur_ylim[1] - dy])
             
-            # 更新起始点
             self.pan_start_xy = (event.xdata, event.ydata)
-            
-            # 重新绘制图表
             self.canvas.draw_idle()
+    
+    def on_close(self):
+        """关闭对话框时的处理"""
+        self.accept()
+        # 重新绘制父窗口的3代系谱图
+        self.parent_widget.draw_pedigree(max_generations=3)
 
 class InbreedingPage(QWidget):
     """隐性基因分析页面"""
@@ -1549,25 +1755,6 @@ class InbreedingPage(QWidget):
                 
                 print(f"母牛ID: {cow_id}, 父号: {sire_id}, 公牛号: {bull_id}")
                 
-                # 计算母牛自身的近交系数
-                inbreeding_coef, cow_contributions, cow_paths = calculator.calculate_inbreeding_coefficient(cow_id)
-                result['近交系数'] = f"{inbreeding_coef:.2%}"
-                
-                if inbreeding_coef > 0:
-                    success_count += 1
-                    if inbreeding_coef > 0.0625:  # 6.25%
-                        high_inbreeding_count += 1
-                        print(f"⚠️ 高近交警告! 母牛 {cow_id} 的近交系数: {inbreeding_coef:.2%}")
-                else:
-                    zero_count += 1
-                
-                # 保存详细的近交信息，便于在界面上展示
-                result['近交详情'] = {
-                    'system': inbreeding_coef,
-                    'common_ancestors': cow_contributions,
-                    'paths': cow_paths
-                }
-                
                 # 如果有公牛ID，计算潜在后代的近交系数
                 if bull_id:
                     offspring_count += 1
@@ -1624,9 +1811,6 @@ class InbreedingPage(QWidget):
             # 输出统计信息
             print("\n====== 近交系数计算统计 ======")
             print(f"总共处理: {total_count} 个配对")
-            print(f"成功计算出非零近交系数: {success_count} 个 ({success_count/total_count*100:.1f}%)")
-            print(f"零近交系数或计算失败: {zero_count} 个 ({zero_count/total_count*100:.1f}%)")
-            print(f"高近交系数(>6.25%): {high_inbreeding_count} 个 ({high_inbreeding_count/total_count*100:.1f}%)")
             print(f"计算了后代近交系数: {offspring_count} 个 ({offspring_count/total_count*100:.1f}%)")
             print("============================\n")
                 

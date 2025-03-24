@@ -538,6 +538,7 @@ class PathInbreedingCalculator:
             bull_inbreeding, _, _ = self.calculate_inbreeding_coefficient(bull_id)
             
             # 后代近交系数 = 0.25 * (1 + 父亲近交系数)
+            # 这里的0.25是正确的，因为直系亲属的路径系数就是0.25
             inbreeding_coef = 0.25 * (1 + bull_inbreeding)
             
             # 创建返回结果
@@ -569,29 +570,92 @@ class PathInbreedingCalculator:
             print(f"[ERROR] 系谱构建失败: bull_pedigree={bool(bull_pedigree)}, cow_pedigree={bool(cow_pedigree)}")
             # 即使系谱不完整，也返回0而不是nan
             return 0.0, {}, {}
+        
+        # 计算每个祖先的代数（到牛只的距离）
+        def calculate_generation(ancestors_paths):
+            """计算每个祖先距离牛只的代数"""
+            generations = {}
+            for ancestor, paths in ancestors_paths.items():
+                # 取最短路径作为代数（距离）
+                min_gen = min(len(path) for path in paths) if paths else float('inf')
+                generations[ancestor] = min_gen
+            return generations
+            
+        # 计算公牛和母牛祖先的代数
+        bull_generations = calculate_generation(bull_ancestors)
+        cow_generations = calculate_generation(cow_ancestors)
             
         # 识别共同祖先
-        common_ancestors = set(bull_ancestors.keys()) & set(cow_ancestors.keys())
+        all_common_ancestors = set(bull_ancestors.keys()) & set(cow_ancestors.keys())
+        print(f"找到所有共同祖先: {len(all_common_ancestors)}个")
         
-        # 特殊情况: 如果公牛是母牛的父亲
-        cow_father = self._get_direct_father(cow_id)
-        if cow_father and cow_father == bull_id:
-            print(f"[INFO] 直系血亲关系检测: 公牛 {bull_id} 是母牛 {cow_id} 的父亲")
-            # 添加公牛到共同祖先集合中
-            common_ancestors.add(bull_id)
-            
-        # 特殊情况: 如果公牛出现在母牛的系谱中
-        if bull_id in cow_ancestors and bull_id not in common_ancestors:
+        # 特殊情况: 如果公牛或母牛是对方的祖先，将其添加到共同祖先集合
+        if bull_id in cow_ancestors and bull_id not in all_common_ancestors:
+            all_common_ancestors.add(bull_id)
             print(f"[INFO] 添加公牛 {bull_id} 作为母牛祖先到共同祖先集合")
-            common_ancestors.add(bull_id)
             
-        # 特殊情况: 如果母牛出现在公牛的系谱中(罕见但需要处理)
-        if cow_id in bull_ancestors:
+        if cow_id in bull_ancestors and cow_id not in all_common_ancestors:
+            all_common_ancestors.add(cow_id)
             print(f"[INFO] 添加母牛 {cow_id} 作为公牛祖先到共同祖先集合")
-            common_ancestors.add(cow_id)
+        
+        # 按代数对共同祖先排序 (代数越小表示越接近牛只)
+        sorted_common_ancestors = sorted(
+            all_common_ancestors,
+            key=lambda x: min(bull_generations.get(x, float('inf')), cow_generations.get(x, float('inf')))
+        )
+        
+        # 过滤掉在同一血缘线上已有更近共同祖先的远祖先
+        filtered_common_ancestors = set()
+        # 记录每条路径上是否已有共同祖先
+        bull_path_has_ca = {}  # 键: 路径标识符，值: 已存在的最近共同祖先
+        cow_path_has_ca = {}   # 键: 路径标识符，值: 已存在的最近共同祖先
+        
+        for ancestor in sorted_common_ancestors:
+            # 获取所有从公牛和母牛到该祖先的路径
+            bull_paths = bull_ancestors.get(ancestor, [])
+            cow_paths = cow_ancestors.get(ancestor, [])
             
+            # 如果任一方没有路径，跳过该祖先
+            if not bull_paths or not cow_paths:
+                print(f"[WARNING] 祖先 {ancestor} 缺少路径，跳过")
+                continue
+                
+            # 检查是否是需要标记的共同祖先
+            should_mark = False
+            
+            # 特殊情况：祖先就是公牛或母牛本身，必须标记
+            if ancestor == bull_id or ancestor == cow_id:
+                should_mark = True
+                filtered_common_ancestors.add(ancestor)
+                print(f"[INFO] 标记特殊祖先: {ancestor} (是公牛或母牛本身)")
+                continue
+                
+            # 检查公牛侧的路径
+            for path_idx, path in enumerate(bull_paths):
+                path_key = f"bull_path_{path_idx}"
+                # 如果这条路径上还没有标记过共同祖先
+                if path_key not in bull_path_has_ca:
+                    bull_path_has_ca[path_key] = ancestor
+                    should_mark = True
+            
+            # 检查母牛侧的路径
+            for path_idx, path in enumerate(cow_paths):
+                path_key = f"cow_path_{path_idx}"
+                # 如果这条路径上还没有标记过共同祖先
+                if path_key not in cow_path_has_ca:
+                    cow_path_has_ca[path_key] = ancestor
+                    should_mark = True
+            
+            # 如果需要标记，加入过滤后的共同祖先集合
+            if should_mark:
+                filtered_common_ancestors.add(ancestor)
+                print(f"[INFO] 标记祖先: {ancestor}")
+                
+        # 使用过滤后的共同祖先进行计算
+        common_ancestors = filtered_common_ancestors
+        
         # 记录共同祖先数量
-        print(f"共同祖先数量: {len(common_ancestors)}")
+        print(f"过滤后的共同祖先数量: {len(common_ancestors)}")
         
         # 如果没有共同祖先，近交系数为0
         if not common_ancestors:
@@ -622,7 +686,7 @@ class PathInbreedingCalculator:
                 # 公牛直接是母牛的某个祖先
                 for cow_path in cow_paths:
                     # 计算路径系数: (1/2)^(n+1) * (1 + F_ancestor)
-                    # 这里n是路径长度，+1是因为还要从公牛到后代
+                    # 这种特殊情况下公式是正确的，因为只需要计算一条路径长度
                     path_length = len(cow_path)
                     ancestor_inbreeding, _, _ = self.calculate_inbreeding_coefficient(ancestor)
                     path_coef = (0.5) ** (path_length + 1) * (1 + ancestor_inbreeding)
@@ -636,13 +700,14 @@ class PathInbreedingCalculator:
                     
                     ancestor_contribution += path_coef
                     all_path_details.append((path_str, path_coef))
-                    
+            
             # 特殊情况处理：如果祖先就是母牛自己
             elif ancestor == cow_id:
                 print(f"[INFO] 特殊情况: 母牛 {cow_id} 自身是共同祖先")
                 # 母牛直接是公牛的某个祖先（非常罕见）
                 for bull_path in bull_paths:
                     # 计算路径系数: (1/2)^(n+1) * (1 + F_ancestor)
+                    # 这种特殊情况下公式是正确的，因为只需要计算一条路径长度
                     path_length = len(bull_path)
                     ancestor_inbreeding, _, _ = self.calculate_inbreeding_coefficient(ancestor)
                     path_coef = (0.5) ** (path_length + 1) * (1 + ancestor_inbreeding)
@@ -662,10 +727,11 @@ class PathInbreedingCalculator:
                 # 计算所有可能的路径组合
                 for bull_path in bull_paths:
                     for cow_path in cow_paths:
-                        # 计算路径系数: (1/2)^(n1+n2+2) * (1 + F_ancestor)
+                        # 计算路径系数: (1/2)^(n1+n2+1) * (1 + F_ancestor)
+                        # 修正之前的算法错误：从(n1+n2+2)变为(n1+n2+1)
                         path_length = len(bull_path) + len(cow_path)
                         ancestor_inbreeding, _, _ = self.calculate_inbreeding_coefficient(ancestor)
-                        path_coef = (0.5) ** (path_length + 2) * (1 + ancestor_inbreeding)
+                        path_coef = (0.5) ** (path_length + 1) * (1 + ancestor_inbreeding)
                         
                         # 构建路径字符串
                         path_str = f"子代 <- {cow_id} <- "
@@ -673,6 +739,8 @@ class PathInbreedingCalculator:
                         path_str += f" -> {ancestor} -> "
                         path_str += " -> ".join([str(p) for p in bull_path])
                         path_str += f" -> {bull_id} -> 子代"
+                        
+                        print(f"[DEBUG] 路径: {path_str}, 长度: {path_length}, 系数: {path_coef:.6f}")
                         
                         ancestor_contribution += path_coef
                         all_path_details.append((path_str, path_coef))

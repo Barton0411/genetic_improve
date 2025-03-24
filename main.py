@@ -22,7 +22,6 @@ def main():
     x = (screen.width() - dialog_geometry.width()) // 2  # 水平居中
     y = int(screen.height() * 0.55)  # 距离顶部55%的位置
     login_dialog.move(x, y)
-    
     if login_dialog.exec() == QDialog.DialogCode.Accepted:
         # 登录成功，停止视频播放并隐藏启动画面
         splash.stopVideo()
