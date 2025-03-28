@@ -16,10 +16,13 @@ class TraitsCalculation(BaseCowCalculation):
         self.output_prefix = "processed_cow_data_key_traits"
         self.required_columns = ['cow_id', 'birth_date', 'birth_date_dam', 'birth_date_mgd']
 
-    def process_data(self, main_window, selected_traits: list, progress_callback=None) -> Tuple[bool, str]:
+    def process_data(self, main_window, selected_traits: list, progress_callback=None, task_info_callback=None) -> Tuple[bool, str]:
         """执行关键性状计算的核心逻辑"""
         try:
             # 1. 初始化必要的设置
+            print("1. 初始化数据库连接...")
+            if task_info_callback:
+                task_info_callback("初始化数据库连接")
             if not self.init_db_connection():
                 return False, "连接数据库失败"
 
@@ -29,9 +32,16 @@ class TraitsCalculation(BaseCowCalculation):
                 return False, error_msg
 
             # 2. 读取母牛数据，获取公牛列表
+            print("2. 读取母牛数据...")
+            if task_info_callback:
+                task_info_callback("读取母牛数据")
+            if progress_callback:
+                progress_callback(10)
             cow_df = self.read_data(project_path, "processed_cow_data.xlsx")
             if cow_df is None:
                 return False, "读取母牛数据失败"
+            
+            print(f"成功读取 {len(cow_df)} 条母牛记录")
             
             # 添加birth_year列
             cow_df['birth_year'] = pd.to_datetime(cow_df['birth_date']).dt.year
@@ -45,71 +55,99 @@ class TraitsCalculation(BaseCowCalculation):
             for col in ['sire', 'mgs', 'mmgs']:
                 if col in cow_df.columns:
                     bull_ids.update(cow_df[col].dropna().unique())
+            
+            print(f"共发现 {len(bull_ids)} 个公牛ID")
 
             # 3. 处理每个公牛的性状数据
+            print("3. 处理公牛性状数据...")
+            if task_info_callback:
+                task_info_callback("处理公牛性状数据")
+            if progress_callback:
+                progress_callback(20)
             bull_traits = {}
-            missing_bulls = []
+            total_bulls = len(bull_ids)
+            for i, bull_id in enumerate(bull_ids, 1):
+                print(f"处理公牛 {bull_id} ({i}/{total_bulls})")
+                if task_info_callback:
+                    task_info_callback(f"处理公牛 {bull_id} ({i}/{total_bulls})")
+                traits_data = self.get_bull_traits(bull_id, selected_traits)
+                if traits_data:
+                    bull_traits[bull_id] = traits_data
+                if progress_callback:
+                    progress = 20 + int((i / total_bulls) * 20)
+                    progress_callback(progress)
+
+            # 4. 更新母牛数据中的公牛性状
+            print("4. 更新母牛数据中的公牛性状...")
+            if task_info_callback:
+                task_info_callback("更新母牛数据中的公牛性状")
+            if progress_callback:
+                progress_callback(45)
             
-            for bull_id in bull_ids:
-                if pd.isna(bull_id):
-                    continue
-                traits_data, found = self.query_bull_traits(str(bull_id), selected_traits)
-                if found:
-                    bull_traits[str(bull_id)] = traits_data
-                else:
-                    missing_bulls.append(bull_id)
-
-            # 4. 处理缺失的公牛信息
-            if missing_bulls:
-                if not self.process_missing_bulls(missing_bulls, 'traits_calculation', main_window.username):
-                    print("警告：缺失公牛信息上传失败")
-
-            # 5. 合并性状数据到母牛数据中
-            for bull_type in ['sire', 'mgs', 'mmgs']:
+            for col in ['sire', 'mgs', 'mmgs']:
                 for trait in selected_traits:
-                    cow_df[f"{bull_type}_{trait}"] = cow_df[bull_type].apply(
-                        lambda x: bull_traits.get(str(x), {}).get(trait) if pd.notna(x) else np.nan
-                    )
-                    
-                # 更新identified列
-                cow_df[f"{bull_type}_identified"] = cow_df[bull_type].apply(
-                    lambda x: str(x) in bull_traits if pd.notna(x) else False
-                )
+                    trait_col = f'{col}_{trait}'
+                    cow_df[trait_col] = cow_df[col].map(lambda x: bull_traits.get(x, {}).get(trait))
+                    identified_count = cow_df[trait_col].notna().sum()
+                    print(f"{trait_col}: 找到 {identified_count} 条记录")
 
-            # 6. 保存详细结果
-            output_dir = self.create_output_directory(project_path)
-            if not output_dir:
-                return False, "创建输出目录失败"
-
+            # 5. 保存详细结果
+            print("5. 保存详细计算结果...")
+            if task_info_callback:
+                task_info_callback("保存详细计算结果")
+            if progress_callback:
+                progress_callback(60)
+            output_dir = project_path / "analysis_results"
+            output_dir.mkdir(exist_ok=True)
             detail_output_path = output_dir / f"{self.output_prefix}_detail.xlsx"
             if not self.save_results_with_retry(cow_df, detail_output_path):
                 return False, "保存详细结果失败"
 
-            # 7. 处理年度平均值
+            # 6. 处理年度数据
+            print("6. 处理年度数据...")
+            if task_info_callback:
+                task_info_callback("处理年度数据")
+            if progress_callback:
+                progress_callback(70)
             yearly_output_path = output_dir / f"{self.output_prefix}_mean_by_year.xlsx"
             if not self.process_yearly_data(detail_output_path, yearly_output_path, selected_traits):
                 return False, "处理年度数据失败"
 
-            # 8. 计算性状得分
+            # 7. 计算性状得分
+            print("7. 计算性状得分...")
+            if task_info_callback:
+                task_info_callback("计算性状得分")
+            if progress_callback:
+                progress_callback(80)
             pedigree_output_path = output_dir / f"{self.output_prefix}_scores_pedigree.xlsx"
             if not self.calculate_trait_scores(detail_output_path, yearly_output_path, pedigree_output_path):
                 return False, "计算性状得分失败"
 
-            # 9. 检查并处理基因组数据
+            # 8. 检查并处理基因组数据
+            print("8. 检查基因组数据...")
+            if task_info_callback:
+                task_info_callback("检查并处理基因组数据")
+            if progress_callback:
+                progress_callback(90)
             genomic_data_path = project_path / "standardized_data" / "processed_genomic_data.xlsx"
             if genomic_data_path.exists():
+                print("发现基因组数据，开始更新...")
                 genomic_output_path = output_dir / f"{self.output_prefix}_scores_genomic.xlsx"
                 if not self.update_genomic_data(pedigree_output_path, genomic_data_path, genomic_output_path):
                     return False, "更新基因组数据失败"
-                # 确保基因组数据评估文件存在
-                if not genomic_output_path.exists():
-                    # 如果更新失败，复制系谱评估文件作为基因组评估文件的基础
-                    df = pd.read_excel(pedigree_output_path)
-                    df.to_excel(genomic_output_path, index=False)
+                print("基因组数据更新完成")
+            else:
+                print("未找到基因组数据文件，跳过基因组数据更新")
 
+            if progress_callback:
+                progress_callback(100)
+            if task_info_callback:
+                task_info_callback("计算完成")
+            print("所有计算步骤已完成!")
             return True, "计算完成"
 
         except Exception as e:
+            print(f"计算过程出错: {str(e)}")
             return False, str(e)
 
     def process_yearly_data(self, detail_path: Path, output_path: Path, selected_traits: list) -> bool:
@@ -380,4 +418,45 @@ class TraitsCalculation(BaseCowCalculation):
                 
         except Exception as e:
             print(f"更新基因组数据时发生错误: {e}")
-            return False      
+            return False
+
+    def get_bull_traits(self, bull_id: str, selected_traits: list) -> dict:
+        """
+        从数据库获取公牛的性状数据
+        
+        Args:
+            bull_id: 公牛ID
+            selected_traits: 选中的性状列表
+            
+        Returns:
+            dict: 包含性状数据的字典，如果未找到则返回None
+        """
+        try:
+            if pd.isna(bull_id):
+                return None
+                
+            bull_id = str(bull_id)  # 确保ID是字符串
+            with self.db_engine.connect() as conn:
+                # 先尝试用 BULL NAAB 查询
+                if len(bull_id) <= 10:
+                    result = conn.execute(
+                        text("SELECT * FROM bull_library WHERE `BULL NAAB`=:bull_id"),
+                        {"bull_id": bull_id}
+                    ).fetchone()
+                else:
+                    # 对于长ID，使用 BULL REG 查询
+                    result = conn.execute(
+                        text("SELECT * FROM bull_library WHERE `BULL REG`=:bull_id"),
+                        {"bull_id": bull_id}
+                    ).fetchone()
+                
+                if result:
+                    # 如果找到了公牛，提取所选性状数据
+                    result_dict = dict(result._mapping)
+                    return {trait: result_dict.get(trait) for trait in selected_traits}
+                    
+                return None
+                
+        except Exception as e:
+            print(f"获取公牛 {bull_id} 的性状数据时发生错误: {e}")
+            return None      

@@ -251,7 +251,7 @@ class BullKeyTraitsPage(QWidget):
                         self, 
                         "警告", 
                         f"以下公牛在数据库中未找到：\n{', '.join(missing_bulls)}\n"
-                        "这些信息已记��到云端数据库。\n"
+                        "这些信息已记录到云端数据库。\n"
                         "结果文件中这些公牛的性状值将显示为空。"
                     )
                 except Exception as e:
@@ -296,3 +296,48 @@ class BullKeyTraitsPage(QWidget):
         while parent and not isinstance(parent, QMainWindow):
             parent = parent.parent()
         return parent
+
+    def perform_bull_traits_calculation(self, main_window):
+        """执行公牛关键性状计算"""
+        try:
+            # 创建进度对话框
+            from gui.progress import ProgressDialog
+            progress_dialog = ProgressDialog(self)
+            progress_dialog.setWindowTitle("公牛关键性状计算进度")
+            progress_dialog.show()
+
+            # 获取选中的性状
+            selected_traits = self.get_selected_traits()
+            if not selected_traits:
+                progress_dialog.close()
+                return False, "请至少选择一个性状"
+
+            # 创建计算实例
+            traits_calculator = TraitsCalculation()
+            
+            def update_progress(value):
+                progress_dialog.update_progress(value)
+                
+            def update_task_info(task_info):
+                progress_dialog.set_task_info(task_info)
+                
+            # 执行计算
+            success, message = traits_calculator.process_data(
+                main_window, 
+                selected_traits,
+                progress_callback=update_progress,
+                task_info_callback=update_task_info
+            )
+            
+            # 关闭进度对话框
+            progress_dialog.close()
+            
+            if progress_dialog.cancelled:
+                return False, "用户取消了操作"
+                
+            return success, message
+
+        except Exception as e:
+            if 'progress_dialog' in locals():
+                progress_dialog.close()
+            return False, str(e)

@@ -407,131 +407,47 @@ class CowKeyTraitsPage(QWidget):
 
     def perform_cow_traits_calculation(self, main_window, progress_callback=None, task_info_callback=None):
         """执行关键性状计算的核心逻辑"""
-        engine = None   # 初始化engine为None
         try:
-            # 1. 获取所选性状列表
+            # 创建进度对话框
+            progress_dialog = ProgressDialog(self)
+            progress_dialog.setWindowTitle("关键性状计算进度")
+            progress_dialog.show()
+
+            # 获取选中的性状
             selected_traits = self.get_selected_traits()
-            print(f"获取到所选性状: {selected_traits}")
+            if not selected_traits:
+                progress_dialog.close()
+                return False, "请至少选择一个性状"
 
-            # 2. 读取母牛数据，获取公牛列表
-            cow_data_path = main_window.selected_project_path / "standardized_data" / "processed_cow_data.xlsx"
-            print(f"母牛数据文件路径: {cow_data_path}")
+            # 创建计算实例
+            traits_calculator = TraitsCalculation()
             
-            if not cow_data_path.exists():
-                raise FileNotFoundError("请先上传并处理母牛数据")
-            
-            print("开始读取母牛数据...")
-            cow_df = pd.read_excel(cow_data_path)
-            
-            # 添加birth_year列
-            cow_df['birth_year'] = pd.to_datetime(cow_df['birth_date']).dt.year
-            
-            # 添加sire_identified, mgs_identified, mmgs_identified列
-            for col in ['sire', 'mgs', 'mmgs']:
-                cow_df[f"{col}_identified"] = False
-            
-            bull_ids = set()
-            for col in ['sire', 'mgs', 'mmgs']:
-                if col in cow_df.columns:
-                    bull_ids.update(cow_df[col].dropna().unique())
-            print(f"提取到的公牛ID数量: {len(bull_ids)}")
-            
-            # 3. 检查数据库中的公牛,并提取所选性状数据
-            print("开始检查数据库中的公牛...")
-            engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
-            bull_traits = {}
-            with engine.connect() as conn:
-                missing_bulls = []
-                for bull_id in bull_ids:
-                    if pd.isna(bull_id):  # 跳过空值
-                        continue
-                    if len(str(bull_id)) > 10:
-                        print(f"检查长ID公牛 {bull_id} (BULL REG)")
-                        result = conn.execute(
-                            text("SELECT * FROM bull_library WHERE `BULL REG`=:bull_id"),
-                            {"bull_id": bull_id}
-                        ).fetchone()
-                    else:
-                        print(f"检查短ID公牛 {bull_id} (BULL NAAB)")
-                        result = conn.execute(
-                            text("SELECT * FROM bull_library WHERE `BULL NAAB`=:bull_id"),
-                            {"bull_id": bull_id}
-                        ).fetchone()
-                        
-                    if result:
-                        # 如果找到了公牛,提取所选性状数据
-                        result_dict = dict(result._mapping)
-                        bull_traits[str(bull_id)] = {trait: result_dict.get(trait) for trait in selected_traits}
-                    else:
-                        missing_bulls.append(bull_id)
+            def update_progress(value):
+                progress_dialog.update_progress(value)
                 
-            print(f"缺失公牛数量: {len(missing_bulls)}")
-                        
-            # 4. 如果有缺失的公牛，创建缺失公牛的DataFrame并更新到云端数据库
-            if missing_bulls:
-                print("开始处理缺失公牛...")
-                username = main_window.username if hasattr(main_window, 'username') else 'unknown'
-                missing_df = pd.DataFrame({
-                    'bull': missing_bulls,
-                    'source': 'traits_calculation',
-                    'time': datetime.datetime.now(),
-                    'user': username
-                })
+            def update_task_info(task_info):
+                progress_dialog.set_task_info(task_info)
                 
-                print("开始更新缺失公牛到云端数据库...")
-                cloud_engine = create_engine(
-                    f"mysql+pymysql://{CLOUD_DB_USER}:{CLOUD_DB_PASSWORD}"
-                    f"@{CLOUD_DB_HOST}:{CLOUD_DB_PORT}/{CLOUD_DB_NAME}?charset=utf8mb4"
-                )
-                missing_df.to_sql('miss_bull', cloud_engine, if_exists='append', index=False)
-                print("缺失公牛更新完成")
-                
-            # 5. 将提取到的公牛性状数据合并到母牛数据中
-            print("开始合并性状数据...")
-            for bull_type in ['sire', 'mgs', 'mmgs']:
-                print(f"处理 {bull_type} 的性状数据")
-                for trait in selected_traits:
-                    cow_df[f"{bull_type}_{trait}"] = cow_df[bull_type].apply(
-                        lambda x: bull_traits.get(str(x), {}).get(trait) if pd.notna(x) else np.nan
-                    )
-                    print(f"{bull_type}_{trait} 的前5行数据:")
-                    print(cow_df[f"{bull_type}_{trait}"].head())
-                
-                # 更新 identified 列
-                cow_df[f"{bull_type}_identified"] = cow_df[bull_type].apply(
-                    lambda x: str(x) in bull_traits if pd.notna(x) else False
-                )
-                    
-            # 6. 保存详细结果
-            detail_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_detail.xlsx"
-            if not self.save_results_with_retry(cow_df, detail_output_path):
-                return False, "用户取消了保存操作"
+            # 执行计算
+            success, message = traits_calculator.process_data(
+                main_window, 
+                selected_traits,
+                progress_callback=update_progress,
+                task_info_callback=update_task_info
+            )
             
-            # 7. 处理年度平均值和回归分析
-            yearly_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_mean_by_year.xlsx"
-            if not self.process_cow_key_traits_by_year(detail_output_path):
-                return False, "用户取消了年度数据保存操作"
-
-            # 8. 计算关键性状得分
-            pedigree_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pidgree.xlsx"
-            if not self.calculate_cow_key_traits_scores(detail_output_path, yearly_output_path):
-                return False, "用户取消了得分计算操作"
+            # 关闭进度对话框
+            progress_dialog.close()
             
-            # 9. 用基因组数据更新关键性状得分
-            genomic_data_path = main_window.selected_project_path / "standardized_data" / "processed_genomic_data.xlsx"
-            if genomic_data_path.exists():
-                if not self.update_with_genomic_data(pedigree_output_path, genomic_data_path):
-                    return False, "用户取消了基因组数据更新操作"
-            else:
-                print("未找到基因组数据文件，跳过基因组数据更新")
-
-            return True, "计算完成"
+            if progress_dialog.cancelled:
+                return False, "用户取消了操作"
+                
+            return success, message
 
         except Exception as e:
+            if 'progress_dialog' in locals():
+                progress_dialog.close()
             return False, str(e)
-        finally:
-            if engine:
-                engine.dispose()
 
     def on_calculation_finished(self):
         """计算完成的处理"""

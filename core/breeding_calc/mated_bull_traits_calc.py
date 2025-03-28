@@ -9,6 +9,7 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from core.data.update_manager import LOCAL_DB_PATH
 from core.breeding_calc.cow_traits_calc import TRAITS_TRANSLATION
+from gui.progress import ProgressDialog
 
 class MatedBullKeyTraitsPage(QWidget):
     def __init__(self, parent=None):
@@ -172,35 +173,61 @@ class MatedBullKeyTraitsPage(QWidget):
         return [self.selected_traits_list.item(i).data(Qt.ItemDataRole.UserRole) 
                 for i in range(self.selected_traits_list.count())]
 
-
     def start_mated_bull_traits_calculation(self):
         """开始已配公牛关键性状计算"""
+        # 获取主窗口
         main_window = self.get_main_window()
-        if not main_window or not main_window.selected_project_path:
-            QMessageBox.warning(self, "警告", "请先选择一个项目")
+        if not main_window:
             return
 
         try:
+            # 创建进度对话框
+            progress_dialog = ProgressDialog(self)
+            progress_dialog.setWindowTitle("已配公牛关键性状计算")
+            progress_dialog.show()
+
             # 1. 读取配种记录
+            progress_dialog.set_task_info("读取配种记录")
+            progress_dialog.update_progress(10)
+            
             breeding_data_path = main_window.selected_project_path / "standardized_data" / "processed_breeding_data.xlsx"
             if not breeding_data_path.exists():
+                progress_dialog.close()
                 QMessageBox.warning(self, "警告", "未找到已标准化的配种记录")
                 return
             
             breeding_df = pd.read_excel(breeding_data_path)
             breeding_df['配种年份'] = pd.to_datetime(breeding_df['配种日期']).dt.year
+            print(f"读取到 {len(breeding_df)} 条配种记录")
 
             # 2. 把配种记录按牛号长度分为两组
+            progress_dialog.set_task_info("处理公牛ID")
+            progress_dialog.update_progress(20)
+            
             short_ids = breeding_df[breeding_df['冻精编号'].str.len() <= 10]['冻精编号'].unique()
             long_ids = breeding_df[breeding_df['冻精编号'].str.len() > 10]['冻精编号'].unique()
+            print(f"短ID公牛数量: {len(short_ids)}, 长ID公牛数量: {len(long_ids)}")
 
             # 3. 从数据库读取性状数据
+            progress_dialog.set_task_info("获取公牛性状数据")
+            progress_dialog.update_progress(30)
+            
             engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
             selected_traits = self.get_selected_traits()
+            
+            if not selected_traits:
+                progress_dialog.close()
+                QMessageBox.warning(self, "警告", "请至少选择一个性状")
+                return
 
             with engine.connect() as conn:
                 traits_data = []
+                
+                # 处理短ID公牛
                 if len(short_ids) > 0:
+                    progress_dialog.set_task_info("处理短ID公牛")
+                    progress_dialog.update_progress(40)
+                    
                     # 为每个ID创建参数名
                     param_names = [f':id{i}' for i in range(len(short_ids))]
                     params_dict = {f'id{i}': id_val for i, id_val in enumerate(short_ids)}
@@ -212,8 +239,13 @@ class MatedBullKeyTraitsPage(QWidget):
                     )
                     naab_df = pd.read_sql(naab_query, conn, params=params_dict)
                     traits_data.append(naab_df)
+                    print(f"获取到 {len(naab_df)} 个短ID公牛的性状数据")
                 
+                # 处理长ID公牛
                 if len(long_ids) > 0:
+                    progress_dialog.set_task_info("处理长ID公牛")
+                    progress_dialog.update_progress(60)
+                    
                     # 为每个ID创建参数名
                     param_names = [f':id{i}' for i in range(len(long_ids))]
                     params_dict = {f'id{i}': id_val for i, id_val in enumerate(long_ids)}
@@ -225,6 +257,7 @@ class MatedBullKeyTraitsPage(QWidget):
                     )
                     reg_df = pd.read_sql(reg_query, conn, params=params_dict)
                     traits_data.append(reg_df)
+                    print(f"获取到 {len(reg_df)} 个长ID公牛的性状数据")
 
                 if traits_data:
                     bull_traits_df = pd.concat(traits_data, ignore_index=True)
@@ -232,6 +265,9 @@ class MatedBullKeyTraitsPage(QWidget):
                     bull_traits_df = pd.DataFrame(columns=['bull_id'] + selected_traits)
 
             # 4. 通过merge一次性关联数据
+            progress_dialog.set_task_info("合并数据")
+            progress_dialog.update_progress(80)
+            
             result_df = pd.merge(
                 breeding_df,
                 bull_traits_df,
@@ -241,11 +277,20 @@ class MatedBullKeyTraitsPage(QWidget):
             ).drop('bull_id', axis=1)
 
             # 5. 保存结果
+            progress_dialog.set_task_info("保存结果")
+            progress_dialog.update_progress(90)
+            
             output_path = main_window.selected_project_path / "analysis_results" / "processed_mated_bull_traits.xlsx"
             result_df.to_excel(output_path, index=False)
+            
+            progress_dialog.update_progress(100)
+            progress_dialog.close()
+            
             QMessageBox.information(self, "成功", "已配公牛关键性状分析完成！")
 
         except Exception as e:
+            if 'progress_dialog' in locals():
+                progress_dialog.close()
             QMessageBox.critical(self, "错误", f"计算过程中发生错误：{str(e)}")
 
     def get_main_window(self):
