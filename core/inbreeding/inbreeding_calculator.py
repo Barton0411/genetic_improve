@@ -399,10 +399,22 @@ class InbreedingCalculator:
         return sorted_ancestors
 
     def calculate_inbreeding_coefficient(self, animal_id: str) -> Tuple[float, str, str]:
-        """计算近交系数"""
+        """计算近交系数
+        
+        使用Wright方法计算近交系数：F = Σ(0.5)^(n+n'+1) * (1+F_A)
+        其中n和n'是从父母到共同祖先的代数，F_A是共同祖先的近交系数
+        
+        Args:
+            animal_id: 动物ID
+            
+        Returns:
+            Tuple[float, str, str]: (近交系数, 状态信息, 计算方法)
+        """
+        # 检查缓存
         if animal_id in self._calculation_cache:
             return self._calculation_cache[animal_id]
             
+        # 获取动物信息
         animal = self.get_cow_info(animal_id)
         if animal is None:
             return 0.0, "NOT_FOUND", "ERROR"
@@ -435,33 +447,52 @@ class InbreedingCalculator:
                             'gib': ancestor['gib']
                         }
                         
-                        # 计算贡献
-                        path1_len = len(ancestor['path1']) - 1
-                        path2_len = len(ancestor['path2']) - 1
-                        base_contribution = (0.5) ** (path1_len + path2_len)
+                        # 计算贡献 - 按照Wright公式
+                        path1_len = len(ancestor['path1']) - 1  # 父系路径长度
+                        path2_len = len(ancestor['path2']) - 1  # 母系路径长度
                         
-                        # GIB调整
+                        # Wright公式: (0.5)^(n+n'+1)
+                        base_contribution = (0.5) ** (path1_len + path2_len + 1)
+                        
+                        # 考虑共同祖先自身的近交系数
+                        ancestor_f = 0.0
+                        # 如果有GIB值，使用GIB估计
                         if ancestor['gib'] and ancestor['gib'] > 0:
-                            base_contribution *= (1 + ancestor['gib']/100)
+                            # GIB值通常是百分比，需要转为小数
+                            ancestor_f = ancestor['gib'] / 100
                         
-                        F_total += base_contribution
+                        # Wright公式包含祖先自身的近交系数：(0.5)^(n+n'+1) * (1+F_A)
+                        final_contribution = base_contribution * (1 + ancestor_f)
+                        F_total += final_contribution
                     
-                    return F_total, "COMPLETE", "PEDIGREE"
-                
-                # 如果没有找到共同祖先，使用父系GIB
+                    # 将结果存入缓存
+                    result = (F_total, "COMPLETE", "PEDIGREE")
+                    self._calculation_cache[animal_id] = result
+                    return result
+                    
+                # 如果没有找到共同祖先，尝试使用父系GIB值估算
                 sire_info = self.prepare_bull_id(animal['sire'])
                 if sire_info and sire_info.get('gib') is not None:
-                    F = sire_info['gib'] / 200  # 使用父系GIB值的一半
-                    return F, "Using GIB value", "GIB"
+                    # 父系GIB值的一半作为近交系数估计
+                    F = sire_info['gib'] / 200  
+                    result = (F, "Using GIB value", "GIB")
+                    self._calculation_cache[animal_id] = result
+                    return result
                 
-                return 0.0, "NO_COMMON_ANCESTOR", "NONE"
+                # 无共同祖先且无父系GIB值
+                result = (0.0, "NO_COMMON_ANCESTOR", "NONE")
+                self._calculation_cache[animal_id] = result
+                return result
             
-            return 0.0, "INCOMPLETE_PEDIGREE", "ERROR"
+            # 父母信息不完整
+            result = (0.0, "INCOMPLETE_PEDIGREE", "ERROR")
+            self._calculation_cache[animal_id] = result
+            return result
             
         except Exception as e:
             logging.error(f"计算近交系数时出错: {str(e)}")
             return 0.0, "ERROR", "ERROR"
-
+    
     def get_bull_by_naab(self, naab_no: str) -> Optional[Dict]:
         """通过 NAAB 号查找公牛信息"""
         if not naab_no or pd.isna(naab_no):

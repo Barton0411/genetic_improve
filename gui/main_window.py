@@ -663,7 +663,7 @@ class MainWindow(QMainWindow):
             if display_name == "母牛数据":
                 # 使用 Worker 处理母牛数据，并显示进度条
                 self.progress_dialog = ProgressDialog(self)
-                self.progress_dialog.set_task_info("上传并处理母牛数据", 0, 100)
+                self.progress_dialog.set_task_info("上传并处理母牛数据")
                 self.progress_dialog.show()
 
                 self.thread = QThread()
@@ -684,7 +684,7 @@ class MainWindow(QMainWindow):
             elif display_name == "基因组检测数据":
                 # 处理基因组检测数据
                 self.progress_dialog = ProgressDialog(self)
-                self.progress_dialog.set_task_info("上传并处理基因组检测数据", 0, 100)
+                self.progress_dialog.set_task_info("上传并处理基因组检测数据")
                 self.progress_dialog.show()
 
                 self.genomic_thread = QThread()

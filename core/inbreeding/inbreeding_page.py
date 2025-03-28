@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
     QTableView, QFrame, QSplitter, QMessageBox, QApplication,
-    QProgressDialog, QMainWindow, QDialog, QTabWidget, QComboBox, QListWidget, QTextEdit, QHeaderView, QMenu
+    QMainWindow, QDialog, QTabWidget, QComboBox, QListWidget, QTextEdit, QHeaderView, QMenu
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QBrush, QColor, QStandardItemModel, QStandardItem
@@ -20,6 +20,7 @@ import math
 import time
 
 from .models import InbreedingDetailModel, AbnormalDetailModel, StatisticsModel
+from gui.progress import ProgressDialog
 from core.data.update_manager import (
     CLOUD_DB_HOST, CLOUD_DB_PORT, CLOUD_DB_USER, 
     CLOUD_DB_PASSWORD, CLOUD_DB_NAME, LOCAL_DB_PATH, get_pedigree_db
@@ -1291,6 +1292,7 @@ class InbreedingPage(QWidget):
             "Mulefoot", "Cholesterol deficiency", "MW"
         ]
         self.db_engine = None
+        self.progress_dialog = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -1694,6 +1696,7 @@ class InbreedingPage(QWidget):
 
     def analyze_mated_pairs(self, project_path: Path, bull_genes: Dict[str, str]) -> List[Dict]:
         """分析已配公牛对"""
+        results = []
         try:
             # 读取配对数据
             breeding_file = project_path / "standardized_data" / "processed_breeding_data.xlsx"
@@ -1708,7 +1711,22 @@ class InbreedingPage(QWidget):
             # 分析每个配对
             results = []
             print("开始分析每个配对...")
+            total_count = len(df)
+            
+            # 更新进度
+            self.update_progress(40, f"分析配对记录 (0/{total_count})")
+            
             for i, row in enumerate(df.iterrows()):
+                # 检查是否取消
+                if hasattr(self, 'progress_dialog') and self.progress_dialog.cancelled:
+                    print("用户取消了分析，正在退出...")
+                    return results  # 提前返回已处理的结果
+                
+                # 每10条记录更新一次进度
+                if i % 10 == 0:
+                    progress = int(40 + (i / total_count) * 30)  # 40-70%的进度范围
+                    self.update_progress(progress, f"分析配对记录 ({i+1}/{total_count})")
+                
                 if i < 5 or i % 100 == 0:  # 只打印前5行和每100行，避免日志过长
                     print(f"分析第{i+1}条配对记录")
                 _, row = row  # 解包iterrows返回的元组
@@ -1762,7 +1780,7 @@ class InbreedingPage(QWidget):
         except Exception as e:
             print(f"分析已配公牛对时发生错误: {e}")
             logging.error(f"分析已配公牛对时发生错误: {e}")
-            return []
+            return results
 
     def analyze_candidate_pairs(self, project_path: Path, bull_genes: Dict[str, str]) -> List[Dict]:
         """分析备选公牛对"""
@@ -1785,11 +1803,24 @@ class InbreedingPage(QWidget):
             cow_df = cow_df[cow_df['是否在场'] == '是']
             print(f"过滤后在群的母牛数量: {len(cow_df)}")
             
+            # 估计总对数
+            total_pairs = len(cow_df) * len(bull_df)
+            print(f"预计分析的总配对数: {total_pairs}")
+            
             # 分析每对组合
             print("开始分析每对母牛和备选公牛的组合...")
             cow_count = 0
             pair_count = 0
+            
+            # 初始进度
+            self.update_progress(50, f"分析配对组合 (0/{total_pairs})")
+            
             for _, cow_row in cow_df.iterrows():
+                # 检查是否取消
+                if hasattr(self, 'progress_dialog') and self.progress_dialog.cancelled:
+                    print("用户取消了分析，正在退出...")
+                    return results  # 提前返回已处理的结果
+                
                 cow_count += 1
                 if cow_count <= 5 or cow_count % 50 == 0:  # 只打印前5头牛和每50头牛，避免日志过长
                     print(f"分析第{cow_count}头母牛")
@@ -1808,7 +1839,18 @@ class InbreedingPage(QWidget):
                 
                 # 分析与每个备选公牛的组合
                 for _, bull_row in bull_df.iterrows():
+                    # 每10对检查一次是否取消
+                    if pair_count % 10 == 0 and hasattr(self, 'progress_dialog') and self.progress_dialog.cancelled:
+                        print("用户取消了分析，正在退出...")
+                        return results  # 提前返回已处理的结果
+                    
                     pair_count += 1
+                    
+                    # 更新进度条 - 每100对更新一次
+                    if pair_count % 100 == 0:
+                        progress = int(40 + (pair_count / total_pairs) * 30)  # 40-70%的进度范围
+                        self.update_progress(progress, f"分析配对组合 ({pair_count}/{total_pairs})")
+                    
                     if pair_count <= 5 or pair_count % 1000 == 0:  # 只打印前5对和每1000对，避免日志过长
                         print(f"  分析第{pair_count}对组合: 母牛{cow_id} - 公牛{bull_row['bull_id']}")
                     
@@ -1851,7 +1893,7 @@ class InbreedingPage(QWidget):
         except Exception as e:
             print(f"分析备选公牛对时发生错误: {e}")
             logging.error(f"分析备选公牛对时发生错误: {e}")
-            return []
+            return results
 
     def collect_abnormal_pairs(self, results: List[Dict]) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """收集异常配对和统计信息"""
@@ -1859,7 +1901,21 @@ class InbreedingPage(QWidget):
         gene_stats = {gene: 0 for gene in self.defect_genes}
         inbreeding_count = 0  # 统计近交系数过高的数量
         
+        # 更新进度
+        self.update_progress(90, "收集异常配对...")
+        
+        # 计数器
+        count = 0
+        total = len(results)
+        
         for result in results:
+            # 每10条检查一次是否取消
+            count += 1
+            if count % 10 == 0 and hasattr(self, 'progress_dialog') and self.progress_dialog.cancelled:
+                print("用户取消了异常配对收集，正在退出...")
+                # 返回当前已收集的结果
+                return pd.DataFrame(abnormal_records), pd.DataFrame(stats_records if 'stats_records' in locals() else [])
+            
             # 检测隐性基因问题
             for gene in self.defect_genes:
                 if result[gene] == 'NO safe':
@@ -1939,6 +1995,15 @@ class InbreedingPage(QWidget):
             
             # 开始计算
             for i, result in enumerate(results):
+                # 检查是否取消
+                if hasattr(self, 'progress_dialog') and self.progress_dialog.cancelled:
+                    print("用户取消了计算，正在退出...")
+                    return results  # 提前返回当前结果
+                
+                # 更新进度条 - 在计算期间显示进度
+                progress = int(70 + (i / total_count) * 20)  # 70-90%的进度范围
+                self.update_progress(progress, f"计算近交系数 ({i+1}/{total_count})")
+                
                 # 打印进度
                 if i % 10 == 0 or i < 5:  # 每10个或前5个打印一次
                     print(f"\n===== 处理第 {i+1}/{total_count} 个配对 =====")
@@ -2018,6 +2083,18 @@ class InbreedingPage(QWidget):
             print(f"⚠️ 计算近交系数时出错: {str(e)}")
             return results
             
+    def update_progress(self, value: int, message: str):
+        """更新进度对话框
+        
+        Args:
+            value: 进度值(0-100)
+            message: 进度消息
+        """
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.update_progress(value)
+            self.progress_dialog.set_task_info(message)
+            QApplication.processEvents()
+    
     def start_analysis(self, analysis_type: str):
         """开始分析"""
         print(f"开始执行{analysis_type}分析...")
@@ -2038,10 +2115,10 @@ class InbreedingPage(QWidget):
         print("数据库连接成功")
         
         # 显示进度对话框
-        progress = QProgressDialog("正在分析基因数据...", "取消", 0, 100, self)
-        progress.setWindowTitle("分析中")
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.show()
+        self.progress_dialog = ProgressDialog(self)
+        self.progress_dialog.setWindowTitle("分析中")
+        self.progress_dialog.set_task_info("基因数据分析")
+        self.progress_dialog.show()
         QApplication.processEvents()
         
         try:
@@ -2050,8 +2127,7 @@ class InbreedingPage(QWidget):
             from pathlib import Path
             
             # 更新进度
-            progress.setValue(5)
-            progress.setLabelText("获取系谱库...")
+            self.update_progress(5, "获取系谱库...")
             QApplication.processEvents()
             
             # 获取系谱库实例
@@ -2061,8 +2137,7 @@ class InbreedingPage(QWidget):
             cow_file = project_path / "standardized_data" / "processed_cow_data.xlsx"
             
             # 更新进度
-            progress.setValue(10)
-            progress.setLabelText("构建母牛系谱库...")
+            self.update_progress(10, "构建母牛系谱库...")
             QApplication.processEvents()
             
             # 构建母牛系谱库并合并
@@ -2070,16 +2145,16 @@ class InbreedingPage(QWidget):
                 if isinstance(value, int):
                     # 将系谱库构建进度(0-100)映射到总进度的10-25区间
                     mapped_value = 10 + int(value * 0.15)
-                    progress.setValue(mapped_value)
-                progress.setLabelText(message)
+                    self.update_progress(mapped_value, message)
+                self.progress_dialog.set_task_info(message)
                 QApplication.processEvents()
-                return not progress.wasCanceled()
+                return not self.progress_dialog.cancelled
             
             # 检查母牛数据文件是否存在
             if not cow_file.exists():
                 print(f"母牛数据文件不存在: {cow_file}")
                 QMessageBox.warning(self, "错误", f"母牛数据文件不存在: {cow_file}\n请确保已上传并处理母牛数据。")
-                progress.close()
+                self.progress_dialog.close()
                 return
                 
             # 构建母牛系谱库
@@ -2091,10 +2166,10 @@ class InbreedingPage(QWidget):
             print("开始收集所需的公牛号...")
             required_bulls = self.collect_required_bulls(analysis_type, project_path)
             print(f"收集到{len(required_bulls)}个公牛号")
-            progress.setValue(30)
+            self.update_progress(30, "收集公牛号")
             QApplication.processEvents()
             
-            if progress.wasCanceled():
+            if self.progress_dialog.cancelled:
                 print("用户取消了分析")
                 return
                 
@@ -2102,10 +2177,10 @@ class InbreedingPage(QWidget):
             print("开始查询公牛基因信息...")
             bull_genes, missing_bulls = self.query_bull_genes(required_bulls)
             print(f"查询到{len(bull_genes)}个公牛的基因信息，有{len(missing_bulls)}个公牛未找到")
-            progress.setValue(40)
+            self.update_progress(40, "查询公牛基因信息")
             QApplication.processEvents()
             
-            if progress.wasCanceled():
+            if self.progress_dialog.cancelled:
                 print("用户取消了分析")
                 return
                 
@@ -2125,10 +2200,10 @@ class InbreedingPage(QWidget):
                 print("分析备选公牛对...")
                 results = self.analyze_candidate_pairs(project_path, bull_genes)
                 
-            progress.setValue(70)
+            self.update_progress(70, "分析完成")
             QApplication.processEvents()
             
-            if progress.wasCanceled():
+            if self.progress_dialog.cancelled:
                 print("用户取消了分析")
                 return
                 
@@ -2142,10 +2217,10 @@ class InbreedingPage(QWidget):
                 print(f"记录 {i+1}: 后代近交系数={result.get('后代近交系数', '未找到')}, "
                      f"后代近交详情存在={bool(result.get('后代近交详情'))}")
                 
-            progress.setValue(90)
+            self.update_progress(90, "完成分析")
             QApplication.processEvents()
             
-            if progress.wasCanceled():
+            if self.progress_dialog.cancelled:
                 print("用户取消了分析")
                 return
                 
@@ -2169,9 +2244,9 @@ class InbreedingPage(QWidget):
             self.stats_model.update_data(stats_df)
             
             # 完成
-            progress.setValue(100)
+            self.progress_dialog.update_progress(100)
             print(f"{analysis_type}分析完成")
-            QMessageBox.information(self, "完成", f"基因分析完成，共分析{len(results)}对配对。")
+            # 不再显示QMessageBox.information完成提示，因为进度对话框已经显示了完成信息
             
         except Exception as e:
             print(f"执行{analysis_type}分析时发生错误: {e}")
@@ -2179,6 +2254,6 @@ class InbreedingPage(QWidget):
             QMessageBox.critical(self, "错误", f"分析过程中发生错误: {str(e)}")
             
         finally:
-            progress.close()
+            self.progress_dialog.close()
             if self.db_engine:
                 self.db_engine.dispose()
