@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
     QTableView, QFrame, QSplitter, QMessageBox, QApplication,
-    QMainWindow, QDialog, QTabWidget, QComboBox, QListWidget, QTextEdit, QHeaderView, QMenu
+    QMainWindow, QDialog, QTabWidget, QComboBox, QListWidget, QTextEdit, QHeaderView, QMenu, QFileDialog
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QBrush, QColor, QStandardItemModel, QStandardItem
@@ -1323,6 +1323,11 @@ class InbreedingPage(QWidget):
         self.detail_table.horizontalHeader().setStretchLastSection(True)  # 最后一列填充剩余空间
         self.detail_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)  # 自动调整列宽
         
+        # 启用排序
+        self.detail_table.setSortingEnabled(True)  # 启用排序功能
+        self.detail_table.horizontalHeader().setSortIndicatorShown(True)  # 显示排序指示器
+        self.detail_table.horizontalHeader().setSectionsClickable(True)  # 确保表头可点击
+        
         left_layout.addWidget(self.detail_table)
         
         # 连接表格点击事件
@@ -1368,6 +1373,25 @@ class InbreedingPage(QWidget):
             button_layout.addWidget(btn)
         
         right_layout.addLayout(button_layout)
+        
+        # 添加导出按钮
+        export_btn = QPushButton("导出分析结果")
+        export_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                min-width: 120px;
+                margin-top: 10px;
+            }
+            QPushButton:hover {
+                background-color: #219a52;
+            }
+        """)
+        export_btn.clicked.connect(self.export_results)
+        right_layout.addWidget(export_btn)
         
         # 添加到分割器
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -2096,7 +2120,12 @@ class InbreedingPage(QWidget):
             QApplication.processEvents()
     
     def start_analysis(self, analysis_type: str):
-        """开始分析"""
+        """开始分析
+        Args:
+            analysis_type: 分析类型，"mated" 表示已配公牛分析，"candidate" 表示备选公牛分析
+        """
+        # 保存最后的分析类型
+        self._last_analysis_type = analysis_type
         print(f"开始执行{analysis_type}分析...")
         
         # 获取项目路径
@@ -2257,3 +2286,52 @@ class InbreedingPage(QWidget):
             self.progress_dialog.close()
             if self.db_engine:
                 self.db_engine.dispose()
+
+    def export_results(self):
+        """导出分析结果到Excel文件"""
+        try:
+            # 检查是否有数据可以导出
+            if self.detail_model.df.empty and self.abnormal_model.df.empty and self.stats_model.df.empty:
+                QMessageBox.warning(self, "警告", "没有可导出的数据，请先进行分析。")
+                return
+
+            # 根据最后点击的按钮来判断分析类型
+            if not hasattr(self, '_last_analysis_type'):
+                default_filename = "近交系数及隐性基因分析结果.xlsx"
+            else:
+                if self._last_analysis_type == "mated":
+                    default_filename = "已配公牛_近交系数及隐性基因分析结果.xlsx"
+                else:
+                    default_filename = "备选公牛_近交系数及隐性基因分析结果.xlsx"
+
+            # 获取保存文件路径
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "导出分析结果",
+                default_filename,
+                "Excel Files (*.xlsx)"
+            )
+
+            if not file_path:
+                return
+
+            # 创建Excel写入器
+            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                # 导出配对明细表
+                if not self.detail_model.df.empty:
+                    self.detail_model.df.to_excel(writer, sheet_name='配对明细表', index=False)
+
+                # 导出异常明细表
+                if not self.abnormal_model.df.empty:
+                    self.abnormal_model.df.to_excel(writer, sheet_name='异常明细表', index=False)
+
+                # 导出统计表
+                if not self.stats_model.df.empty:
+                    self.stats_model.df.to_excel(writer, sheet_name='统计表', index=False)
+
+            # 显示成功消息
+            QMessageBox.information(self, "导出成功", f"分析结果已成功导出到:\n{file_path}")
+
+        except Exception as e:
+            logging.error(f"导出分析结果时发生错误: {e}")
+            QMessageBox.critical(self, "导出失败", f"导出过程中发生错误:\n{str(e)}")

@@ -74,7 +74,7 @@ class IndexCalculationPage(QWidget):
         # 添加表头
         layout.addWidget(QLabel("性状"), 0, 0)
         layout.addWidget(QLabel("权重"), 0, 1)
-        layout.addWidget(QLabel("标准差"), 0, 2)
+
 
         # 添加所有性状及其输入框
         row = 1
@@ -91,9 +91,9 @@ class IndexCalculationPage(QWidget):
             self.trait_inputs[trait] = weight_input
             layout.addWidget(weight_input, row, 1)
 
-            # 标准差显示
+            """ # 标准差显示
             sd_label = QLabel(str(sd))
-            layout.addWidget(sd_label, row, 2)
+            layout.addWidget(sd_label, row, 2)"""
 
             row += 1
 

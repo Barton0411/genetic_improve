@@ -8,6 +8,8 @@ class InbreedingDetailModel(QAbstractTableModel):
         super().__init__()
         self.df = pd.DataFrame()  # 初始化一个空的DataFrame
         self.display_columns = []
+        self.sort_column = None  # 当前排序的列
+        self.sort_order = Qt.SortOrder.AscendingOrder  # 排序顺序
         
         # 定义基因列表
         self.defect_genes = [
@@ -77,7 +79,15 @@ class InbreedingDetailModel(QAbstractTableModel):
                     return self.display_columns[section]
             elif orientation == Qt.Orientation.Vertical:
                 return str(section + 1)
+        elif role == Qt.ItemDataRole.TextAlignmentRole:
+            return Qt.AlignmentFlag.AlignCenter
         return None
+
+    def flags(self, index):
+        """设置单元格标志"""
+        if not index.isValid():
+            return Qt.ItemFlag.NoItemFlags
+        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
     def update_data(self, df: pd.DataFrame):
         """更新数据"""
@@ -192,6 +202,40 @@ class InbreedingDetailModel(QAbstractTableModel):
             'missing bull data': QBrush(QColor(200, 200, 255))  # 浅蓝色
         }
         return colors.get(value)
+
+    def sort(self, column: int, order: Qt.SortOrder) -> None:
+        """实现排序功能"""
+        try:
+            self.layoutAboutToBeChanged.emit()
+            
+            # 获取列名
+            if 0 <= column < len(self.display_columns):
+                column_name = self.display_columns[column]
+                
+                # 如果是近交系数或后代近交系数列，需要特殊处理
+                if column_name in ['近交系数', '后代近交系数']:
+                    # 移除百分号并转换为浮点数进行排序
+                    self.df[f'{column_name}_sort'] = self.df[column_name].str.rstrip('%').astype(float)
+                    self.df = self.df.sort_values(
+                        by=f'{column_name}_sort',
+                        ascending=(order == Qt.SortOrder.AscendingOrder)
+                    )
+                    # 删除临时排序列
+                    self.df = self.df.drop(columns=[f'{column_name}_sort'])
+                else:
+                    # 其他列正常排序
+                    self.df = self.df.sort_values(
+                        by=column_name,
+                        ascending=(order == Qt.SortOrder.AscendingOrder)
+                    )
+                
+                # 保存当前排序状态
+                self.sort_column = column
+                self.sort_order = order
+            
+            self.layoutChanged.emit()
+        except Exception as e:
+            print(f"排序时发生错误: {e}")
 
 
 class AbnormalDetailModel(QAbstractTableModel):
