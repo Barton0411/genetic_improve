@@ -5,7 +5,7 @@ from pathlib import Path
 import json
 
 from PyQt6.QtCore import (
-    Qt, QDir, QUrl, pyqtSignal, QThread, Qt
+    Qt, QDir, QUrl, pyqtSignal, QThread, QTimer
 )
 from PyQt6.QtGui import (
     QFileSystemModel, QDesktopServices, QBrush, QPalette, QPixmap
@@ -14,8 +14,10 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QFileDialog, QMessageBox, QLabel, 
     QListWidget, QListWidgetItem, QStackedWidget, QInputDialog, 
-    QFrame, QTreeView, QGridLayout, QAbstractItemView, QMenu,QGraphicsOpacityEffect,
-    QStackedLayout, QGroupBox, QComboBox, QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QTabWidget, QFormLayout, QSpinBox, QDialogButtonBox, QDialog
+    QFrame, QTreeView, QGridLayout, QAbstractItemView, QMenu, QGraphicsOpacityEffect,
+    QStackedLayout, QGroupBox, QComboBox, QCheckBox, QTableWidget, QTableWidgetItem, 
+    QHeaderView, QLineEdit, QTabWidget, QFormLayout, QSpinBox, QDialogButtonBox, 
+    QDialog, QProgressDialog, QApplication, QTextBrowser, QSizePolicy
 )
 import warnings
 
@@ -36,16 +38,190 @@ from gui.db_update_worker import DBUpdateWorker
 from core.breeding_calc.bull_traits_calc import BullKeyTraitsPage  
 from core.breeding_calc.index_page import IndexCalculationPage
 from core.breeding_calc.mated_bull_traits_calc import MatedBullKeyTraitsPage  
-from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QPushButton, QFileDialog, QMessageBox, QLabel, 
-    QListWidget, QListWidgetItem, QStackedWidget, QInputDialog, 
-    QFrame, QTreeView
-)
-from PyQt6.QtCore import Qt, QDir
-from PyQt6.QtGui import QFileSystemModel, QPixmap
-from pathlib import Path
 
+# 策略表格管理器，用于处理表格创建和数据逻辑
+class StrategyTableManager:
+    """策略表格管理器，用于处理策略表格的创建和数据操作"""
+    
+    @staticmethod
+    def create_strategy_table(parent):
+        """创建策略表格并初始化"""
+        strategy_table = QTableWidget(parent)
+        strategy_table.setColumnCount(6)
+        strategy_table.setRowCount(7)  # 包含一行分隔行
+        
+        # 隐藏垂直表头（行号）
+        strategy_table.verticalHeader().setVisible(False)
+        
+        headers = ["分组", "分配比例(%)", "第1次配种", "第2次配种", "第3次配种", "第4次+配种"]
+        strategy_table.setHorizontalHeaderLabels(headers)
+        
+        # 设置固定的分组名称
+        groups = [
+            ("成母牛A", "成母牛"), ("成母牛B", "成母牛"), ("成母牛C", "成母牛"),
+            (None, None),  # 空行，用于分隔
+            ("后备牛A", "后备牛"), ("后备牛B", "后备牛"), ("后备牛C", "后备牛")
+        ]
+        
+        for i, (group, group_type) in enumerate(groups):
+            # 设置分隔行
+            if group is None:
+                for col in range(6):
+                    item = QTableWidgetItem("")
+                    item.setFlags(Qt.ItemFlag.NoItemFlags)
+                    strategy_table.setItem(i, col, item)
+                strategy_table.setRowHeight(i, 10)  # 设置分隔行高度为10像素
+                continue
+            
+            # 分组名称
+            name_item = QTableWidgetItem(group)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            name_item.setData(Qt.ItemDataRole.UserRole, group_type)
+            strategy_table.setItem(i, 0, name_item)
+            
+            # 添加分配比例输入
+            ratio_item = QTableWidgetItem("0")
+            strategy_table.setItem(i, 1, ratio_item)
+            
+            # 添加配种方式选择下拉框
+            for j in range(2, 6):
+                combo = QComboBox()
+                combo.addItems(["常规冻精", "普通性控", "超级性控", "肉牛冻精", "胚胎"])
+                strategy_table.setCellWidget(i, j, combo)
+        
+        # 设置行高
+        for row in range(strategy_table.rowCount()):
+            if row != 3:  # 不是分隔行
+                strategy_table.setRowHeight(row, 45)  # 增加行高为45像素，使配种方式名称完整显示
+        
+        # 调整表格列宽，确保文字完整显示
+        strategy_table.setColumnWidth(0, 100)  # 分组列
+        strategy_table.setColumnWidth(1, 100)  # 分配比例列
+        strategy_table.setColumnWidth(2, 130)  # 第1次配种列
+        strategy_table.setColumnWidth(3, 130)  # 第2次配种列
+        strategy_table.setColumnWidth(4, 130)  # 第3次配种列
+        strategy_table.setColumnWidth(5, 130)  # 第4次+配种列
+        
+        # 设置下拉框样式
+        StrategyTableManager.setup_combobox_style(strategy_table)
+        
+        # 设置表格其他属性
+        strategy_table.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        strategy_table.setMinimumWidth(750)  # 设置最小宽度确保完整显示
+        strategy_table.setFixedHeight(340)   # 添加这行来设置固定高度
+        strategy_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # 禁用水平滚动条
+        
+        # 表格整体设置
+        strategy_table.setFrameShape(QFrame.Shape.StyledPanel)
+        strategy_table.setShowGrid(True)
+        strategy_table.setGridStyle(Qt.PenStyle.SolidLine)
+        strategy_table.horizontalHeader().setStretchLastSection(True)  # 最后一列拉伸填充
+        strategy_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        
+        return strategy_table
+    
+    @staticmethod
+    def setup_combobox_style(strategy_table):
+        """设置所有下拉框的样式"""
+        for row in range(strategy_table.rowCount()):
+            if row != 3:  # 不是分隔行
+                for col in range(2, 6):
+                    combo = strategy_table.cellWidget(row, col)
+                    if combo:
+                        # 设置下拉框样式，确保文本完整显示，极简风格
+                        combo.setStyleSheet("""
+                            QComboBox { 
+                                min-width: 120px; 
+                                min-height: 30px; 
+                                padding: 2px; 
+                                margin: 1px;
+                                border: 1px solid #ddd;
+                                border-radius: 2px;
+                                background-color: white;
+                            }
+                            QComboBox::drop-down {
+                                subcontrol-origin: padding;
+                                subcontrol-position: right center;
+                                width: 15px;
+                                border-left: none;
+                            }
+                            QComboBox::down-arrow {
+                                width: 8px;
+                                height: 8px;
+                            }
+                        """)
+    
+    @staticmethod
+    def get_strategy_table_data(strategy_table):
+        """获取策略表格中的数据"""
+        data = []
+        for row in range(strategy_table.rowCount()):
+            # 跳过分隔行（第4行，索引为3）
+            if row == 3:
+                continue
+                
+            # 检查是否有有效的分组名称单元格
+            name_item = strategy_table.item(row, 0)
+            if name_item is None:
+                continue
+                
+            # 获取比例，如果为空或无效则设为0
+            ratio_item = strategy_table.item(row, 1)
+            ratio_text = ratio_item.text() if ratio_item is not None else "0"
+            try:
+                ratio = float(ratio_text or "0")
+            except ValueError:
+                ratio = 0
+                
+            # 安全地获取配种方法
+            breeding_methods = []
+            for col in range(2, 6):
+                combo = strategy_table.cellWidget(row, col)
+                if combo is not None:
+                    breeding_methods.append(combo.currentText())
+                else:
+                    # 如果下拉框不存在，添加默认值
+                    breeding_methods.append("常规冻精")
+            
+            row_data = {
+                "group": name_item.text(),
+                "ratio": ratio,
+                "breeding_methods": breeding_methods
+            }
+            data.append(row_data)
+        return data
+        
+    @staticmethod
+    def load_strategy_to_table(strategy_table, strategy_data):
+        """将策略数据加载到表格中"""
+        if 'strategy_table' not in strategy_data:
+            raise ValueError("策略数据缺少strategy_table字段")
+            
+        # 策略中应该有6行（3行成母牛+3行后备牛）
+        strategy_rows = strategy_data['strategy_table']
+        if len(strategy_rows) != 6:
+            raise ValueError(f"策略数据格式不正确，期望6行，实际{len(strategy_rows)}行")
+        
+        # 前3项为成母牛A/B/C，后3项为后备牛A/B/C
+        # 界面表格有7行，第4行为分隔行
+        table_indices = [0, 1, 2, 4, 5, 6]  # 映射策略索引到表格行索引
+        
+        for strategy_idx, table_idx in enumerate(table_indices):
+            if strategy_idx < len(strategy_rows):
+                strategy_row = strategy_rows[strategy_idx]
+                
+                # 设置分配比例 - 先检查单元格是否存在
+                ratio_item = strategy_table.item(table_idx, 1)
+                if ratio_item:
+                    ratio_item.setText(str(strategy_row['ratio']))
+                
+                # 设置配种方法 - 先检查下拉框是否存在
+                for j, method in enumerate(strategy_row['breeding_methods']):
+                    combo = strategy_table.cellWidget(table_idx, j + 2)
+                    if combo:
+                        index = combo.findText(method)
+                        if index >= 0:
+                            combo.setCurrentIndex(index)
 
 # 修改 sys.path（如果必要，确保只做一次）
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -912,6 +1088,13 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(20)
 
+        # 创建左右分栏布局
+        h_layout = QHBoxLayout()
+        
+        # 左侧面板 - 参数设置和分组设计
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        
         # 1. 选配参数设置区域
         param_group = QGroupBox("选配参数设置")
         param_layout = QVBoxLayout()
@@ -936,126 +1119,156 @@ class MainWindow(QMainWindow):
         param_layout.addLayout(gene_control_layout)
         param_group.setLayout(param_layout)
         
-        # 2. 牛群分组设置区域
-        group_group = QGroupBox("牛群分组设置")
-        group_layout = QVBoxLayout()
+        # 2. 分组设计区域
+        design_group = QGroupBox("分组方式设计")
+        design_layout = QVBoxLayout()
         
-        # 按钮区域
-        button_layout = QHBoxLayout()
+        # 创建分组策略设置页面
+        strategy_widget = QWidget()
+        strategy_layout = QVBoxLayout(strategy_widget)
+        strategy_layout.setContentsMargins(0, 0, 0, 0)  # 减少内边距
+        strategy_layout.setSpacing(5)  # 减少组件间距
         
-        # 手动分组按钮
-        manual_group_btn = QPushButton("手动分组")
-        manual_group_btn.clicked.connect(self.on_manual_grouping)
+        # 添加参数设置
+        param_form_layout = QFormLayout()
+        param_form_layout.setContentsMargins(0, 0, 0, 0)  # 减少内边距
+        param_form_layout.setVerticalSpacing(5)  # 减少垂直间距
         
-        # 分组方式设计按钮
-        design_group_btn = QPushButton("分组方式设计")
-        design_group_btn.clicked.connect(self.on_group_design)
+        self.reserve_age = QSpinBox()
+        self.reserve_age.setRange(0, 1000)
+        self.reserve_age.setSuffix(" 天")
+        self.reserve_age.setValue(420)  # 默认值
         
-        button_layout.addWidget(manual_group_btn)
-        button_layout.addWidget(design_group_btn)
-        button_layout.addStretch()
+        self.cycle_days = QSpinBox()
+        self.cycle_days.setRange(0, 365)
+        self.cycle_days.setSuffix(" 天")
+        self.cycle_days.setValue(21)  # 默认值
         
-        group_layout.addLayout(button_layout)
+        param_form_layout.addRow("后备牛开配日龄:", self.reserve_age)
+        param_form_layout.addRow("选配周期:", self.cycle_days)
         
-        # 已保存的分组方式列表
-        saved_strategies_label = QLabel("已保存的分组方式:")
-        group_layout.addWidget(saved_strategies_label)
+        strategy_layout.addLayout(param_form_layout)
         
+        # 添加策略表
+        strategy_table_label = QLabel("配种策略设置:")
+        strategy_layout.addWidget(strategy_table_label)
+        
+        # 创建选配策略表
+        self.strategy_table = StrategyTableManager.create_strategy_table(strategy_widget)
+        
+        strategy_layout.addWidget(self.strategy_table)
+        design_layout.addWidget(strategy_widget)
+        
+        # 紧凑布局，减少各组件间距
+        design_layout.setSpacing(5)  # 减少组件间距
+        strategy_layout.setSpacing(5)  # 减少组件间距
+        
+        # 让策略区域紧凑显示，不拉伸
+        strategy_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        
+        # 添加已保存策略列表 - 修改为垂直布局
+        saved_strategies_layout = QVBoxLayout()  # 改为垂直布局 QVBoxLayout
+        saved_strategies_label = QLabel("已保存策略:")
+        saved_strategies_label.setFixedHeight(80)  # 设置标签固定高度
+        saved_strategies_layout.addWidget(saved_strategies_label)  # 先添加标签
+
         self.strategies_list = QListWidget()
-        self.strategies_list.setMaximumHeight(150)
-        group_layout.addWidget(self.strategies_list)
-        
-        # 分组方式操作按钮
-        strategy_buttons_layout = QHBoxLayout()
-        apply_strategy_btn = QPushButton("应用选中的分组方式")
-        delete_strategy_btn = QPushButton("删除选中的分组方式")
-        apply_strategy_btn.clicked.connect(self.on_apply_strategy)
-        delete_strategy_btn.clicked.connect(self.on_delete_strategy)
-        
-        strategy_buttons_layout.addWidget(apply_strategy_btn)
-        strategy_buttons_layout.addWidget(delete_strategy_btn)
-        group_layout.addLayout(strategy_buttons_layout)
-        
-        group_group.setLayout(group_layout)
-        
-        # 加载已保存的分组策略
-        self.load_saved_strategies()
-        
-        # 3. 冻精分配设置区域
-        semen_group = QGroupBox("冻精分配设置")
-        semen_layout = QVBoxLayout()
-        
-        # 常规冻精
-        regular_semen_label = QLabel("常规冻精:")
-        semen_layout.addWidget(regular_semen_label)
-        regular_semen_layout = QHBoxLayout()
-        self.regular_semen_ratios = []
-        
-        # 这里需要从数据库或其他数据源获取公牛信息
-        # 暂时使用示例数据
-        regular_bulls = ["007HO16284", "007HO16385", "151HO04449", "007HO16443", "151HO04311"]
-        for bull_id in regular_bulls:
-            ratio_label = QLabel(bull_id)
-            ratio_edit = QLineEdit()
-            ratio_edit.setPlaceholderText("默认0%")
-            ratio_edit.setFixedWidth(80)
-            regular_semen_layout.addWidget(ratio_label)
-            regular_semen_layout.addWidget(ratio_edit)
-            self.regular_semen_ratios.append(ratio_edit)
-        regular_semen_layout.addStretch()
-        semen_layout.addLayout(regular_semen_layout)
-        
-        # 性控冻精
-        sexed_semen_label = QLabel("性控冻精:")
-        semen_layout.addWidget(sexed_semen_label)
-        sexed_semen_layout = QHBoxLayout()
-        self.sexed_semen_ratios = []
-        
-        # 示例性控冻精数据
-        sexed_bulls = ["001HO09154", "001HO09162", "001HO09174"]
-        for bull_id in sexed_bulls:
-            ratio_label = QLabel(bull_id)
-            ratio_edit = QLineEdit()
-            ratio_edit.setPlaceholderText("默认0%")
-            ratio_edit.setFixedWidth(80)
-            sexed_semen_layout.addWidget(ratio_label)
-            sexed_semen_layout.addWidget(ratio_edit)
-            self.sexed_semen_ratios.append(ratio_edit)
-        sexed_semen_layout.addStretch()
-        semen_layout.addLayout(sexed_semen_layout)
-        
-        semen_group.setLayout(semen_layout)
-        
-        # 4. 开始选配按钮区域
-        button_layout = QHBoxLayout()
-        self.start_breeding_button = QPushButton("开始选配")
-        self.start_breeding_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2ecc71;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 5px;
-                font-size: 14px;
-                min-width: 120px;
+        self.strategies_list.setMaximumHeight(130)  # 设置列表框高度
+        self.strategies_list.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #ddd;
+                border-radius: 2px;
+                background-color: white;
+                font-size: 12px;
             }
-            QPushButton:hover {
-                background-color: #27ae60;
-            }
-            QPushButton:pressed {
-                background-color: #219a52;
+            QListWidget::item {
+                padding: 2px;
             }
         """)
-        self.start_breeding_button.clicked.connect(self.start_breeding)
-        button_layout.addStretch()
-        button_layout.addWidget(self.start_breeding_button)
+        saved_strategies_layout.addWidget(self.strategies_list)  # 再添加列表框
+        design_layout.addLayout(saved_strategies_layout)
+        
+        # 底部按钮布局 - 极简风格
+        button_layout = QHBoxLayout()
+        button_style = """
+            QPushButton {
+                background-color: #f5f5f5;
+                border: 1px solid #ddd;
+                border-radius: 2px;
+                padding: 4px 8px;
+                min-width: 80px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #e9e9e9;
+            }
+            QPushButton:pressed {
+                background-color: #d5d5d5;
+            }
+        """
+        
+        load_strategy_btn = QPushButton("加载策略")
+        load_strategy_btn.setStyleSheet(button_style)
+        load_strategy_btn.clicked.connect(self.load_selected_strategy)
+        
+        delete_strategy_btn = QPushButton("删除策略")
+        delete_strategy_btn.setStyleSheet(button_style)
+        delete_strategy_btn.clicked.connect(self.delete_selected_strategy)
+        
+        save_strategy_btn = QPushButton("保存方式")
+        save_strategy_btn.setStyleSheet(button_style)
+        save_strategy_btn.clicked.connect(self.save_group_strategy)
+        
+        apply_strategy_btn = QPushButton("应用方式")
+        apply_strategy_btn.setStyleSheet(button_style)
+        apply_strategy_btn.clicked.connect(self.apply_group_strategy)
+        
+        explain_logic_btn = QPushButton("逻辑说明")
+        explain_logic_btn.setStyleSheet(button_style)
+        explain_logic_btn.clicked.connect(self.show_group_logic_explanation)
+        
+        button_layout.addWidget(load_strategy_btn)
+        button_layout.addWidget(delete_strategy_btn)
+        button_layout.addWidget(save_strategy_btn)
+        button_layout.addWidget(apply_strategy_btn)
+        button_layout.addWidget(explain_logic_btn)
         button_layout.addStretch()
         
-        # 添加所有组件到主布局
-        layout.addWidget(param_group)
-        layout.addWidget(group_group)
-        layout.addWidget(semen_group)
-        layout.addLayout(button_layout)
+        # 添加按钮到布局
+        design_layout.addLayout(button_layout)
+        
+        # 减少布局的边距
+        design_layout.setContentsMargins(5, 5, 5, 5)
+        
+        design_group.setLayout(design_layout)
+        
+        # 将分组和参数设置添加到左侧面板
+        left_layout.addWidget(param_group)
+        left_layout.addWidget(design_group)
+        
+        # 右侧面板 - 分组预览
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        
+        # 分组预览区域
+        preview_group = QGroupBox("分组预览")
+        preview_layout = QVBoxLayout()
+        
+        # 创建预览表格
+        self.preview_table = QTableWidget()
+        self.preview_table.setColumnCount(4)
+        self.preview_table.setHorizontalHeaderLabels(["耳标号", "胎次", "DIM", "分组"])
+        preview_layout.addWidget(self.preview_table)
+        
+        preview_group.setLayout(preview_layout)
+        right_layout.addWidget(preview_group)
+        
+        # 添加左右面板到水平布局
+        h_layout.addWidget(left_panel, stretch=1)
+        h_layout.addWidget(right_panel, stretch=1)
+        
+        # 将水平布局添加到主布局
+        layout.addLayout(h_layout)
         
         # 设置整体样式
         style = """
@@ -1071,7 +1284,7 @@ class MainWindow(QMainWindow):
                 left: 10px;
                 padding: 0 5px;
             }
-            QComboBox {
+            QComboBox, QPushButton {
                 min-width: 150px;
                 padding: 5px;
             }
@@ -1104,7 +1317,216 @@ class MainWindow(QMainWindow):
         """
         page.setStyleSheet(style)
         
+        # 加载已保存的策略列表
+        self.load_strategy_list()
+        
         return page
+
+    def load_strategy_list(self):
+        """加载已保存的策略列表"""
+        from core.grouping.group_manager import GroupManager
+        self.strategies_list.clear()
+        strategies = GroupManager.list_strategies()
+        self.strategies_list.addItems(strategies)
+
+    def load_selected_strategy(self):
+        """加载选中的策略"""
+        if not self.strategies_list.currentItem():
+            QMessageBox.warning(self, "警告", "请先选择一个策略")
+            return
+
+        try:
+            from core.grouping.group_manager import GroupManager
+            strategy_name = self.strategies_list.currentItem().text()
+            
+            # 创建临时的GroupManager实例来加载策略
+            group_manager = GroupManager(self.selected_project_path)
+            group_manager.load_strategy(strategy_name)
+            
+            # 更新界面上的参数
+            params = group_manager.strategy['params']
+            self.reserve_age.setValue(params.get('reserve_age', 0))
+            self.cycle_days.setValue(params.get('cycle_days', 0))
+            
+            # 使用策略表格管理器加载策略
+            StrategyTableManager.load_strategy_to_table(self.strategy_table, group_manager.strategy)
+            
+            QMessageBox.information(self, "成功", f"已加载策略：{strategy_name}")
+            
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"加载策略错误详情: {error_details}")
+            QMessageBox.critical(self, "错误", f"加载策略时发生错误：{str(e)}\n\n请检查是否选择了正确的牧场项目。")
+
+    def delete_selected_strategy(self):
+        """删除选中的策略"""
+        if not self.strategies_list.currentItem():
+            QMessageBox.warning(self, "警告", "请先选择一个策略")
+            return
+
+        strategy_name = self.strategies_list.currentItem().text()
+        reply = QMessageBox.question(
+            self, 
+            "确认删除", 
+            f'确定要删除策略"{strategy_name}"吗？此操作不可恢复！',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                from core.grouping.group_manager import GroupManager
+                GroupManager.delete_strategy(strategy_name)
+                self.load_strategy_list()  # 刷新列表
+                QMessageBox.information(self, "成功", "策略已删除")
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"删除策略时发生错误：{str(e)}")
+
+    def save_group_strategy(self):
+        """保存分组方式设计"""
+        strategy_name, ok = QInputDialog.getText(
+            self, "保存分组方式", "请输入分组方式名称:"
+        )
+        
+        if ok and strategy_name:
+            try:
+                # 准备策略数据
+                strategy_data = {
+                    "params": {
+                        "reserve_age": self.reserve_age.value(),
+                        "cycle_days": self.cycle_days.value()
+                    },
+                    "strategy_table": StrategyTableManager.get_strategy_table_data(self.strategy_table)
+                }
+                
+                # 保存策略
+                from core.grouping.group_manager import GroupManager
+                GroupManager.save_strategy(strategy_name, strategy_data)
+                QMessageBox.information(self, "成功", "分组方式已保存")
+                
+                # 刷新策略列表
+                self.load_saved_strategies()
+                
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"保存分组方式时发生错误：{str(e)}")
+
+    def apply_group_strategy(self):
+        """应用当前的临时分组策略"""
+        if not self.check_index_file_exists():
+            return
+        
+        # 确保项目路径存在
+        if self.selected_project_path is None:
+            QMessageBox.warning(self, "警告", "请先选择一个项目")
+            return
+            
+        try:
+            from core.grouping.group_manager import GroupManager
+            
+            # 获取控件值
+            reserve_age = self.reserve_age.value() if hasattr(self, 'reserve_age') else 420
+            cycle_days = self.cycle_days.value() if hasattr(self, 'cycle_days') else 21
+            
+            # 构建分组策略
+            current_strategy = {
+                "params": {
+                    "reserve_age": reserve_age,
+                    "cycle_days": cycle_days
+                },
+                "strategy_table": StrategyTableManager.get_strategy_table_data(self.strategy_table)
+            }
+            
+            # 打印调试信息
+            print(f"项目路径: {self.selected_project_path}")
+            print(f"策略参数: {current_strategy['params']}")
+            
+            # 创建进度对话框
+            progress = ProgressDialog(self)
+            progress.setWindowTitle("分组进度")
+            progress.set_task_info("正在准备分组数据...")
+            progress.show()
+            
+            try:
+                # 创建临时策略并应用
+                group_manager = GroupManager(self.selected_project_path)
+                
+                # 添加详细错误处理
+                try:
+                    # 真正的分组处理
+                    df = group_manager.apply_temp_strategy(current_strategy, progress_callback=progress)
+                    
+                    # 直接更新到原始指数文件，而不是创建新文件
+                    progress.set_task_info("正在更新分组结果到指数计算文件...")
+                    index_file = self.selected_project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
+                    
+                    # 读取原始指数文件
+                    import pandas as pd
+                    try:
+                        index_df = pd.read_excel(index_file)
+                        
+                        # 如果index_df中已有group列，先删除
+                        if 'group' in index_df.columns:
+                            index_df = index_df.drop(columns=['group'])
+                        
+                        # 只保留group列进行更新
+                        group_col = df[['cow_id', 'group']]
+                        
+                        # 将group列合并到原始指数文件
+                        index_df = pd.merge(index_df, group_col, on='cow_id', how='left')
+                        
+                        # 保存更新后的文件
+                        index_df.to_excel(index_file, index=False)
+                        
+                        # 显示分组统计信息
+                        group_counts = df.groupby('group').size().reset_index(name='count')
+                        group_stats = "\n".join([f"{row['group']}: {row['count']}头" for _, row in group_counts.iterrows()])
+                        
+                        # 完成处理，确保进度对话框关闭
+                        progress.set_task_info("分组完成")
+                        progress.update_progress(100)
+                        
+                        # 使用QTimer延迟关闭，确保UI更新
+                        QTimer.singleShot(500, progress.close)
+                        
+                        # 在进度条关闭后显示成功消息
+                        QTimer.singleShot(600, lambda: QMessageBox.information(
+                            self, "成功", f"分组完成！\n分组统计：\n{group_stats}\n\n结果已更新到：\n{index_file}"
+                        ))
+                        
+                    except Exception as e:
+                        raise Exception(f"更新指数文件时发生错误: {str(e)}")
+                
+                except Exception as e:
+                    # 出错时也确保关闭进度对话框
+                    progress.close()
+                    
+                    error_message = str(e)
+                    import traceback
+                    error_traceback = traceback.format_exc()
+                    print(f"错误详情: {error_traceback}")
+                    QMessageBox.critical(self, "错误", f"应用分组策略时发生错误：{error_message}\n\n请检查控制台输出以获取详细信息。")
+                
+            except Exception as e:
+                # 发生异常时关闭进度对话框
+                progress.close()
+                QMessageBox.critical(self, "错误", f"初始化分组过程时发生错误：{str(e)}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"应用分组策略时发生错误：{str(e)}")
+
+    def update_preview_table(self, df):
+        """更新预览表格"""
+        self.preview_table.setRowCount(len(df))
+        
+        # 设置表格数据
+        for i, (_, row) in enumerate(df.iterrows()):
+            self.preview_table.setItem(i, 0, QTableWidgetItem(str(row['cow_id'])))
+            self.preview_table.setItem(i, 1, QTableWidgetItem(str(row['lac'])))
+            self.preview_table.setItem(i, 2, QTableWidgetItem(str(row['DIM'])))
+            self.preview_table.setItem(i, 3, QTableWidgetItem(str(row['group'])))
+        
+        # 调整列宽
+        self.preview_table.resizeColumnsToContents()
 
     def check_index_file_exists(self):
         """检查指数计算结果文件是否存在"""
@@ -1142,35 +1564,55 @@ class MainWindow(QMainWindow):
         
         if not self.check_index_file_exists():
             return
+            
+        # 确保项目路径存在
+        if self.selected_project_path is None:
+            QMessageBox.warning(self, "警告", "请先选择一个项目")
+            return
         
         try:
             from core.grouping.group_manager import GroupManager
             
             strategy_name = self.strategies_list.currentItem().text()
-            group_manager = GroupManager(self.selected_project_path)
+            
+            # 打印调试信息
+            print(f"应用策略: {strategy_name}")
+            print(f"项目路径: {self.selected_project_path}")
+            
+            # 创建GroupManager实例
+            try:
+                group_manager = GroupManager(self.selected_project_path)
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"创建GroupManager实例失败: {str(e)}")
+                import traceback
+                print(f"错误详情:\n{traceback.format_exc()}")
+                return
             
             # 显示进度对话框
-            progress = QMessageBox(self)
-            progress.setIcon(QMessageBox.Icon.Information)
-            progress.setText("正在应用分组策略...")
-            progress.setStandardButtons(QMessageBox.StandardButton.NoButton)
+            progress = ProgressDialog(self)
+            progress.setWindowTitle("分组进度")
+            progress.set_task_info("正在应用分组策略...")
             progress.show()
             
-            # 应用分组策略
-            df = group_manager.apply_grouping(strategy_name)
-            
-            # 获取分组统计
-            summary = group_manager.get_group_summary()
-            
-            # 关闭进度对话框
-            progress.close()
-            
-            # 显示分组结果
-            msg = "分组完成！\n\n分组统计：\n"
-            for _, row in summary.iterrows():
-                msg += f"{row['分组']}: {row['数量']}头\n"
-            
-            QMessageBox.information(self, "成功", msg)
+            try:
+                # 应用分组策略
+                df = group_manager.apply_grouping(strategy_name)
+                
+                # 获取分组统计
+                summary = group_manager.get_group_summary()
+                
+                # 显示分组结果
+                msg = "分组完成！\n\n分组统计：\n"
+                for _, row in summary.iterrows():
+                    msg += f"{row['分组']}: {row['数量']}头\n"
+                
+                progress.set_task_info("分组完成")
+                progress.update_progress(100)
+                QMessageBox.information(self, "成功", msg)
+                
+            finally:
+                # 确保进度对话框被关闭
+                progress.close()
             
         except Exception as e:
             QMessageBox.critical(self, "错误", f"应用分组策略时发生错误：{str(e)}")
@@ -1205,6 +1647,103 @@ class MainWindow(QMainWindow):
         """开始选配"""
         QMessageBox.information(self, "提示", "选配功能正在开发中...")
 
+    def show_group_logic_explanation(self):
+        """显示分组逻辑说明对话框"""
+        explanation = """
+<h3>分组逻辑详细说明</h3>
+
+<p><b>基础筛选：</b>只考虑在场母牛（"是否在场" = "是"且sex = "母"）</p>
+
+<h4>1. 牛只分类</h4>
+<ul>
+<li><b>后备牛：</b>胎次(lac) = 0</li>
+<li><b>成母牛：</b>胎次(lac) > 0</li>
+</ul>
+
+<h4>2. 后备牛分组</h4>
+<ul>
+<li><b>已孕牛：</b>repro_status 为 "初检孕" 或 "复检孕"</li>
+<li><b>难孕牛：</b>日龄 ≥ 18×30.8(约553天) 且未孕</li>
+<li><b>周期分组：</b>对普通后备牛（非已孕/难孕）按日龄分周期
+  <ul>
+  <li>第1周期：18×30.8 > 日龄 ≥ (后备牛开配日龄-选配周期*1)</li>
+  <li>第2周期：(后备牛开配日龄-选配周期*1) > 日龄 ≥ (后备牛开配日龄-选配周期*2)</li>
+  <li>第n周期：(后备牛开配日龄-选配周期*(n-1)) > 日龄 ≥ (后备牛开配日龄-选配周期*n)</li>
+  </ul>
+</li>
+</ul>
+
+<h4>3. 成母牛分组</h4>
+<ul>
+<li><b>已孕牛：</b>repro_status 为 "初检孕" 或 "复检孕"</li>
+<li><b>难孕牛：</b>泌乳天数(DIM) ≥ 150 且未孕</li>
+<li><b>未孕牛：</b>非已孕且非难孕的成母牛</li>
+</ul>
+
+<h4>4. 遗传物质分配规则</h4>
+<ol>
+<li><b>已孕牛和难孕牛：</b>统一使用非性控</li>
+<li><b>后备牛各周期：</b>
+  <ul>
+  <li>先按ranking排序（从小到大）</li>
+  <li>根据配置的比例将每个周期内的牛分为A/B/C组：
+    <ul>
+    <li>A组：取排名前X%的牛（如前50%）</li>
+    <li>B组：取排名接下来Y%的牛（如50%-80%）</li>
+    <li>C组：取排名最后Z%的牛（如80%-100%）</li>
+    </ul>
+  </li>
+  <li>对每组牛根据配种次数应用不同的配种方法：
+    <ul>
+    <li>第1次配种：使用各组设定的第1次配种方法</li>
+    <li>第2次配种：使用各组设定的第2次配种方法</li>
+    <li>第3次配种：使用各组设定的第3次配种方法</li>
+    <li>第4次及以上配种：使用各组设定的第4次+配种方法</li>
+    </ul>
+  </li>
+  </ul>
+</li>
+<li><b>成母牛未孕牛：</b>同样按ranking排序并分为A/B/C组，应用各自的配种策略</li>
+</ol>
+
+<h4>5. 性控/非性控判定</h4>
+<ul>
+<li><b>性控方法：</b>"普通性控"、"超级性控"</li>
+<li><b>非性控方法：</b>"常规冻精"、"肉牛冻精"、"胚胎"</li>
+</ul>
+
+<h4>6. 结果标记</h4>
+<ul>
+<li>后备牛：后备牛第X周期+性控/非性控</li>
+<li>后备牛特殊：后备牛已孕牛+非性控、后备牛难孕牛+非性控</li>
+<li>成母牛：成母牛未孕牛+性控/非性控</li>
+<li>成母牛特殊：成母牛已孕牛+非性控、成母牛难孕牛+非性控</li>
+</ul>
+
+<p>举例：某后备牛属于第1周期，ranking在该周期牛只前30%（属于A组），配种次数为1，A组第2次配种设置为"超级性控"，则该牛标记为 "后备牛第1周期+性控"</p>
+"""
+        
+        # 创建对话框
+        dialog = QDialog(self)
+        dialog.setWindowTitle("分组逻辑说明")
+        dialog.setMinimumSize(800, 600)
+        
+        # 创建布局
+        layout = QVBoxLayout(dialog)
+        
+        # 创建文本浏览器并设置富文本
+        text_browser = QTextBrowser()
+        text_browser.setHtml(explanation)
+        layout.addWidget(text_browser)
+        
+        # 添加关闭按钮
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
+        
+        # 显示对话框
+        dialog.exec()
+
 class GroupDesignDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1215,79 +1754,37 @@ class GroupDesignDialog(QDialog):
     def setup_ui(self):
         layout = QVBoxLayout(self)
         
-        # 创建标签页
-        tab_widget = QTabWidget()
+        # 创建分组策略设置页面
+        main_widget = QWidget()
+        main_layout = QVBoxLayout(main_widget)
         
-        # 第1部分：参数设计
-        param_tab = QWidget()
-        param_layout = QFormLayout(param_tab)
+        # 添加参数设置
+        param_form_layout = QFormLayout()
         
         self.reserve_age = QSpinBox()
         self.reserve_age.setRange(0, 1000)
         self.reserve_age.setSuffix(" 天")
+        self.reserve_age.setValue(420)  # 默认值
         
-        self.first_wait = QSpinBox()
-        self.first_wait.setRange(0, 1000)
-        self.first_wait.setSuffix(" 天")
+        self.cycle_days = QSpinBox()
+        self.cycle_days.setRange(0, 365)
+        self.cycle_days.setSuffix(" 天")
+        self.cycle_days.setValue(21)  # 默认值
         
-        self.later_wait = QSpinBox()
-        self.later_wait.setRange(0, 1000)
-        self.later_wait.setSuffix(" 天")
+        param_form_layout.addRow("后备牛开配日龄:", self.reserve_age)
+        param_form_layout.addRow("选配周期:", self.cycle_days)
         
-        self.cycle_months = QSpinBox()
-        self.cycle_months.setRange(0, 12)
-        self.cycle_months.setSuffix(" 个月")
+        main_layout.addLayout(param_form_layout)
         
-        param_layout.addRow("后备牛开配日龄:", self.reserve_age)
-        param_layout.addRow("头胎牛自愿等待期:", self.first_wait)
-        param_layout.addRow("2+胎牛自愿等待期:", self.later_wait)
-        param_layout.addRow("选配周期:", self.cycle_months)
-        
-        # 第2部分：选配策略表设置
-        strategy_tab = QWidget()
-        strategy_layout = QVBoxLayout(strategy_tab)
+        # 添加策略表
+        strategy_table_label = QLabel("配种策略设置:")
+        main_layout.addWidget(strategy_table_label)
         
         # 创建选配策略表
-        self.strategy_table = QTableWidget()
-        self.strategy_table.setColumnCount(6)
-        self.strategy_table.setRowCount(6)
+        self.strategy_table = StrategyTableManager.create_strategy_table(main_widget)
         
-        headers = ["分组", "分配比例(%)", "第1次配种", "第2次配种", "第3次配种", "第4次+配种"]
-        self.strategy_table.setHorizontalHeaderLabels(headers)
-        
-        # 设置固定的分组名称
-        groups = [
-            ("成母牛A", "成母牛"), ("成母牛B", "成母牛"), ("成母牛C", "成母牛"),
-            ("后备牛A", "后备牛"), ("后备牛B", "后备牛"), ("后备牛C", "后备牛")
-        ]
-        
-        for i, (group, group_type) in enumerate(groups):
-            # 分组名称
-            name_item = QTableWidgetItem(group)
-            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            name_item.setData(Qt.ItemDataRole.UserRole, group_type)  # 存储分组类型
-            self.strategy_table.setItem(i, 0, name_item)
-            
-            # 添加分配比例输入
-            ratio_item = QTableWidgetItem("0")
-            self.strategy_table.setItem(i, 1, ratio_item)
-            
-            # 添加配种方式选择下拉框
-            for j in range(2, 6):
-                combo = QComboBox()
-                combo.addItems(["常规冻精", "普通性控", "超级性控", "肉牛冻精", "胚胎"])
-                self.strategy_table.setCellWidget(i, j, combo)
-        
-        # 连接分配比例变化的信号
-        self.strategy_table.itemChanged.connect(self.validate_ratios)
-        
-        strategy_layout.addWidget(self.strategy_table)
-        
-        # 添加标签页
-        tab_widget.addTab(param_tab, "参数设计")
-        tab_widget.addTab(strategy_tab, "选配策略设置")
-        
-        layout.addWidget(tab_widget)
+        main_layout.addWidget(self.strategy_table)
+        layout.addWidget(main_widget)
         
         # 添加保存按钮
         button_box = QDialogButtonBox(
@@ -1297,39 +1794,6 @@ class GroupDesignDialog(QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
-
-    def validate_ratios(self, item):
-        """验证分配比例是否合法"""
-        if item.column() != 1:  # 只验证分配比例列
-            return
-            
-        try:
-            # 暂时阻断信号以避免递归
-            self.strategy_table.blockSignals(True)
-            
-            # 获取当前行的分组类型
-            group_type = self.strategy_table.item(item.row(), 0).data(Qt.ItemDataRole.UserRole)
-            
-            # 计算同类型分组的总比例
-            total = 0
-            for row in range(self.strategy_table.rowCount()):
-                current_type = self.strategy_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
-                if current_type == group_type:
-                    ratio_item = self.strategy_table.item(row, 1)
-                    if ratio_item and ratio_item.text():
-                        try:
-                            ratio = float(ratio_item.text())
-                            total += ratio
-                        except ValueError:
-                            pass
-            
-            # 如果总比例超过100%，显示警告并重置当前值
-            if total > 100:
-                QMessageBox.warning(self, "警告", f"{group_type}的总分配比例不能超过100%")
-                item.setText("0")
-            
-        finally:
-            self.strategy_table.blockSignals(False)
 
     def accept(self):
         """保存分组方式设计"""
@@ -1343,11 +1807,9 @@ class GroupDesignDialog(QDialog):
                 strategy_data = {
                     "params": {
                         "reserve_age": self.reserve_age.value(),
-                        "first_wait": self.first_wait.value(),
-                        "later_wait": self.later_wait.value(),
-                        "cycle_months": self.cycle_months.value()
+                        "cycle_days": self.cycle_days.value()
                     },
-                    "strategy_table": self.get_strategy_table_data()
+                    "strategy_table": StrategyTableManager.get_strategy_table_data(self.strategy_table)
                 }
                 
                 # 保存策略
@@ -1362,13 +1824,37 @@ class GroupDesignDialog(QDialog):
         """获取策略表数据"""
         data = []
         for row in range(self.strategy_table.rowCount()):
+            # 跳过分隔行或无效行
+            if row >= self.strategy_table.rowCount():
+                continue
+                
+            # 检查是否有有效的分组名称单元格
+            name_item = self.strategy_table.item(row, 0)
+            if name_item is None:
+                continue
+                
+            # 获取比例，如果为空或无效则设为0
+            ratio_item = self.strategy_table.item(row, 1)
+            ratio_text = ratio_item.text() if ratio_item is not None else "0"
+            try:
+                ratio = float(ratio_text or "0")
+            except ValueError:
+                ratio = 0
+                
+            # 安全地获取配种方法
+            breeding_methods = []
+            for col in range(2, 6):
+                combo = self.strategy_table.cellWidget(row, col)
+                if combo is not None:
+                    breeding_methods.append(combo.currentText())
+                else:
+                    # 如果下拉框不存在，添加默认值
+                    breeding_methods.append("常规冻精")
+            
             row_data = {
-                "group": self.strategy_table.item(row, 0).text(),
-                "ratio": float(self.strategy_table.item(row, 1).text()),
-                "breeding_methods": [
-                    self.strategy_table.cellWidget(row, col).currentText()
-                    for col in range(2, 6)
-                ]
+                "group": name_item.text(),
+                "ratio": ratio,
+                "breeding_methods": breeding_methods
             }
             data.append(row_data)
         return data

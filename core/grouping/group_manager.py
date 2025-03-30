@@ -1,3 +1,7 @@
+"""
+分组管理模块
+"""
+
 import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -7,45 +11,105 @@ import os
 
 class GroupManager:
     def __init__(self, project_path: Path):
+        """
+        初始化分组管理器
+        
+        Args:
+            project_path: 项目路径
+        """
+        if project_path is None:
+            raise ValueError("项目路径不能为空")
+            
+        if not isinstance(project_path, Path):
+            project_path = Path(project_path)
+            
+        if not project_path.exists():
+            raise ValueError(f"项目路径不存在：{project_path}")
+            
         self.project_path = project_path
-        # 获取 GENETIC_IMPROVE 项目根目录
-        self.root_dir = self.get_root_dir()
         self.today = datetime.now()
         self.cow_data = None
         self.strategy = None
         
+        # 设置指数文件路径
+        self.index_file = project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
+        
+        # 获取项目根目录
+        try:
+            self.root_dir = self.get_root_dir()
+        except Exception as e:
+            print(f"警告：获取项目根目录失败：{str(e)}，使用当前工作目录")
+            self.root_dir = Path.cwd()
+        
     @staticmethod
     def get_root_dir() -> Path:
         """获取 GENETIC_IMPROVE 项目根目录"""
-        # 从环境变量中获取项目根目录
-        root_dir = os.getenv('GENETIC_IMPROVE_ROOT')
-        if root_dir:
-            return Path(root_dir)
+        try:
+            # 从环境变量中获取项目根目录
+            root_dir = os.getenv('GENETIC_IMPROVE_ROOT')
+            if root_dir:
+                return Path(root_dir)
+                
+            # 如果环境变量未设置，尝试从当前文件位置推断
+            current_file = Path(__file__).resolve()  # 使用resolve()获取绝对路径
             
-        # 如果环境变量未设置，尝试从当前文件位置推断
-        current_file = Path(__file__)
-        # 假设当前文件在 GENETIC_IMPROVE/core/grouping/ 目录下
-        if 'core' in current_file.parts and 'grouping' in current_file.parts:
-            return current_file.parent.parent.parent
-        else:
+            # 检查当前文件是否存在且在正确的目录结构中
+            if current_file.exists() and 'core' in current_file.parts and 'grouping' in current_file.parts:
+                root_dir = current_file.parent.parent.parent
+                if root_dir.exists():  # 确保根目录存在
+                    return root_dir
+            
             # 如果无法推断，使用当前工作目录
+            cwd = Path.cwd()
+            print(f"警告：无法确定项目根目录，使用当前工作目录：{cwd}")
+            return cwd
+            
+        except Exception as e:
+            print(f"获取根目录时发生错误: {str(e)}，使用当前工作目录作为替代")
             return Path.cwd()
         
     def load_data(self):
         """加载牛只数据"""
-        index_file = self.project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
-        if not index_file.exists():
+        if not self.index_file.exists():
             raise FileNotFoundError("请先进行牛只指数计算排名")
-        self.cow_data = pd.read_excel(index_file)
+        self.cow_data = pd.read_excel(self.index_file)
         
     def load_strategy(self, strategy_name: str):
         """加载分组策略"""
-        strategy_file = self.root_dir / "config" / "group_strategies" / f"{strategy_name}.json"
-        if not strategy_file.exists():
-            raise FileNotFoundError(f"找不到分组策略文件：{strategy_name}")
+        try:
+            # 获取根目录
+            root_dir = self.get_root_dir()
+            if not root_dir:
+                raise ValueError("无法获取项目根目录")
+                
+            # 构建策略文件路径
+            strategy_file = root_dir / "config" / "group_strategies" / f"{strategy_name}.json"
             
-        with open(strategy_file, 'r', encoding='utf-8') as f:
-            self.strategy = json.load(f)
+            # 检查策略文件是否存在
+            if not strategy_file.exists():
+                raise FileNotFoundError(f"找不到分组策略文件：{strategy_name}")
+                
+            # 尝试读取和解析策略文件
+            try:
+                with open(strategy_file, 'r', encoding='utf-8') as f:
+                    self.strategy = json.load(f)
+                    
+                # 验证策略数据结构
+                if not isinstance(self.strategy, dict):
+                    raise ValueError("策略文件格式错误：应为JSON对象")
+                    
+                if 'params' not in self.strategy:
+                    raise ValueError("策略文件缺少params字段")
+                    
+                if 'strategy_table' not in self.strategy:
+                    raise ValueError("策略文件缺少strategy_table字段")
+                    
+            except json.JSONDecodeError as e:
+                raise ValueError(f"策略文件JSON格式错误：{str(e)}")
+                
+        except Exception as e:
+            print(f"加载策略时发生错误: {str(e)}")
+            raise
 
     @classmethod
     def save_strategy(cls, strategy_name: str, strategy_data: dict):
@@ -92,7 +156,7 @@ class GroupManager:
             if pd.isna(calving_date):
                 return 0
             calving_date = pd.to_datetime(calving_date)
-            return (self.today - calving_date).days
+            return (self.today - calving_date).dt.days
         except:
             return 0
 
@@ -169,9 +233,15 @@ class GroupManager:
             
         # 处理成母牛周期
         cow_mask = (df['lac'] > 0) & df['group'].isna()
+        
+        # 将产犊日期转换为datetime类型
+        df['calving_date'] = pd.to_datetime(df['calving_date'])
+        
         for i in range(1, 5):  # 处理4个周期
-            cycle_date = self.today - timedelta(days=cycle_months*i*30)
-            mask = cow_mask & (pd.to_datetime(df['calving_date']) >= cycle_date)
+            cycle_end = self.today - timedelta(days=cycle_months*(i-1)*30)
+            cycle_start = self.today - timedelta(days=cycle_months*i*30)
+            
+            mask = cow_mask & (df['calving_date'] >= cycle_start) & (df['calving_date'] < cycle_end)
             df.loc[mask, 'cycle'] = i
             
         return df
@@ -182,111 +252,493 @@ class GroupManager:
             raise ValueError("请先加载分组策略")
             
         # 获取策略表数据
-        strategy_table = pd.DataFrame(self.strategy['strategy_table'])
+        strategy_table = self.strategy['strategy_table']
         
-        # 分别处理后备牛和成母牛
-        for cow_type in ['后备牛', '成母牛']:
-            type_strategies = strategy_table[strategy_table['group'].str.startswith(cow_type)]
+        # 对每个分组策略进行处理
+        for group_strategy in strategy_table:
+            group_name = group_strategy['group']  # 例如：成母牛A
+            ratio = group_strategy['ratio']  # 比例
+            breeding_methods = group_strategy['breeding_methods']  # 配种方法列表
             
-            # 对每个周期进行处理
-            for cycle in range(1, 5):
-                cycle_mask = (df['cycle'] == cycle) & df['group'].isna()
-                if cow_type == '后备牛':
-                    cow_mask = (df['lac'] == 0)
-                else:
-                    cow_mask = (df['lac'] > 0)
+            # 获取该组的所有牛（通过cycle匹配）
+            if '成母牛' in group_name:
+                base_mask = (df['lac'] > 0) & df['group'].isna()
+            else:  # 后备牛
+                base_mask = (df['lac'] == 0) & df['group'].isna()
+                
+            # 根据ranking排序并选择指定比例的牛
+            group_df = df[base_mask].sort_values('ranking')
+            count = int(len(group_df) * ratio / 100)
+            selected_indices = group_df.index[:count]
+            
+            # 根据配种次数分配配种方法
+            for idx in selected_indices:
+                services = df.loc[idx, 'services_time']
+                if pd.isna(services):
+                    services = 0
                     
-                combined_mask = cycle_mask & cow_mask
-                if not combined_mask.any():
-                    continue
-                    
-                # 计算该周期牛只的排名百分比
-                cycle_cows = df[combined_mask].copy()
-                if len(cycle_cows) > 0:  # 只在有牛只的情况下计算排名
-                    cycle_cows['rank_pct'] = cycle_cows['ranking'].rank(pct=True) * 100
-                    
-                    # 累计比例用于分组
-                    cum_ratio = 0
-                    for _, strategy_row in type_strategies.iterrows():
-                        ratio = strategy_row['ratio']
-                        if ratio == 0:
-                            continue
-                            
-                        # 确定该组使用性控的配种次数
-                        sexed_services = [
-                            i+1 for i, method in enumerate(strategy_row['breeding_methods'])
-                            if self.is_sexed_method(method)
-                        ]
-                        
-                        # 在排名范围内的牛只
-                        rank_mask = (
-                            (cycle_cows['rank_pct'] > cum_ratio) & 
-                            (cycle_cows['rank_pct'] <= cum_ratio + ratio)
-                        )
-                        
-                        # 根据配种次数决定使用性控还是非性控
-                        services_mask = cycle_cows['services_time'].isin(
-                            [s-1 for s in sexed_services]  # services_time从0开始计数
-                        )
-                        
-                        # 更新分组
-                        use_sexed_mask = rank_mask & services_mask
-                        df.loc[cycle_cows[use_sexed_mask].index, 'group'] = f'{cow_type}+第{cycle}周期+性控'
-                        df.loc[cycle_cows[~use_sexed_mask].index, 'group'] = f'{cow_type}+第{cycle}周期+非性控'
-                        
-                        cum_ratio += ratio
-                    
-                    # 剩余未分组的牛只使用非性控
-                    df.loc[cycle_cows[df.loc[cycle_cows.index, 'group'].isna()].index, 'group'] = f'{cow_type}+第{cycle}周期+非性控'
+                # 获取对应的配种方法（超过3次使用最后一个方法）
+                method_idx = min(int(services), len(breeding_methods)-1)
+                method = breeding_methods[method_idx]
+                
+                # 更新分组信息
+                cow_type = "成母牛" if df.loc[idx, 'lac'] > 0 else "后备牛"
+                cycle = df.loc[idx, 'cycle']
+                is_sexed = self.is_sexed_method(method)
+                
+                df.loc[idx, 'group'] = f"{cow_type}+第{cycle}周期+{'性控' if is_sexed else '非性控'}"
+                
+        # 处理未分配的牛（默认使用非性控）
+        mask = df['group'].isna() & df['cycle'].notna()
+        cow_type_mask = df['lac'] > 0
+        df.loc[mask & cow_type_mask, 'group'] = df.loc[mask & cow_type_mask].apply(
+            lambda x: f"成母牛+第{int(x['cycle'])}周期+非性控", axis=1
+        )
+        df.loc[mask & ~cow_type_mask, 'group'] = df.loc[mask & ~cow_type_mask].apply(
+            lambda x: f"后备牛+第{int(x['cycle'])}周期+非性控", axis=1
+        )
         
         return df
 
+    def apply_temp_strategy(self, strategy: dict, progress_callback=None) -> pd.DataFrame:
+        """
+        应用临时分组策略，返回分组结果
+        
+        Args:
+            strategy: 分组策略
+            progress_callback: 进度回调函数
+        
+        Returns:
+            分组结果DataFrame
+        """
+        self.strategy = strategy
+        
+        # 显示进度
+        if progress_callback:
+            progress_callback.set_task_info("正在读取指数计算结果...")
+            progress_callback.update_progress(5)
+        
+        # 读取指数计算结果
+        if not self.index_file.exists():
+            raise FileNotFoundError("请先进行牛只指数计算排名")
+        
+        try:
+            df = pd.read_excel(self.index_file)
+        except Exception as e:
+            raise Exception(f"读取指数计算结果失败: {str(e)}")
+        
+        if progress_callback:
+            progress_callback.set_task_info("正在筛选在场母牛...")
+            progress_callback.update_progress(10)
+        
+        # 筛选在场的母牛
+        df = df[(df['是否在场'] == '是') & (df['sex'] == '母')].copy()
+        
+        if progress_callback:
+            progress_callback.set_task_info("正在计算日龄和DIM...")
+            progress_callback.update_progress(15)
+        
+        # 计算日龄和DIM
+        today = datetime.now()
+        df['birth_date'] = pd.to_datetime(df['birth_date'], errors='coerce')
+        df['calving_date'] = pd.to_datetime(df['calving_date'], errors='coerce')
+        
+        # 计算日龄 - 正确处理NaN值
+        df['日龄'] = df['birth_date'].apply(
+            lambda x: (today - x).days if pd.notna(x) else None
+        )
+        
+        # 计算DIM - 正确处理NaN值
+        df['DIM'] = df['calving_date'].apply(
+            lambda x: (today - x).days if pd.notna(x) else None
+        )
+        
+        # 检查日龄计算是否有异常值
+        invalid_age_mask = df['日龄'].notna() & ((df['日龄'] < 0) | (df['日龄'] > 3650))  # 超过10年的日龄视为异常
+        if invalid_age_mask.any():
+            print(f"警告：发现{invalid_age_mask.sum()}头牛的日龄异常")
+            print(df[invalid_age_mask][['cow_id', 'birth_date', '日龄']].head())
+        
+        print("日龄和DIM计算完成")
+        
+        if progress_callback:
+            progress_callback.set_task_info("正在区分后备牛和成母牛...")
+            progress_callback.update_progress(20)
+        
+        # 区分后备牛和成母牛
+        heifer_mask = df['lac'] == 0  # 后备牛
+        mature_mask = df['lac'] > 0   # 成母牛
+        
+        if progress_callback:
+            progress_callback.set_task_info("正在处理后备牛分组...")
+            progress_callback.update_progress(30)
+        
+        # 处理后备牛
+        heifer_df = df[heifer_mask].copy()
+        
+        # 标记已孕和难孕牛 - 先处理NaN值
+        pregnant_mask = heifer_df['repro_status'].fillna('').isin(['初检孕', '复检孕'])
+        # 日龄中的None/NaN值视为0，确保布尔表达式有效性
+        valid_age_mask = heifer_df['日龄'].notna()
+        difficult_mask = valid_age_mask & (heifer_df['日龄'] >= 18 * 30.8) & ~pregnant_mask
+        
+        # 分配特殊组
+        heifer_df.loc[pregnant_mask, 'group'] = '后备牛已孕牛'
+        heifer_df.loc[difficult_mask, 'group'] = '后备牛难孕牛'
+        
+        # 处理正常后备牛的周期分配
+        normal_mask = ~(pregnant_mask | difficult_mask)
+        heifer_normal = heifer_df[normal_mask]
+        
+        reserve_age = strategy['params'].get('reserve_age', 0)  # 后备牛开配日龄
+        cycle_days = strategy['params'].get('cycle_days', 0)    # 选配周期
+        
+        print(f"后备牛已孕牛数量：{pregnant_mask.sum()}头")
+        print(f"后备牛难孕牛数量：{difficult_mask.sum()}头")
+        print(f"后备牛总数量：{len(heifer_df)}头")
+        print(f"后备牛开配日龄：{reserve_age}天，选配周期：{cycle_days}天")
+        
+        # 调试信息
+        if not heifer_normal.empty and valid_age_mask.any():
+            valid_age_data = heifer_normal[heifer_normal['日龄'].notna()]['日龄']
+            if not valid_age_data.empty:
+                print(f"后备牛日龄范围：{valid_age_data.min()}-{valid_age_data.max()}")
+            else:
+                print("后备牛没有有效日龄数据")
+        
+        # 动态计算周期数 - 不再使用固定的max_cycles
+        min_age = heifer_normal['日龄'].min() if not heifer_normal.empty and valid_age_mask.any() else 0
+        if pd.isna(min_age):
+            min_age = 0
+        # 至少需要1个周期，最多计算到min_age小于0
+        cycle_count = max(1, (reserve_age - min_age) // cycle_days + 1) if cycle_days > 0 else 1
+        print(f"根据后备牛日龄计算的周期数: {cycle_count}")
+        
+        # 分配周期，修正逻辑确保能够分配到所有周期
+        heifer_cycles_count = {}
+        
+        # 重新实现周期分配逻辑
+        for i in range(1, cycle_count + 1):
+            cycle_start = reserve_age - cycle_days * i
+            cycle_end = reserve_age - cycle_days * (i-1) if i > 1 else 18 * 30.8
+            
+            # 确保有效的布尔掩码
+            valid_age_data = heifer_normal['日龄'].notna()
+            cycle_mask = valid_age_data & (heifer_normal['日龄'] >= cycle_start) & (heifer_normal['日龄'] < cycle_end)
+            heifer_df.loc[heifer_normal[cycle_mask].index, 'group'] = f'后备牛第{i}周期'
+            heifer_cycles_count[i] = cycle_mask.sum()
+            print(f"后备牛第{i}周期 (日龄 {cycle_start}-{cycle_end})：{cycle_mask.sum()}头")
+        
+        if progress_callback:
+            progress_callback.set_task_info("正在处理成母牛分组...")
+            progress_callback.update_progress(60)
+            print("\n开始处理成母牛分组...")
+        
+        # 处理成母牛
+        mature_df = df[mature_mask].copy()
+        # 标记已孕和难孕牛 - 先处理NaN值
+        pregnant_mask = mature_df['repro_status'].fillna('').isin(['初检孕', '复检孕'])
+        # 确保DIM有效性
+        valid_dim_mask = mature_df['DIM'].notna()
+        difficult_mask = valid_dim_mask & (mature_df['DIM'] >= 150) & ~pregnant_mask
+        
+        # 分配周期
+        mature_df.loc[pregnant_mask, 'group'] = '成母牛已孕牛'
+        mature_df.loc[difficult_mask, 'group'] = '成母牛难孕牛'
+        
+        # 标记正常成母牛为未孕牛（而不是按周期分）
+        normal_mask = ~(pregnant_mask | difficult_mask)
+        mature_df.loc[normal_mask, 'group'] = '成母牛未孕牛'
+        
+        print(f"成母牛已孕牛数量：{pregnant_mask.sum()}头")
+        print(f"成母牛难孕牛数量：{difficult_mask.sum()}头")
+        print(f"成母牛未孕牛数量：{normal_mask.sum()}头")
+        print(f"成母牛总数量：{len(mature_df)}头")
+        
+        if progress_callback:
+            progress_callback.set_task_info("正在处理遗传物质分配...")
+            progress_callback.update_progress(80)
+            print("\n开始处理遗传物质分配...")
+        
+        # 合并结果
+        result_df = pd.concat([heifer_df, mature_df])
+        
+        # 先整理策略表
+        heifer_strategies = []
+        mature_strategies = []
+        for strategy_row in strategy['strategy_table']:
+            group = strategy_row['group']
+            if group.startswith('后备牛'):
+                heifer_strategies.append(strategy_row)
+            elif group.startswith('成母牛'):
+                mature_strategies.append(strategy_row)
+        
+        # 为策略排序，确保按A->B->C顺序处理
+        heifer_strategies.sort(key=lambda x: x['group'])
+        mature_strategies.sort(key=lambda x: x['group'])
+        
+        # 验证策略比例总和是否合理
+        heifer_total = sum(s['ratio'] for s in heifer_strategies)
+        mature_total = sum(s['ratio'] for s in mature_strategies)
+        if heifer_total > 100:
+            print(f"警告：后备牛策略总比例超过100%：{heifer_total}%")
+        if mature_total > 100:
+            print(f"警告：成母牛策略总比例超过100%：{mature_total}%")
+        
+        # 跟踪已处理牛只，避免重复处理
+        processed_cows = set()
+        
+        # 1. 处理后备牛各周期
+        print("\n开始处理后备牛分组...")
+        # 找出所有后备牛周期组
+        heifer_cycle_groups = set()
+        for group in result_df['group']:
+            if pd.isna(group):
+                continue
+            if group.startswith('后备牛第') and not ('+性控' in group or '+非性控' in group):
+                heifer_cycle_groups.add(group)
+        
+        # 对每个周期分别处理
+        for cycle_group in sorted(heifer_cycle_groups):
+            cycle_num = int(cycle_group.replace('后备牛第', '').replace('周期', ''))
+            print(f"\n处理{cycle_group}:")
+            
+            # 获取该周期的所有牛
+            cycle_mask = result_df['group'] == cycle_group
+            cycle_df = result_df[cycle_mask].copy()
+            
+            if cycle_df.empty:
+                print(f"  没有找到{cycle_group}的牛")
+                continue
+                
+            # 确保有ranking列
+            if 'ranking' not in cycle_df.columns:
+                print(f"  警告：{cycle_group}没有ranking列，跳过")
+                continue
+            
+            # 按ranking排序
+            cycle_df = cycle_df.sort_values('ranking')
+            total_cows = len(cycle_df)
+            print(f"  {cycle_group}共有{total_cows}头牛")
+            
+            # 累计比例，用于计算分组边界
+            cumulative_ratio = 0
+            
+            # 遍历每个策略组（A/B/C）
+            for strategy_row in heifer_strategies:
+                group = strategy_row['group']
+                ratio = strategy_row['ratio']
+                breeding_methods = strategy_row['breeding_methods']
+                
+                # 计算该组应该包含的牛的数量和范围
+                start_idx = int(total_cows * cumulative_ratio / 100)
+                end_idx = int(total_cows * (cumulative_ratio + ratio) / 100)
+                count = end_idx - start_idx
+                
+                if count <= 0:
+                    print(f"  {group}比例{ratio}%计算结果为0头牛，跳过")
+                    cumulative_ratio += ratio
+                    continue
+                
+                print(f"  处理{group}，比例{ratio}%，第{start_idx+1}-{end_idx}头，共{count}头")
+                
+                # 获取该组的牛
+                group_df = cycle_df.iloc[start_idx:end_idx]
+                
+                # 对每头牛应用配种策略
+                sexed_count = 0
+                non_sexed_count = 0
+                
+                for idx, row in group_df.iterrows():
+                    if idx in processed_cows:
+                        continue  # 跳过已处理的牛
+                    
+                    try:
+                        # 获取配种次数
+                        services_time = row.get('services_time', 0)
+                        if pd.isna(services_time):
+                            services_time = 0
+                        services_time = int(services_time)
+                        
+                        # 获取对应的配种方法（第几次配种用什么方法）
+                        method_idx = min(services_time, len(breeding_methods)-1)
+                        breeding_method = breeding_methods[method_idx]
+                        
+                        # 判断是否为性控
+                        is_sexed = breeding_method in ['普通性控', '超级性控']
+                        
+                        # 更新分组名称
+                        current_group = result_df.loc[idx, 'group']
+                        if pd.isna(current_group):
+                            continue
+                        
+                        # 处理已孕牛或难孕牛 - 强制使用非性控
+                        if '已孕牛' in str(current_group) or '难孕牛' in str(current_group):
+                            is_sexed = False
+                        
+                        # 更新分组标记
+                        result_df.loc[idx, 'group'] = f"{current_group}+{'性控' if is_sexed else '非性控'}"
+                        processed_cows.add(idx)
+                        
+                        # 统计
+                        if is_sexed:
+                            sexed_count += 1
+                        else:
+                            non_sexed_count += 1
+                    except Exception as e:
+                        print(f"  处理牛只时出错: {e}, cow_id: {row.get('cow_id', 'unknown')}")
+                
+                print(f"  {group}在{cycle_group}中: 性控{sexed_count}头, 非性控{non_sexed_count}头")
+                
+                # 更新累计比例
+                cumulative_ratio += ratio
+        
+        # 2. 处理成母牛未孕牛
+        print("\n开始处理成母牛未孕牛分组...")
+        
+        mature_mask = result_df['group'] == '成母牛未孕牛'
+        mature_df = result_df[mature_mask].copy()
+        
+        if not mature_df.empty:
+            # 确保有ranking列
+            if 'ranking' in mature_df.columns:
+                # 按ranking排序
+                mature_df = mature_df.sort_values('ranking')
+                total_cows = len(mature_df)
+                print(f"成母牛未孕牛共有{total_cows}头")
+                
+                # 累计比例，用于计算分组边界
+                cumulative_ratio = 0
+                
+                # 遍历每个策略组（A/B/C）
+                for strategy_row in mature_strategies:
+                    group = strategy_row['group']
+                    ratio = strategy_row['ratio']
+                    breeding_methods = strategy_row['breeding_methods']
+                    
+                    # 计算该组应该包含的牛的数量和范围
+                    start_idx = int(total_cows * cumulative_ratio / 100)
+                    end_idx = int(total_cows * (cumulative_ratio + ratio) / 100)
+                    count = end_idx - start_idx
+                    
+                    if count <= 0:
+                        print(f"{group}比例{ratio}%计算结果为0头牛，跳过")
+                        cumulative_ratio += ratio
+                        continue
+                    
+                    print(f"处理{group}，比例{ratio}%，第{start_idx+1}-{end_idx}头，共{count}头")
+                    
+                    # 获取该组的牛
+                    group_df = mature_df.iloc[start_idx:end_idx]
+                    
+                    # 对每头牛应用配种策略
+                    sexed_count = 0
+                    non_sexed_count = 0
+                    
+                    for idx, row in group_df.iterrows():
+                        if idx in processed_cows:
+                            continue  # 跳过已处理的牛
+                        
+                        try:
+                            # 获取配种次数
+                            services_time = row.get('services_time', 0)
+                            if pd.isna(services_time):
+                                services_time = 0
+                            services_time = int(services_time)
+                            
+                            # 获取对应的配种方法
+                            method_idx = min(services_time, len(breeding_methods)-1)
+                            breeding_method = breeding_methods[method_idx]
+                            
+                            # 判断是否为性控
+                            is_sexed = breeding_method in ['普通性控', '超级性控']
+                            
+                            # 更新分组名称
+                            current_group = result_df.loc[idx, 'group']
+                            if pd.isna(current_group):
+                                continue
+                            
+                            # 更新分组标记
+                            result_df.loc[idx, 'group'] = f"{current_group}+{'性控' if is_sexed else '非性控'}"
+                            processed_cows.add(idx)
+                            
+                            # 统计
+                            if is_sexed:
+                                sexed_count += 1
+                            else:
+                                non_sexed_count += 1
+                        except Exception as e:
+                            print(f"处理牛只时出错: {e}, cow_id: {row.get('cow_id', 'unknown')}")
+                    
+                    print(f"{group}: 性控{sexed_count}头, 非性控{non_sexed_count}头")
+                    
+                    # 更新累计比例
+                    cumulative_ratio += ratio
+            else:
+                print("警告：成母牛未孕牛没有ranking列，跳过")
+        else:
+            print("没有找到成母牛未孕牛")
+        
+        # 3. 处理已孕牛和难孕牛 - 统一使用非性控
+        print("\n处理已孕牛和难孕牛...")
+        # 确保group列存在且处理NaN值
+        if 'group' in result_df.columns:
+            special_mask = result_df['group'].fillna('').str.contains('已孕牛|难孕牛', na=False)
+            special_mask = special_mask & ~result_df.index.isin(processed_cows)
+            
+            for idx in result_df[special_mask].index:
+                current_group = result_df.loc[idx, 'group']
+                if pd.notna(current_group) and not ('+性控' in current_group or '+非性控' in current_group):
+                    result_df.loc[idx, 'group'] = f"{current_group}+非性控"
+                    processed_cows.add(idx)
+        else:
+            print("警告：结果数据中没有group列")
+        
+        # 处理任何剩余未添加性控/非性控标记的牛 - 默认使用非性控
+        if 'group' in result_df.columns:
+            # 确保安全地处理可能的NaN值
+            has_group_mask = result_df['group'].notna()
+            not_processed_mask = ~result_df.index.isin(processed_cows)
+            no_breeding_mark_mask = ~result_df['group'].fillna('').str.contains('[+]性控|[+]非性控', na=False)
+            
+            remaining_mask = has_group_mask & not_processed_mask & no_breeding_mark_mask
+            
+            for idx in result_df[remaining_mask].index:
+                current_group = result_df.loc[idx, 'group']
+                if pd.notna(current_group):
+                    result_df.loc[idx, 'group'] = f"{current_group}+非性控"
+        
+        print(f"完成分组，共处理{len(processed_cows)}头牛")
+        
+        if progress_callback:
+            progress_callback.set_task_info("分组完成")
+            progress_callback.update_progress(100)
+        
+        return result_df
+
     def apply_grouping(self, strategy_name: str) -> pd.DataFrame:
-        """应用分组策略"""
-        # 1. 加载数据
-        self.load_data()
+        """应用指定的分组策略"""
+        # 加载策略
         self.load_strategy(strategy_name)
         
-        # 2. 特殊组分组（已孕牛和难孕牛）
+        # 加载数据
+        self.load_data()
+        
+        # 对特殊牛只进行分组（已孕牛和难孕牛）
         df = self.group_special_cows()
         
-        # 3. 周期分组
+        # 按周期分组
         df = self.group_by_cycle(df)
         
-        # 4. 分配配种方法
+        # 分配配种方法
         df = self.assign_breeding_methods(df)
-        
-        # 5. 将分组结果更新到原始文件
-        index_file = self.project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
-        
-        # 读取原始文件
-        original_df = pd.read_excel(index_file)
-        
-        # 更新分组列
-        original_df['group'] = None  # 先清空原有的分组
-        for idx, row in df.iterrows():
-            if not pd.isna(row['group']):
-                original_df.loc[original_df.index == idx, 'group'] = row['group']
-        
-        # 保存回原文件
-        original_df.to_excel(index_file, index=False)
         
         return df
 
     def get_group_summary(self) -> pd.DataFrame:
-        """获取分组统计信息"""
-        if self.cow_data is None:
-            raise ValueError("请先应用分组策略")
-            
-        # 直接从原始文件读取最新的分组信息
-        index_file = self.project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
-        df = pd.read_excel(index_file)
-        
-        summary = df.groupby('group').agg({
-            'cow_id': 'count'  # 统计每组牛只数量
-        }).reset_index()
-        
-        summary.columns = ['分组', '数量']
-        # 删除空分组
-        summary = summary.dropna(subset=['分组'])
-        return summary 
+        """获取分组统计结果"""
+        # 统计各分组的数量
+        summary = pd.DataFrame(self.cow_data['group'].value_counts())
+        summary.columns = ['数量']
+        summary.index.name = '分组'
+        return summary.reset_index() 

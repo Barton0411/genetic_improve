@@ -1,7 +1,7 @@
 {
   "params": {
-    "reserve_age": 420,
-    "cycle_days": 21
+    "reserve_age": 425,
+    "cycle_days": 60
   },
   "strategy_table": [
     {
