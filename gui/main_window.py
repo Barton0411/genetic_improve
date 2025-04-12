@@ -3,6 +3,7 @@ import os
 import shutil
 from pathlib import Path
 import json
+import logging
 
 from PyQt6.QtCore import (
     Qt, QDir, QUrl, pyqtSignal, QThread, QTimer
@@ -32,7 +33,7 @@ from core.data.uploader import (
     upload_and_standardize_body_data,
     upload_and_standardize_cow_data
 )
-from gui.worker import CowDataWorker, GenomicDataWorker
+from gui.worker import CowDataWorker, GenomicDataWorker, BreedingDataWorker
 from gui.progress import ProgressDialog
 from gui.db_update_worker import DBUpdateWorker
 from core.breeding_calc.bull_traits_calc import BullKeyTraitsPage  
@@ -829,24 +830,30 @@ class MainWindow(QMainWindow):
     # 在 handle_file_upload 方法中添加对基因组检测数据的处理逻辑
     def handle_file_upload(self, file_paths: list[Path], display_name: str):
         """根据上传类型选择不同的处理方法"""
+        print(f"[DEBUG-MAIN-1] 开始处理文件上传: display_name={display_name}, file_paths={file_paths}")
         if self.selected_project_path is None:
+            print("[DEBUG-MAIN-ERROR] 未选择项目")
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
 
         if not file_paths:
+            print("[DEBUG-MAIN-ERROR] 未提供文件路径")
             return
 
         # 根据 display_name 来选择不同的处理逻辑
         try:
             if display_name == "母牛数据":
+                print("[DEBUG-MAIN-2] 处理母牛数据上传")
                 # 使用 Worker 处理母牛数据，并显示进度条
                 self.progress_dialog = ProgressDialog(self)
                 self.progress_dialog.set_task_info("上传并处理母牛数据")
                 self.progress_dialog.show()
+                print("[DEBUG-MAIN-3] 创建进度对话框")
 
                 self.thread = QThread()
                 self.worker = CowDataWorker(file_paths, self.selected_project_path)
                 self.worker.moveToThread(self.thread)
+                print("[DEBUG-MAIN-4] 创建worker和线程")
 
                 # 连接信号与槽
                 self.thread.started.connect(self.worker.run)
@@ -857,10 +864,43 @@ class MainWindow(QMainWindow):
                 self.worker.finished.connect(self.worker.deleteLater)
                 self.thread.finished.connect(self.thread.deleteLater)
                 self.worker.error.connect(self.on_worker_error)
+                print("[DEBUG-MAIN-5] 连接信号槽")
 
                 self.thread.start()
+                print("[DEBUG-MAIN-6] 线程已启动")
+            elif display_name == "配种记录":
+                print("[DEBUG-MAIN-7] 处理配种记录上传")
+                # 检查是否已上传母牛数据
+                cow_data_file = self.selected_project_path / "standardized_data" / "processed_cow_data.xlsx"
+                if not cow_data_file.exists():
+                    print("[DEBUG-MAIN-ERROR] 未找到母牛数据文件")
+                    QMessageBox.warning(self, "警告", "请先上传并处理母牛数据，再上传配种记录")
+                    return
+                
+                # 使用进度对话框处理配种记录
+                self.progress_dialog = ProgressDialog(self)
+                self.progress_dialog.set_task_info("上传并处理配种记录")
+                self.progress_dialog.show()
+                
+                # 创建线程处理配种记录
+                self.breeding_thread = QThread()
+                self.breeding_worker = BreedingDataWorker(file_paths, self.selected_project_path)
+                self.breeding_worker.moveToThread(self.breeding_thread)
+                
+                # 连接信号与槽
+                self.breeding_thread.started.connect(self.breeding_worker.run)
+                self.breeding_worker.progress.connect(self.progress_dialog.update_progress)
+                self.breeding_worker.message.connect(self.progress_dialog.update_info)
+                self.breeding_worker.finished.connect(self.on_breeding_worker_finished)
+                self.breeding_worker.finished.connect(self.breeding_thread.quit)
+                self.breeding_worker.finished.connect(self.breeding_worker.deleteLater)
+                self.breeding_thread.finished.connect(self.breeding_thread.deleteLater)
+                self.breeding_worker.error.connect(self.on_worker_error)
+                
+                self.breeding_thread.start()
             elif display_name == "基因组检测数据":
                 # 处理基因组检测数据
+                print("[DEBUG-MAIN-8] 处理基因组检测数据上传")
                 self.progress_dialog = ProgressDialog(self)
                 self.progress_dialog.set_task_info("上传并处理基因组检测数据")
                 self.progress_dialog.show()
@@ -882,12 +922,9 @@ class MainWindow(QMainWindow):
                 self.genomic_thread.start()
             else:
                 # 其他数据类型直接处理
+                print(f"[DEBUG-MAIN-9] 处理其他类型数据上传: {display_name}")
                 final_path = None
-                if display_name == "母牛数据":
-                    final_path = upload_and_standardize_cow_data(file_paths, self.selected_project_path)
-                elif display_name == "配种记录":
-                    final_path = upload_and_standardize_breeding_data(file_paths, self.selected_project_path)
-                elif display_name == "体型外貌数据":
+                if display_name == "体型外貌数据":
                     final_path = upload_and_standardize_body_data(file_paths, self.selected_project_path)
                 elif display_name == "备选公牛数据":
                     final_path = upload_and_standardize_bull_data(file_paths, self.selected_project_path)
@@ -895,10 +932,28 @@ class MainWindow(QMainWindow):
                     raise ValueError(f"未知的数据类型: {display_name}")
 
                 QMessageBox.information(self, "成功", f"{display_name}文件已成功上传并标准化，标准化文件路径：{final_path}")
+        except ValueError as ve:
+            if "请先上传并处理母牛数据" in str(ve):
+                print(f"[DEBUG-MAIN-ERROR] 需要先上传母牛数据: {ve}")
+                QMessageBox.warning(self, "需要母牛数据", "请先上传并处理母牛数据，再上传配种记录")
+            else:
+                print(f"[DEBUG-MAIN-ERROR] 数值错误: {ve}")
+                QMessageBox.warning(self, "警告", str(ve))
         except NotImplementedError as nie:
+            print(f"[DEBUG-MAIN-ERROR] 功能未实现: {nie}")
             QMessageBox.warning(self, "功能未实现", str(nie))
         except Exception as e:
+            print(f"[DEBUG-MAIN-ERROR] 文件上传或标准化时发生错误: {e}")
+            import traceback
+            print(traceback.format_exc())
             QMessageBox.critical(self, "错误", f"文件上传或标准化时发生错误：{str(e)}")
+            
+    def on_breeding_worker_finished(self, final_path: Path):
+        """处理配种记录Worker完成的信号"""
+        print(f"[DEBUG-MAIN] 配种记录处理完成: {final_path}")
+        self.progress_dialog.close()
+        QMessageBox.information(self, "成功", f"配种记录已成功上传并标准化，标准化文件路径：{final_path}")
+        # 可以在这里添加更新UI或刷新数据的代码
 
     # 添加一个新的处理函数 for genomic data
     def on_genomic_worker_finished(self, final_path: Path):
@@ -913,6 +968,7 @@ class MainWindow(QMainWindow):
 
     def on_worker_error(self, error_message: str):
         """处理 Worker 发生错误的信号"""
+        print(f"[DEBUG-MAIN-ERROR] Worker错误: {error_message}")
         self.progress_dialog.close()
         QMessageBox.critical(self, "错误", f"上传或标准化母牛数据时发生错误：\n{error_message}")
 
@@ -1012,11 +1068,28 @@ class MainWindow(QMainWindow):
         if not file_paths:
             return  # 用户未选择文件
 
-        # 将用户选择的路径转为Path对象列表
-        input_files = [Path(p) for p in file_paths]
+        try:
+            # 将用户选择的路径转为Path对象列表
+            input_files = []
+            for p in file_paths:
+                try:
+                    # 处理路径可能包含的中文字符
+                    path_obj = Path(p)
+                    # 检查路径是否存在
+                    if not path_obj.exists():
+                        raise FileNotFoundError(f"文件不存在: {p}")
+                    input_files.append(path_obj)
+                except Exception as e:
+                    QMessageBox.critical(self, "错误", f"处理文件路径时出错: {p}\n错误: {str(e)}")
+                    return
 
-        # 调用上传处理逻辑
-        self.handle_file_upload(input_files, display_name)
+            # 调用上传处理逻辑
+            self.handle_file_upload(input_files, display_name)
+        except Exception as e:
+            import traceback
+            error_msg = f"处理文件路径时出错: {str(e)}\n{traceback.format_exc()}"
+            QMessageBox.critical(self, "错误", error_msg)
+            logging.error(error_msg)
 
     def check_and_update_database_on_startup(self):
         """在应用启动时自动检查和更新数据库"""

@@ -3,6 +3,8 @@ import re
 import pandas as pd
 from pathlib import Path
 import numpy as np
+import logging
+import traceback
 
 # 品种字母和对应双字母代码的映射
 BREED_CORRECTIONS = {
@@ -848,11 +850,11 @@ GENOMIC_COLUMN_MAPPING_BY_TYPE = {
 # === 3. 定义一个检测报告类型的函数 ===
 def detect_report_type(genomic_df: pd.DataFrame) -> str:
     """
-    根据每种类型的“关键列”或特征列来判断。
+    根据每种类型的"关键列"或特征列来判断。
     假设每种类型各有 3 个关键列，如果都存在，则认为是对应类型。
     若判断逻辑更复杂，请自行修改。
     """
-    # 示例：每种类型各自有一组“关键列”
+    # 示例：每种类型各自有一组"关键列"
     type1_keys = {"Sire NAAB", "MGS REG", "MGS NAAB"}  # 示例关键列
     type2_keys = {"Dom Red", "UCL", "Coat Color"}  # 示例关键列
     type3_keys = {"Maternal Grandsire (MGS)", "Type-FS", "On-farm ID (Herd Management #)"}  # ...
@@ -945,213 +947,357 @@ def preprocess_cow_data(cow_df, progress_callback=None):
     """
     预处理母牛数据
     """
-    # 替换表头中的中文列名为英文列名
-    column_mapping = {
-        "耳号": "cow_id",
-        "品种": "breed",
-        "性别": "sex",
-        "父亲号": "sire",
-        "外祖父": "mgs",
-        "母亲号": "dam",
-        "外曾外祖父": "mmgs",
-        "胎次": "lac",
-        "最近产犊日期": "calving_date",
-        "牛只出生日期": "birth_date",
-        "月龄": "age",
-        "本胎次配次": "services_time",
-        "本胎次奶厅高峰产量": "peak_milk",
-        "305奶量": "milk_305",
-        "泌乳天数": "DIM",
-        "繁育状态": "repro_status",
-    }
-    cow_df.rename(columns=column_mapping, inplace=True)
+    print("[DEBUG-1] 开始预处理母牛数据，行数:", len(cow_df))
+    try:
+        # 替换表头中的中文列名为英文列名
+        print("[DEBUG-2] 开始转换列名...")
+        column_mapping = {
+            "耳号": "cow_id",
+            "品种": "breed",
+            "性别": "sex",
+            "父亲号": "sire",
+            "外祖父": "mgs",
+            "母亲号": "dam",
+            "外曾外祖父": "mmgs",
+            "胎次": "lac",
+            "最近产犊日期": "calving_date",
+            "牛只出生日期": "birth_date",
+            "月龄": "age",
+            "本胎次配次": "services_time",
+            "本胎次奶厅高峰产量": "peak_milk",
+            "305奶量": "milk_305",
+            "泌乳天数": "DIM",
+            "繁育状态": "repro_status",
+        }
+        print("[DEBUG-3] 原始列名:", cow_df.columns.tolist())
+        cow_df.rename(columns=column_mapping, inplace=True)
+        print("[DEBUG-4] 转换后列名:", cow_df.columns.tolist())
 
-    # 定义需要保留的列
-    columns_to_keep = [
-        "cow_id", "breed", "sex", "sire", "mgs", "dam", "mmgs", 
-        "lac", "calving_date", "birth_date", "age",
-        "services_time", "DIM", "peak_milk", "milk_305", "repro_status", 
-        "group", "是否在场"
-    ]
+        # 定义需要保留的列
+        print("[DEBUG-5] 设置需要保留的列...")
+        columns_to_keep = [
+            "cow_id", "breed", "sex", "sire", "mgs", "dam", "mmgs", 
+            "lac", "calving_date", "birth_date", "age",
+            "services_time", "DIM", "peak_milk", "milk_305", "repro_status", 
+            "group", "是否在场"
+        ]
 
-    # 添加不存在的列并填充为空值
-    missing_columns = [col for col in columns_to_keep if col not in cow_df.columns]
-    for col in missing_columns:
-        cow_df[col] = ""
+        # 添加不存在的列并填充为空值
+        print("[DEBUG-6] 添加缺失列...")
+        missing_columns = [col for col in columns_to_keep if col not in cow_df.columns]
+        for col in missing_columns:
+            print(f"  - 添加缺失列: {col}")
+            cow_df[col] = ""
 
-    # 调整列的顺序
-    cow_df = cow_df[columns_to_keep]
+        # 调整列的顺序
+        try:
+            print("[DEBUG-7] 调整列顺序...")
+            cow_df = cow_df[columns_to_keep]
+        except KeyError as ke:
+            import logging
+            print(f"[DEBUG-ERROR] 调整列顺序时出错，找不到列: {ke}")
+            logging.error(f"调整列顺序时出错，找不到列: {ke}")
+            # 确保只使用存在的列
+            existing_columns = [col for col in columns_to_keep if col in cow_df.columns]
+            cow_df = cow_df[existing_columns]
+            # 添加缺失的列
+            for col in columns_to_keep:
+                if col not in existing_columns:
+                    cow_df[col] = ""
 
-    # 删除性别为“公”的记录
-    cow_df = cow_df[cow_df['sex'] != '公']
+        # 删除性别为"公"的记录
+        print("[DEBUG-8] 过滤记录...")
+        if 'sex' in cow_df.columns:
+            print(f"  - 过滤前记录数: {len(cow_df)}")
+            cow_df = cow_df[cow_df['sex'] != '公']
+            print(f"  - 过滤后记录数: {len(cow_df)}")
 
-    # 处理数值列，将无效值转换为NaN
-    numeric_columns = ['lac', 'age', 'services_time', 'DIM', 'peak_milk', 'milk_305']
-    for column in numeric_columns:
-        if column in cow_df.columns:
-            # 转换为数值类型，无效值转为NaN
-            cow_df[column] = pd.to_numeric(cow_df[column], errors='coerce')
-            # 替换无限值为NaN
-            cow_df[column] = cow_df[column].replace([np.inf, -np.inf], np.nan)
-            # 将NaN保留为NaN，不替换为空字符串
+        # 处理数值列，将无效值转换为NaN
+        print("[DEBUG-9] 处理数值列...")
+        numeric_columns = ['lac', 'age', 'services_time', 'DIM', 'peak_milk', 'milk_305']
+        for column in numeric_columns:
+            if column in cow_df.columns:
+                try:
+                    print(f"  - 处理数值列: {column}")
+                    # 转换为数值类型，无效值转为NaN
+                    cow_df[column] = pd.to_numeric(cow_df[column], errors='coerce')
+                    # 替换无限值为NaN
+                    cow_df[column] = cow_df[column].replace([np.inf, -np.inf], np.nan)
+                except Exception as e:
+                    import logging
+                    print(f"[DEBUG-ERROR] 处理数值列 {column} 时出错: {e}")
+                    logging.error(f"处理数值列 {column} 时出错: {e}")
+                    # 确保此列为有效的数值类型
+                    cow_df[column] = ""
 
-    # 对cow_id, sire, mgs, dam, mmgs列进行空格和小数点清除
-    columns_to_clean = ['cow_id', 'sire', 'mgs', 'dam', 'mmgs']
-    for column in columns_to_clean:
-        if column in cow_df.columns:
-            # 将列转换为字符串类型
-            cow_df[column] = cow_df[column].astype(str)
-            # 去除空格、小数点并清理
-            cow_df[column] = cow_df[column].str.replace(' ', '').str.replace('.', '', regex=False).str.strip()
+        # 对cow_id, sire, mgs, dam, mmgs列进行空格和小数点清除
+        print("[DEBUG-10] 清理ID列...")
+        columns_to_clean = ['cow_id', 'sire', 'mgs', 'dam', 'mmgs']
+        for column in columns_to_clean:
+            if column in cow_df.columns:
+                try:
+                    print(f"  - 清理ID列: {column}")
+                    # 将列转换为字符串类型
+                    cow_df[column] = cow_df[column].astype(str)
+                    # 去除空格、小数点并清理
+                    cow_df[column] = cow_df[column].str.replace(' ', '').str.replace('.', '', regex=False).str.strip()
+                except Exception as e:
+                    import logging
+                    print(f"[DEBUG-ERROR] 清理列 {column} 时出错: {e}")
+                    logging.error(f"清理列 {column} 时出错: {e}")
+                    # 确保此列为字符串类型
+                    cow_df[column] = cow_df[column].astype(str)
 
-    # 调试输出：查看清理后的cow_id和dam
-    print("清理后的cow_id和dam:")
-    print(cow_df[['cow_id', 'dam']].head())
+        # 调试输出：查看清理后的cow_id和dam
+        import logging
+        print("[DEBUG-11] 清理后的ID列预览:")
+        if not cow_df.empty:
+            print(cow_df[['cow_id', 'dam']].head().to_string())
+            logging.info(cow_df[['cow_id', 'dam']].head().to_string())
 
-    # 对calving_date和birth_date列转换为日期格式
-    date_columns = ['calving_date', 'birth_date']
-    for column in date_columns:
-        if column in cow_df.columns:
-            cow_df[column] = pd.to_datetime(cow_df[column], errors='coerce')
+        # 对calving_date和birth_date列转换为日期格式
+        print("[DEBUG-12] 处理日期列...")
+        date_columns = ['calving_date', 'birth_date']
+        for column in date_columns:
+            if column in cow_df.columns:
+                try:
+                    print(f"  - 处理日期列: {column}")
+                    cow_df[column] = pd.to_datetime(cow_df[column], errors='coerce')
+                except Exception as e:
+                    import logging
+                    print(f"[DEBUG-ERROR] 处理日期列 {column} 时出错: {e}")
+                    logging.error(f"处理日期列 {column} 时出错: {e}")
+                    cow_df[column] = pd.NaT
 
-    # 检查重复的cow_id
-    duplicate_cows = cow_df[cow_df.duplicated(subset=['cow_id'], keep=False)]
-    if not duplicate_cows.empty:
-        duplicate_count = len(duplicate_cows['cow_id'].unique())
-        msg = f"发现{duplicate_count}个重复的母牛号。将按以下优先级保留记录：\n1. 性别为母牛\n2. 在群状态\n3. 出生日期最近\n4. 胎次最小\n5. 随机选择"
-        if progress_callback:
-            progress_callback(f"警告: {msg}")
-
-        # 定义一个函数来选择要保留的记录
-        def select_record(group):
-            # 1. 优先选择性别为母牛的记录
-            females = group[group['sex'] == '母']
-            if not females.empty:
-                group = females
-
-            # 2. 在性别相同的情况下，优先选择在群的记录
-            in_herd = group[group['是否在场'] == '是']
-            if not in_herd.empty:
-                group = in_herd
-
-            # 3. 如果还有多条记录，选择出生日期最近的
-            if group['birth_date'].notna().any():
-                return group.loc[group['birth_date'].idxmax()]
-
-            # 4. 如果出生日期都缺失，选择胎次最小的
-            elif group['lac'].notna().any():
-                return group.loc[group['lac'].idxmin()]
-
-            # 5. 如果以上条件都不满足，随机选择一条记录
-            else:
-                return group.sample(n=1).iloc[0]
-
-        # 按cow_id分组，应用选择函数
-        cow_df = cow_df.groupby('cow_id').apply(select_record).reset_index(drop=True)
-
-    invalid_naab_numbers = set()
-
-    # 对sire, mgs, mmgs列进行NAAB编号格式化
-    naab_columns = ['sire', 'mgs', 'mmgs']
-    total_naab = cow_df.shape[0] * len(naab_columns)
-    current_naab = 0
-
-    for column in naab_columns:
-        if column in cow_df.columns:
-            def format_and_track(x):
-                nonlocal current_naab
+        # 检查重复的cow_id
+        print("[DEBUG-13] 检查重复的cow_id...")
+        try:
+            duplicate_cows = cow_df[cow_df.duplicated(subset=['cow_id'], keep=False)]
+            if not duplicate_cows.empty:
+                duplicate_count = len(duplicate_cows['cow_id'].unique())
+                print(f"  - 发现{duplicate_count}个重复的母牛号")
+                msg = f"发现{duplicate_count}个重复的母牛号。将按以下优先级保留记录：\n1. 性别为母牛\n2. 在群状态\n3. 出生日期最近\n4. 胎次最小\n5. 随机选择"
                 if progress_callback:
-                    current_naab += 1
-                    progress = int((current_naab / total_naab) * 100)
-                    progress_callback(progress)  # 修改这里，去除 .emit
-                formatted_id, errors = format_naab_number(x)
-                if errors:
-                    invalid_naab_numbers.add(x)
-                    return ''
-                return formatted_id
+                    progress_callback(msg)
 
-            cow_df[column] = cow_df[column].apply(format_and_track)
+                # 定义一个函数来选择要保留的记录
+                def select_record(group):
+                    try:
+                        print(f"  - 处理重复的cow_id: {group['cow_id'].iloc[0]}")
+                        # 1. 优先选择性别为母牛的记录
+                        females = group[group['sex'] == '母']
+                        if not females.empty:
+                            group = females
 
-    if invalid_naab_numbers:
-        invalid_numbers_str = '\n'.join(invalid_naab_numbers)
-        if progress_callback:
-            progress_callback(f"NAAB公牛号的牛号部分有误,\n以下牛号HO之后的数字超过5位:\n\n{invalid_numbers_str}\n\n（正确案例:123HO12345）\n\n继续处理...")
+                        # 2. 在性别相同的情况下，优先选择在群的记录
+                        in_herd = group[group['是否在场'] == '是']
+                        if not in_herd.empty:
+                            group = in_herd
 
+                        # 3. 如果还有多条记录，选择出生日期最近的
+                        if group['birth_date'].notna().any():
+                            return group.loc[group['birth_date'].idxmax()]
 
+                        # 4. 如果出生日期都缺失，选择胎次最小的
+                        elif group['lac'].notna().any():
+                            return group.loc[group['lac'].idxmin()]
 
-    # 添加新列：birth_date_dam, mgd, birth_date_mgd
-    # 1. 添加 birth_date_dam
-    # 创建一个映射字典：cow_id -> birth_date
-    cow_birth_date_map = cow_df.set_index('cow_id')['birth_date'].to_dict()
-    cow_df['birth_date_dam'] = cow_df['dam'].map(cow_birth_date_map)
+                        # 5. 如果以上条件都不满足，随机选择一条记录
+                        else:
+                            return group.sample(n=1).iloc[0]
+                    except Exception as e:
+                        import logging
+                        print(f"[DEBUG-ERROR] 选择要保留的记录时出错: {e}")
+                        logging.error(f"选择要保留的记录时出错: {e}")
+                        # 返回第一条记录作为备选
+                        return group.iloc[0]
 
-    # 2. 添加 mgd（外祖母）
-    # 首先，需要获取母亲的母亲号（即外祖母的 cow_id）
-    # 创建一个映射字典：cow_id -> dam
-    cow_dam_map = cow_df.set_index('cow_id')['dam'].to_dict()
-    cow_df['mgd'] = cow_df['dam'].map(cow_dam_map)
+                # 按cow_id分组，应用选择函数
+                try:
+                    print("  - 开始处理重复记录...")
+                    cow_df = cow_df.groupby('cow_id').apply(select_record).reset_index(drop=True)
+                    print(f"  - 处理后记录数: {len(cow_df)}")
+                except Exception as e:
+                    import logging
+                    print(f"[DEBUG-ERROR] 处理重复cow_id时出错: {e}")
+                    logging.error(f"处理重复cow_id时出错: {e}")
+            else:
+                print("  - 未发现重复的cow_id")
+        except Exception as e:
+            import logging
+            print(f"[DEBUG-ERROR] 检查重复的cow_id时出错: {e}")
+            logging.error(f"检查重复的cow_id时出错: {e}")
 
-    # 3. 添加 birth_date_mgd
-    # 通过 mgd（外祖母的 cow_id）映射到 birth_date
-    cow_df['birth_date_mgd'] = cow_df['mgd'].map(cow_birth_date_map)
+        print("[DEBUG-14] 开始处理NAAB编号...")
+        invalid_naab_numbers = set()
 
-    # 填充缺失值（如果需要）
-    cow_df['birth_date_dam'] = cow_df['birth_date_dam'].fillna(pd.NaT)
-    cow_df['mgd'] = cow_df['mgd'].fillna('')
-    cow_df['birth_date_mgd'] = cow_df['birth_date_mgd'].fillna(pd.NaT)
+        # 对sire, mgs, mmgs列进行NAAB编号格式化
+        try:
+            naab_columns = ['sire', 'mgs', 'mmgs']
+            total_naab = cow_df.shape[0] * len(naab_columns)
+            current_naab = 0
 
-    # 对日期列进行格式化（可选）
-    cow_df['birth_date_dam'] = cow_df['birth_date_dam'].dt.strftime('%Y-%m-%d')
-    cow_df['birth_date_mgd'] = cow_df['birth_date_mgd'].dt.strftime('%Y-%m-%d')
+            for column in naab_columns:
+                if column in cow_df.columns:
+                    print(f"  - 处理NAAB列: {column}")
+                    def format_and_track(x):
+                        try:
+                            nonlocal current_naab
+                            if progress_callback:
+                                current_naab += 1
+                                progress = int((current_naab / total_naab) * 100)
+                                print(f"  - NAAB处理进度: {progress}%, 当前值: {x}")
+                                progress_callback(progress)
+                            formatted_id, errors = format_naab_number(x)
+                            if errors:
+                                print(f"  - NAAB格式错误: {x}, 错误: {errors}")
+                                invalid_naab_numbers.add(x)
+                                return ''
+                            return formatted_id
+                        except Exception as e:
+                            import logging
+                            print(f"[DEBUG-ERROR] 处理NAAB编号 {x} 时出错: {e}")
+                            logging.error(f"处理NAAB编号 {x} 时出错: {e}")
+                            return ''
 
-    # 检查是否有缺失的母亲或外祖母信息，并记录警告或错误（可选）
-    # missing_birth_date_dam = cow_df['birth_date_dam'].isna().sum()
-    # missing_birth_date_mgd = cow_df['birth_date_mgd'].isna().sum()
+                    cow_df[column] = cow_df[column].apply(format_and_track)
+                    print(f"  - 完成处理NAAB列: {column}")
+        except Exception as e:
+            import logging
+            print(f"[DEBUG-ERROR] 处理NAAB编号时出错: {e}")
+            logging.error(f"处理NAAB编号时出错: {e}")
 
-    # if missing_birth_date_dam > 0:
-    #     msg = f"警告: 有 {missing_birth_date_dam} 只母牛的母亲出生日期未找到。"
-    #     if progress_callback:
-    #         progress_callback(msg)
+        if invalid_naab_numbers:
+            invalid_numbers_str = '\n'.join(invalid_naab_numbers)
+            print(f"[DEBUG-15] 发现 {len(invalid_naab_numbers)} 个无效的NAAB编号")
+            if progress_callback:
+                progress_callback(f"NAAB公牛号的牛号部分有误,\n以下牛号HO之后的数字超过5位:\n\n{invalid_numbers_str}\n\n（正确案例:123HO12345）\n\n继续处理...")
 
-    # if missing_birth_date_mgd > 0:
-    #     msg = f"警告: 有 {missing_birth_date_mgd} 只母牛的外祖母出生日期未找到。"
-    #     if progress_callback:
-    #         progress_callback(msg)
+        # 添加新列：birth_date_dam, mgd, birth_date_mgd
+        print("[DEBUG-16] 添加派生列...")
+        try:
+            # 1. 添加 birth_date_dam
+            print("  - 添加 birth_date_dam 列")
+            # 创建一个映射字典：cow_id -> birth_date
+            cow_birth_date_map = cow_df.set_index('cow_id')['birth_date'].to_dict()
+            cow_df['birth_date_dam'] = cow_df['dam'].map(cow_birth_date_map)
 
-    return cow_df
+            # 2. 添加 mgd（外祖母）
+            print("  - 添加 mgd 列")
+            # 首先，需要获取母亲的母亲号（即外祖母的 cow_id）
+            # 创建一个映射字典：cow_id -> dam
+            cow_dam_map = cow_df.set_index('cow_id')['dam'].to_dict()
+            cow_df['mgd'] = cow_df['dam'].map(cow_dam_map)
+
+            # 3. 添加 birth_date_mgd
+            print("  - 添加 birth_date_mgd 列")
+            # 通过 mgd（外祖母的 cow_id）映射到 birth_date
+            cow_df['birth_date_mgd'] = cow_df['mgd'].map(cow_birth_date_map)
+
+            # 填充缺失值（如果需要）
+            print("  - 填充缺失值")
+            cow_df['birth_date_dam'] = cow_df['birth_date_dam'].fillna(pd.NaT)
+            cow_df['mgd'] = cow_df['mgd'].fillna('')
+            cow_df['birth_date_mgd'] = cow_df['birth_date_mgd'].fillna(pd.NaT)
+
+            # 对日期列进行格式化（可选）
+            print("  - 格式化日期列")
+            cow_df['birth_date_dam'] = cow_df['birth_date_dam'].dt.strftime('%Y-%m-%d')
+            cow_df['birth_date_mgd'] = cow_df['birth_date_mgd'].dt.strftime('%Y-%m-%d')
+        except Exception as e:
+            import logging
+            print(f"[DEBUG-ERROR] 添加新列时出错: {e}")
+            logging.error(f"添加新列时出错: {e}")
+            # 确保新列存在
+            cow_df['birth_date_dam'] = ""
+            cow_df['mgd'] = ""
+            cow_df['birth_date_mgd'] = ""
+
+        print("[DEBUG-17] 预处理完成，返回结果DataFrame，行数:", len(cow_df))
+        return cow_df
+    except Exception as e:
+        import logging
+        import traceback
+        print(f"[DEBUG-FATAL] 预处理母牛数据时出错: {e}")
+        print(traceback.format_exc())
+        logging.error(f"预处理母牛数据时出错: {e}")
+        logging.error(traceback.format_exc())
+        raise ValueError(f"预处理母牛数据时出错: {e}")
 
 
 def process_cow_data_file(input_file: Path, project_path: Path, progress_callback=None) -> Path:
     """
     标准化母牛数据文件
     """
+    import logging
+    print("[DEBUG-FILE-1] 开始标准化母牛数据文件:", input_file)
     # 将标准化后的文件存储到 standardized_data 文件夹
     standardized_path = project_path / "standardized_data"
     standardized_path.mkdir(parents=True, exist_ok=True)
+    print(f"[DEBUG-FILE-2] 标准化路径: {standardized_path}")
+    
+    # 配置日志
+    logging.basicConfig(
+        filename=project_path / "cow_data_processing.log",
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+    logging.info(f"开始处理母牛数据文件: {input_file}")
+    logging.info(f"项目路径: {project_path}")
+    
     # 读取文件
     try:
         # 在读取时指定数据类型
+        print("[DEBUG-FILE-3] 开始读取母牛数据文件...")
+        logging.info("开始读取母牛数据文件...")
         df = pd.read_excel(input_file, dtype={'cow_id': str, 'sire': str, 'mgs': str, 'dam': str, 'mmgs': str})
+        print(f"[DEBUG-FILE-4] 成功读取母牛数据文件，数据形状: {df.shape}")
+        logging.info(f"成功读取母牛数据文件，数据形状: {df.shape}")
+        logging.info(f"列名: {df.columns.tolist()}")
     except Exception as e:
+        print(f"[DEBUG-FILE-ERROR] 读取母牛数据文件失败: {e}")
+        logging.error(f"读取母牛数据文件失败: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
         raise ValueError(f"读取母牛数据文件失败: {e}")
 
     # 对数据进行标准化处理
     try:
+        print("[DEBUG-FILE-5] 开始预处理母牛数据...")
+        logging.info("开始预处理母牛数据...")
         df_cleaned = preprocess_cow_data(df, progress_callback)
+        print(f"[DEBUG-FILE-6] 成功预处理母牛数据，处理后数据形状: {df_cleaned.shape}")
+        logging.info(f"成功预处理母牛数据，处理后数据形状: {df_cleaned.shape}")
     except Exception as e:
+        print(f"[DEBUG-FILE-ERROR] 预处理母牛数据失败: {e}")
+        logging.error(f"预处理母牛数据失败: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
         raise ValueError(f"预处理母牛数据失败: {e}")
 
     # 保存标准化后的文件
     output_file = standardized_path / "processed_cow_data.xlsx"
     try:
+        print(f"[DEBUG-FILE-7] 开始保存标准化后的母牛数据到: {output_file}")
+        logging.info(f"开始保存标准化后的母牛数据到: {output_file}")
         df_cleaned.to_excel(output_file, index=False)
+        print("[DEBUG-FILE-8] 成功保存标准化后的母牛数据")
+        logging.info("成功保存标准化后的母牛数据")
     except Exception as e:
+        print(f"[DEBUG-FILE-ERROR] 保存母牛数据文件失败: {e}")
+        logging.error(f"保存母牛数据文件失败: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
         raise ValueError(f"保存母牛数据文件失败: {e}")
 
     # 确保文件存在
     if not output_file.exists():
+        print("[DEBUG-FILE-ERROR] 标准化后的母牛数据文件未生成。")
+        logging.error("标准化后的母牛数据文件未生成。")
         raise ValueError("标准化后的母牛数据文件未生成。")
 
+    print(f"[DEBUG-FILE-9] 母牛数据处理完成，输出文件: {output_file}")
+    logging.info(f"母牛数据处理完成，输出文件: {output_file}")
     return output_file
 
 def preprocess_bull_data(bull_df, progress_callback=None):
@@ -1271,83 +1417,168 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
     返回:
         Path: 标准化后的配种记录数据文件路径。
     """
+    print(f"[DEBUG-BREEDING-1] 开始处理配种记录文件: {input_file}")
+    
     # 将标准化后的文件存储到 standardized_data 文件夹
     standardized_path = project_path / "standardized_data"
     standardized_path.mkdir(parents=True, exist_ok=True)
+    print(f"[DEBUG-BREEDING-2] 标准化路径: {standardized_path}")
+    
     # 读取文件，根据文件类型选择读取方法
     try:
+        print(f"[DEBUG-BREEDING-3] 尝试读取配种记录文件: {input_file}")
         if input_file.suffix.lower() == '.csv':
             df = pd.read_csv(input_file)
         else:
             df = pd.read_excel(input_file)
+        print(f"[DEBUG-BREEDING-4] 成功读取配种记录文件，形状: {df.shape}")
     except Exception as e:
-        raise ValueError(f"读取配种记录数据文件失败: {e}")
+        error_msg = f"读取配种记录数据文件失败: {e}"
+        print(f"[DEBUG-BREEDING-ERROR] {error_msg}")
+        raise ValueError(error_msg)
 
     # 数据标准化逻辑（根据用户提供的必需列进行处理）
     required_columns = ['耳号', '配种日期', '冻精编号', '冻精类型']
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
-        raise ValueError(f"配种记录数据缺少以下必需列: {', '.join(missing_columns)}")
+        error_msg = f"配种记录数据缺少以下必需列: {', '.join(missing_columns)}"
+        print(f"[DEBUG-BREEDING-ERROR] {error_msg}")
+        raise ValueError(error_msg)
 
     # 删除缺失值
+    print(f"[DEBUG-BREEDING-5] 删除缺失值前记录数: {len(df)}")
     df_cleaned = df.dropna(subset=required_columns)
+    print(f"[DEBUG-BREEDING-6] 删除缺失值后记录数: {len(df_cleaned)}")
 
     # 处理 '冻精编号' 使用 format_naab_number
     def apply_format_naab_number(x):
-        formatted_id, errors = format_naab_number(x)
-        if errors:
-            # 如果有错误，返回空字符串
+        try:
+            # 防止空值或None
+            if pd.isna(x) or not x:
+                return ''
+                
+            formatted_id, errors = format_naab_number(str(x))
+            if errors:
+                # 如果有错误，返回空字符串
+                print(f"[DEBUG-BREEDING-WARNING] 冻精编号格式错误: {x}, 错误: {errors}")
+                return ''
+            return formatted_id
+        except Exception as e:
+            print(f"[DEBUG-BREEDING-ERROR] 处理冻精编号时出错: {x}, 错误: {e}")
             return ''
-        return formatted_id
 
+    # 安全地处理每行数据
     total = df_cleaned.shape[0]
-    for idx, row in df_cleaned.iterrows():
-        df_cleaned.at[idx, '冻精编号'] = apply_format_naab_number(row['冻精编号'])
-        if progress_callback:
-            progress = int((idx + 1) / total * 100)
-            progress_callback(progress)
+    try:
+        print(f"[DEBUG-BREEDING-7] 开始处理冻精编号，总行数: {total}")
+        for idx, row in df_cleaned.iterrows():
+            try:
+                df_cleaned.at[idx, '冻精编号'] = apply_format_naab_number(row['冻精编号'])
+                
+                # 只在特定间隔更新进度，减少回调频率
+                if progress_callback and idx % max(1, total // 10) == 0:
+                    progress = int((idx + 1) / total * 100)
+                    print(f"[DEBUG-BREEDING-8] 进度更新: {progress}%")
+                    progress_callback(progress)
+            except Exception as e:
+                print(f"[DEBUG-BREEDING-ERROR] 处理第 {idx} 行时出错: {e}")
+                # 继续处理下一行
+                continue
+    except Exception as e:
+        print(f"[DEBUG-BREEDING-ERROR] 处理冻精编号过程中出错: {e}")
+        # 继续执行，不抛出异常
 
     # 处理 '配种日期' 转换为日期格式
-    df_cleaned['配种日期'] = pd.to_datetime(df_cleaned['配种日期'], errors='coerce')
+    try:
+        print(f"[DEBUG-BREEDING-9] 处理配种日期")
+        df_cleaned['配种日期'] = pd.to_datetime(df_cleaned['配种日期'], errors='coerce')
+    except Exception as e:
+        print(f"[DEBUG-BREEDING-ERROR] 处理配种日期时出错: {e}")
+        # 继续执行
 
     # 填充 NaN 为 ''
-    df_cleaned.fillna('', inplace=True)
-
-    # 如果没有提供cow_df，尝试从标准化文件中读取
-    if cow_df is None:
-        cow_data_file = standardized_path / "processed_cow_data.xlsx"
-        if cow_data_file.exists():
-            try:
-                cow_df = pd.read_excel(cow_data_file, dtype={'cow_id': str, 'sire': str})
-            except Exception as e:
-                print(f"读取母牛数据文件失败: {e}")
+    try:
+        print(f"[DEBUG-BREEDING-10] 填充空值")
+        df_cleaned.fillna('', inplace=True)
+    except Exception as e:
+        print(f"[DEBUG-BREEDING-ERROR] 填充空值时出错: {e}")
+        # 继续执行
 
     # 添加父号列
-    if cow_df is not None:
-        # 确保 'cow_id' 和 'sire' 列存在
-        if 'cow_id' in cow_df.columns and 'sire' in cow_df.columns:
-            cow_df['cow_id'] = cow_df['cow_id'].astype(str)
-            sire_dict = dict(zip(cow_df['cow_id'], cow_df['sire']))
-            # 将耳号转换为字符串类型
-            df_cleaned['耳号'] = df_cleaned['耳号'].astype(str)
-            # 添加父号列
-            df_cleaned['父号'] = df_cleaned['耳号'].map(sire_dict).fillna('')
+    try:
+        print(f"[DEBUG-BREEDING-11] 处理父号列")
+        # 检查cow_df是否有效
+        if cow_df is not None and not cow_df.empty:
+            # 确保 'cow_id' 和 'sire' 列存在
+            if 'cow_id' in cow_df.columns and 'sire' in cow_df.columns:
+                try:
+                    print(f"[DEBUG-BREEDING-12] 创建父号映射字典，母牛数据形状: {cow_df.shape}")
+                    # 确保cow_id列为字符串类型
+                    cow_df['cow_id'] = cow_df['cow_id'].astype(str)
+                    # 创建映射字典: cow_id -> sire
+                    sire_dict = dict(zip(cow_df['cow_id'], cow_df['sire']))
+                    print(f"[DEBUG-BREEDING-13] 创建了 {len(sire_dict)} 个映射项")
+                    
+                    # 确保配种记录的耳号列为字符串类型
+                    df_cleaned['耳号'] = df_cleaned['耳号'].astype(str)
+                    print(f"[DEBUG-BREEDING-14] 开始映射父号...")
+                    
+                    # 检查映射前的样本数据
+                    sample_ear_tags = df_cleaned['耳号'].head(5).tolist()
+                    print(f"[DEBUG-BREEDING-15] 样本耳号: {sample_ear_tags}")
+                    sample_matches = [sire_dict.get(tag, '未匹配') for tag in sample_ear_tags]
+                    print(f"[DEBUG-BREEDING-16] 样本映射结果: {sample_matches}")
+                    
+                    # 添加父号列
+                    df_cleaned['父号'] = df_cleaned['耳号'].map(sire_dict).fillna('')
+                    
+                    # 检查映射效果
+                    matched_count = (df_cleaned['父号'] != '').sum()
+                    print(f"[DEBUG-BREEDING-17] 父号映射完成，成功匹配 {matched_count}/{len(df_cleaned)} 条记录")
+                except Exception as e:
+                    print(f"[DEBUG-BREEDING-ERROR] 映射父号时出错: {e}")
+                    import traceback
+                    print(traceback.format_exc())
+                    df_cleaned['父号'] = ''  # 出错时设置为空字符串
+            else:
+                print(f"[DEBUG-BREEDING-WARNING] 母牛数据中缺少必要的列: cow_id或sire")
+                df_cleaned['父号'] = ''
         else:
+            # 如果没有提供有效的cow_df，添加空的父号列
+            print(f"[DEBUG-BREEDING-WARNING] 未提供有效的母牛数据")
             df_cleaned['父号'] = ''
-    else:
-        # 如果没有提供 cow_df，添加空的父号列
-        df_cleaned['父号'] = ''
+    except Exception as e:
+        print(f"[DEBUG-BREEDING-ERROR] 处理父号时出错: {e}")
+        import traceback
+        print(traceback.format_exc())
+        df_cleaned['父号'] = ''  # 确保父号列存在
 
     # 重新排列列的顺序
-    df_cleaned = df_cleaned[['耳号', '父号', '冻精编号', '配种日期', '冻精类型']]
+    try:
+        print(f"[DEBUG-BREEDING-18] 重新排列列顺序")
+        columns_to_keep = ['耳号', '父号', '冻精编号', '配种日期', '冻精类型']
+        # 确保所有必要的列都存在
+        for col in columns_to_keep:
+            if col not in df_cleaned.columns:
+                df_cleaned[col] = ''
+                
+        df_cleaned = df_cleaned[columns_to_keep]
+    except Exception as e:
+        print(f"[DEBUG-BREEDING-ERROR] 重新排列列时出错: {e}")
+        # 继续执行，不抛出异常
 
     # 保存标准化后的文件
     output_file = standardized_path / "processed_breeding_data.xlsx"
     try:
+        print(f"[DEBUG-BREEDING-19] 保存处理后的文件: {output_file}")
         df_cleaned.to_excel(output_file, index=False)
+        print(f"[DEBUG-BREEDING-20] 文件保存成功")
     except Exception as e:
-        raise ValueError(f"保存配种记录数据文件失败: {e}")
+        error_msg = f"保存配种记录数据文件失败: {e}"
+        print(f"[DEBUG-BREEDING-ERROR] {error_msg}")
+        raise ValueError(error_msg)
 
+    print(f"[DEBUG-BREEDING-21] 配种记录处理完成，返回文件路径: {output_file}")
     return output_file
 
 

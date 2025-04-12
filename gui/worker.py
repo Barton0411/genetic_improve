@@ -34,20 +34,87 @@ class CowDataWorker(QObject):
         super().__init__()
         self.input_files = input_files
         self.project_path = project_path
+        print(f"[DEBUG-WORKER-INIT] CowDataWorker初始化: input_files={input_files}, project_path={project_path}")
+
+    def progress_callback(self, progress_value, message=None):
+        """统一的进度回调函数，同时处理进度值和消息"""
+        print(f"[DEBUG-WORKER-PROGRESS] 进度: {progress_value}%, 消息: {message}")
+        self.progress.emit(progress_value)
+        if message:
+            self.message.emit(message)
 
     @pyqtSlot()
     def run(self):
+        import logging
+        import traceback
+        print("[DEBUG-WORKER-1] CowDataWorker开始运行")
+        
+        # 配置日志
         try:
+            log_file = self.project_path / "worker_cow_data.log"
+            logging.basicConfig(
+                filename=log_file,
+                level=logging.INFO,
+                format='%(asctime)s - %(levelname)s - %(message)s'
+            )
+            print(f"[DEBUG-WORKER-2] 日志文件配置在: {log_file}")
+        except Exception as e:
+            print(f"[DEBUG-WORKER-ERROR] 配置日志文件时出错: {e}")
+        
+        try:
+            print("[DEBUG-WORKER-3] 开始上传并标准化母牛数据")
+            logging.info(f"开始上传并标准化母牛数据，项目路径: {self.project_path}")
+            logging.info(f"输入文件: {self.input_files}")
+            
+            # 检查项目路径是否存在
+            if not self.project_path.exists():
+                error_msg = f"项目路径不存在: {self.project_path}"
+                print(f"[DEBUG-WORKER-ERROR] {error_msg}")
+                logging.error(error_msg)
+                self.error.emit(error_msg)
+                return
+                
+            # 检查输入文件是否存在
+            if not self.input_files or not self.input_files[0].exists():
+                error_msg = f"输入文件不存在或无效: {self.input_files}"
+                print(f"[DEBUG-WORKER-ERROR] {error_msg}")
+                logging.error(error_msg)
+                self.error.emit(error_msg)
+                return
+            
+            # 记录文件信息
+            print("[DEBUG-WORKER-4] 检查文件信息")
+            file_info = f"文件大小: {self.input_files[0].stat().st_size} 字节"
+            print(f"[DEBUG-WORKER-5] {file_info}")
+            logging.info(file_info)
+            self.message.emit(f"处理文件: {self.input_files[0].name}")
+            self.message.emit(file_info)
+            
+            # 导入上传函数
+            print("[DEBUG-WORKER-6] 导入upload_and_standardize_cow_data函数")
+            from core.data.uploader import upload_and_standardize_cow_data
+            
             # 上传并标准化数据，传递进度回调
+            print("[DEBUG-WORKER-7] 调用upload_and_standardize_cow_data函数")
             standardized_path = upload_and_standardize_cow_data(
                 self.input_files, 
                 self.project_path, 
-                progress_callback=self.progress.emit  # 传递 emit 方法
+                progress_callback=self.progress_callback  # 使用新的回调函数
             )
+            
+            print(f"[DEBUG-WORKER-8] 处理完成，标准化文件路径: {standardized_path}")
+            logging.info(f"处理完成，标准化文件路径: {standardized_path}")
             self.finished.emit(standardized_path)
+            print("[DEBUG-WORKER-9] 发送finished信号，工作线程结束")
+            
         except Exception as e:
             error_trace = traceback.format_exc()
-            self.error.emit(str(e) + "\n" + error_trace)
+            error_msg = f"处理母牛数据时发生错误: {str(e)}"
+            print(f"[DEBUG-WORKER-ERROR] {error_msg}")
+            print(error_trace)
+            logging.error(error_msg)
+            logging.error(error_trace)
+            self.error.emit(f"{error_msg}\n\n详细错误信息:\n{error_trace}")
 
 class GenomicDataWorker(QObject):
     progress = pyqtSignal(int)      # 进度百分比
@@ -167,4 +234,106 @@ class TraitsCalculationWorker(QObject):
         except Exception as e:
             error_trace = traceback.format_exc()
             self.error.emit(str(e) + "\n" + error_trace)
+
+class BreedingDataWorker(QObject):
+    progress = pyqtSignal(int)      # 进度百分比
+    message = pyqtSignal(str)       # 消息更新
+    finished = pyqtSignal(Path)     # 处理完成，返回文件路径
+    error = pyqtSignal(str)         # 发生错误
+
+    def __init__(self, input_files, project_path):
+        super().__init__()
+        self.input_files = input_files
+        self.project_path = project_path
+        print(f"[DEBUG-BREEDING-WORKER-INIT] BreedingDataWorker初始化: input_files={input_files}, project_path={project_path}")
+
+    def progress_callback(self, progress_value, message=None):
+        """统一的进度回调函数，同时处理进度值和消息"""
+        print(f"[DEBUG-BREEDING-WORKER-PROGRESS] 进度: {progress_value}%, 消息: {message}")
+        self.progress.emit(progress_value)
+        if message:
+            self.message.emit(message)
+
+    @pyqtSlot()
+    def run(self):
+        import logging
+        import traceback
+        print("[DEBUG-BREEDING-WORKER-1] BreedingDataWorker开始运行")
+        
+        # 配置日志
+        try:
+            log_file = self.project_path / "breeding_worker.log"
+            logging.basicConfig(
+                filename=log_file,
+                level=logging.INFO,
+                format='%(asctime)s - %(levelname)s - %(message)s',
+                force=True
+            )
+            print(f"[DEBUG-BREEDING-WORKER-2] 日志文件配置在: {log_file}")
+        except Exception as e:
+            print(f"[DEBUG-BREEDING-WORKER-ERROR] 配置日志文件时出错: {e}")
+        
+        try:
+            print("[DEBUG-BREEDING-WORKER-3] 开始上传并标准化配种记录")
+            logging.info(f"开始上传并标准化配种记录，项目路径: {self.project_path}")
+            logging.info(f"输入文件: {self.input_files}")
+            
+            # 检查项目路径是否存在
+            if not self.project_path.exists():
+                error_msg = f"项目路径不存在: {self.project_path}"
+                print(f"[DEBUG-BREEDING-WORKER-ERROR] {error_msg}")
+                logging.error(error_msg)
+                self.error.emit(error_msg)
+                return
+                
+            # 检查输入文件是否存在
+            if not self.input_files or not self.input_files[0].exists():
+                error_msg = f"输入文件不存在或无效: {self.input_files}"
+                print(f"[DEBUG-BREEDING-WORKER-ERROR] {error_msg}")
+                logging.error(error_msg)
+                self.error.emit(error_msg)
+                return
+            
+            # 检查母牛数据文件是否存在
+            cow_data_file = self.project_path / "standardized_data" / "processed_cow_data.xlsx"
+            if not cow_data_file.exists():
+                error_msg = "请先上传并处理母牛数据，再上传配种记录"
+                print(f"[DEBUG-BREEDING-WORKER-ERROR] {error_msg}")
+                logging.error(error_msg)
+                self.error.emit(error_msg)
+                return
+            
+            # 记录文件信息
+            print("[DEBUG-BREEDING-WORKER-4] 检查文件信息")
+            file_info = f"文件大小: {self.input_files[0].stat().st_size} 字节"
+            print(f"[DEBUG-BREEDING-WORKER-5] {file_info}")
+            logging.info(file_info)
+            self.message.emit(f"处理文件: {self.input_files[0].name}")
+            self.message.emit(file_info)
+            
+            # 导入上传函数
+            print("[DEBUG-BREEDING-WORKER-6] 导入upload_and_standardize_breeding_data函数")
+            from core.data.uploader import upload_and_standardize_breeding_data
+            
+            # 上传并标准化数据，传递进度回调
+            print("[DEBUG-BREEDING-WORKER-7] 调用upload_and_standardize_breeding_data函数")
+            standardized_path = upload_and_standardize_breeding_data(
+                self.input_files, 
+                self.project_path, 
+                progress_callback=self.progress_callback  # 使用回调函数
+            )
+            
+            print(f"[DEBUG-BREEDING-WORKER-8] 处理完成，标准化文件路径: {standardized_path}")
+            logging.info(f"处理完成，标准化文件路径: {standardized_path}")
+            self.finished.emit(standardized_path)
+            print("[DEBUG-BREEDING-WORKER-9] 发送finished信号，工作线程结束")
+            
+        except Exception as e:
+            error_trace = traceback.format_exc()
+            error_msg = f"处理配种记录时发生错误: {str(e)}"
+            print(f"[DEBUG-BREEDING-WORKER-ERROR] {error_msg}")
+            print(error_trace)
+            logging.error(error_msg)
+            logging.error(error_trace)
+            self.error.emit(f"{error_msg}\n\n详细错误信息:\n{error_trace}")
 
