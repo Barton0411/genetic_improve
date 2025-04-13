@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
     QTableView, QFrame, QSplitter, QMessageBox, QApplication,
-    QMainWindow, QDialog, QTabWidget, QComboBox, QListWidget, QTextEdit, QHeaderView, QMenu, QFileDialog
+    QMainWindow, QDialog, QTabWidget, QComboBox, QListWidget, QListWidgetItem, QTextEdit, QHeaderView, QMenu, QFileDialog
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QBrush, QColor, QStandardItemModel, QStandardItem
@@ -2275,7 +2275,9 @@ class InbreedingPage(QWidget):
             # 完成
             self.progress_dialog.update_progress(100)
             print(f"{analysis_type}分析完成")
-            # 不再显示QMessageBox.information完成提示，因为进度对话框已经显示了完成信息
+            
+            # 自动保存分析结果
+            self.export_results(auto_save=True)
             
         except Exception as e:
             print(f"执行{analysis_type}分析时发生错误: {e}")
@@ -2287,12 +2289,17 @@ class InbreedingPage(QWidget):
             if self.db_engine:
                 self.db_engine.dispose()
 
-    def export_results(self):
-        """导出分析结果到Excel文件"""
+    def export_results(self, auto_save=False):
+        """导出分析结果到Excel文件
+        
+        Args:
+            auto_save: 是否自动保存到项目文件夹
+        """
         try:
             # 检查是否有数据可以导出
             if self.detail_model.df.empty and self.abnormal_model.df.empty and self.stats_model.df.empty:
-                QMessageBox.warning(self, "警告", "没有可导出的数据，请先进行分析。")
+                if not auto_save:  # 只在手动导出时显示警告
+                    QMessageBox.warning(self, "警告", "没有可导出的数据，请先进行分析。")
                 return
 
             # 根据最后点击的按钮来判断分析类型
@@ -2304,13 +2311,30 @@ class InbreedingPage(QWidget):
                 else:
                     default_filename = "备选公牛_近交系数及隐性基因分析结果.xlsx"
 
-            # 获取保存文件路径
-            file_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "导出分析结果",
-                default_filename,
-                "Excel Files (*.xlsx)"
-            )
+            file_path = None
+            if auto_save:
+                # 自动保存到项目目录下的analysis_results文件夹
+                project_path = self.get_project_path()
+                if not project_path:
+                    return
+                    
+                # 确保analysis_results文件夹存在
+                analysis_dir = project_path / "analysis_results"
+                if not analysis_dir.exists():
+                    analysis_dir.mkdir(parents=True, exist_ok=True)
+                    
+                # 添加时间戳到文件名
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"{default_filename.split('.')[0]}_{timestamp}.xlsx"
+                file_path = str(analysis_dir / filename)
+            else:
+                # 手动选择保存位置
+                file_path, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "导出分析结果",
+                    default_filename,
+                    "Excel Files (*.xlsx)"
+                )
 
             if not file_path:
                 return
@@ -2329,9 +2353,89 @@ class InbreedingPage(QWidget):
                 if not self.stats_model.df.empty:
                     self.stats_model.df.to_excel(writer, sheet_name='统计表', index=False)
 
-            # 显示成功消息
-            QMessageBox.information(self, "导出成功", f"分析结果已成功导出到:\n{file_path}")
+            if auto_save:
+                # 弹出自定义对话框，提供打开文件选项
+                self.show_export_success_dialog(file_path)
+            else:
+                # 显示成功消息
+                QMessageBox.information(self, "导出成功", f"分析结果已成功导出到:\n{file_path}")
 
         except Exception as e:
             logging.error(f"导出分析结果时发生错误: {e}")
             QMessageBox.critical(self, "导出失败", f"导出过程中发生错误:\n{str(e)}")
+
+    def show_export_success_dialog(self, file_path):
+        """显示导出成功对话框，提供打开文件选项
+        
+        Args:
+            file_path: 导出文件的路径
+        """
+        # 创建自定义对话框
+        dialog = QDialog(self)
+        dialog.setWindowTitle("分析完成")
+        
+        # 设置对话框布局
+        layout = QVBoxLayout(dialog)
+        
+        # 添加消息标签
+        message = QLabel(f"分析结果已自动保存到:\n{file_path}")
+        message.setWordWrap(True)
+        layout.addWidget(message)
+        
+        # 添加按钮
+        button_layout = QHBoxLayout()
+        open_button = QPushButton("打开")
+        cancel_button = QPushButton("取消")
+        
+        # 设置按钮样式
+        open_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        
+        button_layout.addWidget(open_button)
+        button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
+        
+        # 连接信号
+        open_button.clicked.connect(lambda: self.open_file(file_path))
+        open_button.clicked.connect(dialog.accept)
+        cancel_button.clicked.connect(dialog.reject)
+        
+        # 显示对话框
+        dialog.setMinimumWidth(400)
+        dialog.exec()
+
+    def open_file(self, file_path):
+        """使用系统默认程序打开文件
+        
+        Args:
+            file_path: 要打开的文件路径
+        """
+        try:
+            import os
+            import platform
+            
+            # 根据操作系统选择打开文件的方法
+            system = platform.system()
+            if system == 'Windows':
+                os.startfile(file_path)
+            elif system == 'Darwin':  # macOS
+                import subprocess
+                subprocess.call(['open', file_path])
+            else:  # Linux
+                import subprocess
+                subprocess.call(['xdg-open', file_path])
+                
+        except Exception as e:
+            logging.error(f"打开文件时发生错误: {e}")
+            QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}\n请手动打开文件。")
