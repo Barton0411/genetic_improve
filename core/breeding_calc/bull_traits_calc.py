@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt
 import pandas as pd
 from sqlalchemy import create_engine, text
 import datetime
+from core.breeding_calc.traits_calculation import TraitsCalculation
 from core.data.update_manager import (
     CLOUD_DB_HOST, CLOUD_DB_PORT, CLOUD_DB_USER, 
     CLOUD_DB_PASSWORD, CLOUD_DB_NAME, LOCAL_DB_PATH
