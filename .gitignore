@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.spec
+*.manifest
+
+# Logs
+*.log
+crawler_log.txt
+
+# Database
+*.db
+local_bull_library.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+genetic_projects/
+inbreeding_reports/
+standardized_data/
+analysis_results/
+选配推荐报告/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak

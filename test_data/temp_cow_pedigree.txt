@@ -1,0 +1,12 @@
+animal_id,sire_id,dam_id,type,gib
+TestCow1,HOGBR000000577955,TestCow6,cow,NA
+TestCow6,HOITA019500233177,TestCow10,cow,NA
+TestCow10,HODEU000340055654,0,cow,NA
+TestCow2,HODEU000340055654,TestCow7,cow,NA
+TestCow7,HOGBR000000577955,0,cow,NA
+TestCow3,TestBull1,0,cow,NA
+TestCow4,TestBull2,TestCow8,cow,NA
+TestCow8,HODEU000340055654,TestCow11,cow,NA
+TestCow11,HOITA019500233177,0,cow,NA
+TestCow5,0,TestCow9,cow,NA
+TestCow9,HOGBR000000577955,0,cow,NA

@@ -1,0 +1,68 @@
+{
+  "params": {
+    "reserve_age": 420,
+    "cycle_days": 21
+  },
+  "strategy_table": [
+    {
+      "group": "成母牛A",
+      "ratio": 30.0,
+      "breeding_methods": [
+        "超级性控",
+        "超级性控",
+        "常规冻精",
+        "常规冻精"
+      ]
+    },
+    {
+      "group": "成母牛B",
+      "ratio": 50.0,
+      "breeding_methods": [
+        "常规冻精",
+        "常规冻精",
+        "常规冻精",
+        "常规冻精"
+      ]
+    },
+    {
+      "group": "成母牛C",
+      "ratio": 20.0,
+      "breeding_methods": [
+        "肉牛冻精",
+        "肉牛冻精",
+        "肉牛冻精",
+        "肉牛冻精"
+      ]
+    },
+    {
+      "group": "后备牛A",
+      "ratio": 80.0,
+      "breeding_methods": [
+        "普通性控",
+        "普通性控",
+        "常规冻精",
+        "常规冻精"
+      ]
+    },
+    {
+      "group": "后备牛B",
+      "ratio": 10.0,
+      "breeding_methods": [
+        "常规冻精",
+        "常规冻精",
+        "常规冻精",
+        "常规冻精"
+      ]
+    },
+    {
+      "group": "后备牛C",
+      "ratio": 10.0,
+      "breeding_methods": [
+        "肉牛冻精",
+        "肉牛冻精",
+        "肉牛冻精",
+        "肉牛冻精"
+      ]
+    }
+  ]
+}

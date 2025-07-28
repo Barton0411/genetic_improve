@@ -1,0 +1,77 @@
+{
+  "test_summary": {
+    "total_time": 15.199974775314331,
+    "timestamp": "2025-05-23T20:53:31.885064",
+    "test_data_dir": "test_data"
+  },
+  "test_results": {
+    "basic_functionality": "PASSED",
+    "pressure_test": "PASSED",
+    "pressure_details": {
+      "empty_data_test": {
+        "status": "failed",
+        "message": "空数据测试失败: 数据准备失败"
+      },
+      "large_data_test": {
+        "status": "skipped",
+        "message": "无测试数据"
+      },
+      "exception_data_test": {
+        "status": "passed",
+        "message": "异常数据测试完成",
+        "details": [
+          "缺失推荐数据: 通过",
+          "无效近交系数: 通过",
+          "缺失指数得分: 通过",
+          "重复母牛ID: 通过"
+        ]
+      },
+      "boundary_test": {
+        "status": "passed",
+        "message": "边界条件测试完成",
+        "details": [
+          "近交系数阈值边界: 通过",
+          "冻精数量为0: 通过",
+          "所有母牛同分组: 通过",
+          "分组名称特殊字符: 通过"
+        ]
+      }
+    },
+    "boundary_conditions": [
+      [
+        "边界条件测试",
+        "FAILED",
+        "数据准备失败"
+      ]
+    ],
+    "performance": {
+      "100_cows": {
+        "processing_time": 0.10474348068237305,
+        "cows_processed": 100,
+        "cows_per_second": 954.7133563686192
+      },
+      "500_cows": {
+        "processing_time": 0.5383267402648926,
+        "cows_processed": 500,
+        "cows_per_second": 928.8039448940744
+      },
+      "1000_cows": {
+        "processing_time": 1.1008589267730713,
+        "cows_processed": 1000,
+        "cows_per_second": 908.3816061075897
+      }
+    },
+    "data_quality": [
+      [
+        "缺失数据处理",
+        "PASSED",
+        "处理了950头牛"
+      ]
+    ],
+    "concurrent": {
+      "status": "PASSED",
+      "threads_completed": 5,
+      "errors": 0
+    }
+  }
+}

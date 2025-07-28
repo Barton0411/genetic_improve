@@ -1,0 +1,28 @@
+个体选配功能测试报告
+==================================================
+
+测试时间: 2025-05-23T20:53:31.885064
+总耗时: 15.20秒
+测试数据目录: test_data
+
+测试结果汇总:
+------------------------------
+basic_functionality: PASSED
+
+pressure_test: PASSED
+
+pressure_details: 详见JSON报告
+
+boundary_conditions:
+  边界条件测试: FAILED
+
+performance: 详见JSON报告
+
+data_quality:
+  缺失数据处理: PASSED
+
+concurrent: 详见JSON报告
+
+
+测试总结: 2/7 项测试通过
+⚠ 部分测试失败，需要检查相关功能。
