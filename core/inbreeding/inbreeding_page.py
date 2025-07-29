@@ -607,7 +607,7 @@ class PedigreeDialog(QDialog):
             
             # 添加缩放和平移功能
             def on_scroll(event):
-                """鼠标滚轮缩放事件处理"""
+                """鼠标滚轮和触控板缩放事件处理"""
                 # 获取当前缩放比例
                 cur_xlim = ax.get_xlim()
                 cur_ylim = ax.get_ylim()
@@ -619,21 +619,37 @@ class PedigreeDialog(QDialog):
                 if xdata is None or ydata is None:
                     return
                 
-                if event.button == 'up':  # 放大
-                    # 缩放比例因子
-                    scale_factor = 0.7  # 更快的缩放速度
-                else:  # 缩小
-                    # 缩放比例因子
-                    scale_factor = 1.4  # 更快的缩放速度
+                # 获取滚轮步进值
+                steps = event.step
+                
+                # 检测是否为触控板手势（步进值通常小于1）
+                if abs(steps) < 1:
+                    # 触控板双指缩放，使用更平滑的缩放
+                    if steps > 0:
+                        scale_factor = 1 - steps * 0.05  # 放大
+                    else:
+                        scale_factor = 1 - steps * 0.05  # 缩小
+                else:
+                    # 传统鼠标滚轮
+                    if event.button == 'up':  # 放大
+                        scale_factor = 0.8
+                    else:  # 缩小
+                        scale_factor = 1.25
+                
+                # 限制缩放范围
+                new_xrange = cur_xrange * scale_factor
+                new_yrange = cur_yrange * scale_factor
+                
+                # 防止过度缩放
+                if new_xrange < 0.5 or new_xrange > 50:
+                    return
                 
                 # 设置新的缩放范围
-                ax.set_xlim([xdata - cur_xrange * scale_factor,
-                           xdata + cur_xrange * scale_factor])
-                ax.set_ylim([ydata - cur_yrange * scale_factor,
-                           ydata + cur_yrange * scale_factor])
+                ax.set_xlim([xdata - new_xrange, xdata + new_xrange])
+                ax.set_ylim([ydata - new_yrange, ydata + new_yrange])
                 
                 # 重新绘制图表
-                self.canvas.draw()
+                self.canvas.draw_idle()
             
             # 添加滚轮事件
             self.canvas.mpl_connect('scroll_event', lambda event: on_scroll(event))
@@ -841,6 +857,13 @@ class MaximizedPedigreeDialog(QDialog):
         zoom_out_btn.setStyleSheet("font-size: 18px; font-weight: bold;")
         zoom_out_btn.clicked.connect(self.zoom_out)
         
+        # 重置按钮
+        reset_btn = QPushButton("⟲")
+        reset_btn.setToolTip("重置视图")
+        reset_btn.setFixedSize(40, 40)
+        reset_btn.setStyleSheet("font-size: 18px;")
+        reset_btn.clicked.connect(self.zoom_reset)
+        
         # 保存按钮
         save_btn = QPushButton("保存图片")
         save_btn.setToolTip("保存血缘图为图片文件")
@@ -856,6 +879,7 @@ class MaximizedPedigreeDialog(QDialog):
         
         btn_layout.addWidget(zoom_in_btn)
         btn_layout.addWidget(zoom_out_btn)
+        btn_layout.addWidget(reset_btn)
         btn_layout.addWidget(self.pan_btn)
         btn_layout.addWidget(save_btn)
         btn_layout.addStretch()
@@ -877,6 +901,9 @@ class MaximizedPedigreeDialog(QDialog):
         
         # 绘制完整的6代系谱图
         self.draw_pedigree()
+        
+        # 连接滚轮事件以支持鼠标滚轮和触控板缩放
+        self.canvas.mpl_connect('scroll_event', self.on_scroll)
         
     def toggle_pan_mode(self):
         """切换拖动模式"""
@@ -1005,6 +1032,58 @@ class MaximizedPedigreeDialog(QDialog):
             ax.set_xlim(self.base_xlim)
             ax.set_ylim(self.base_ylim)
             self.canvas.draw_idle()
+    
+    def on_scroll(self, event):
+        """处理鼠标滚轮和触控板缩放事件"""
+        # 获取当前axes
+        ax = self.figure.gca()
+        
+        # 获取当前视图范围
+        cur_xlim = ax.get_xlim()
+        cur_ylim = ax.get_ylim()
+        
+        # 获取鼠标位置
+        xdata = event.xdata
+        ydata = event.ydata
+        
+        if xdata is None or ydata is None:
+            return
+        
+        # 计算当前范围
+        cur_xrange = (cur_xlim[1] - cur_xlim[0]) * 0.5
+        cur_yrange = (cur_ylim[1] - cur_ylim[0]) * 0.5
+        
+        # 获取滚轮步进值
+        steps = event.step
+        
+        # 检测是否为触控板手势（步进值通常小于1）
+        if abs(steps) < 1:
+            # 触控板双指缩放，使用更平滑的缩放
+            if steps > 0:
+                scale_factor = 1 - steps * 0.1  # 放大
+            else:
+                scale_factor = 1 - steps * 0.1  # 缩小
+        else:
+            # 传统鼠标滚轮
+            if event.button == 'up':  # 放大
+                scale_factor = 0.9
+            else:  # 缩小
+                scale_factor = 1.1
+        
+        # 限制缩放范围
+        new_xrange = cur_xrange * scale_factor
+        new_yrange = cur_yrange * scale_factor
+        
+        # 防止过度缩放
+        if new_xrange < 0.5 or new_xrange > 100:
+            return
+        
+        # 以鼠标位置为中心进行缩放
+        ax.set_xlim([xdata - new_xrange, xdata + new_xrange])
+        ax.set_ylim([ydata - new_yrange, ydata + new_yrange])
+        
+        # 更新画布
+        self.canvas.draw_idle()
     
     def draw_pedigree(self):
         """绘制完整的6代系谱图 - 采用固定画布大小和均匀分布节点"""
