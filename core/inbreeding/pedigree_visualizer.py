@@ -442,7 +442,7 @@ class PedigreeTreeView(QGraphicsView):
         # 获取场景边界
         scene_rect = self.scene.sceneRect()
         
-        # 创建提示背景
+        # 创建操作提示背景
         hint_width = 280
         hint_height = 120
         hint_x = scene_rect.width() - hint_width - 20
@@ -452,6 +452,17 @@ class PedigreeTreeView(QGraphicsView):
         hint_rect.setBrush(QBrush(QColor(255, 255, 224, 200)))  # 淡黄色背景
         hint_rect.setPen(QPen(QColor("#666666")))
         self.scene.addItem(hint_rect)
+        
+        # 添加计算方法说明背景
+        method_width = 400
+        method_height = 180
+        method_x = scene_rect.width() - method_width - 20
+        method_y = hint_y + hint_height + 20
+        
+        method_rect = QGraphicsRectItem(method_x, method_y, method_width, method_height)
+        method_rect.setBrush(QBrush(QColor(240, 248, 255, 200)))  # 淡蓝色背景
+        method_rect.setPen(QPen(QColor("#666666")))
+        self.scene.addItem(method_rect)
         
         # 添加提示标题
         hint_title = QGraphicsTextItem("操作提示")
@@ -491,3 +502,25 @@ class PedigreeTreeView(QGraphicsView):
         hint_text.setFont(text_font)
         hint_text.setPos(hint_x + 10, hint_y + 30)
         self.scene.addItem(hint_text)
+        
+        # 添加计算方法说明标题
+        method_title = QGraphicsTextItem("近交系数计算方法")
+        method_title.setDefaultTextColor(QColor("#333333"))
+        method_title.setFont(title_font)  # 使用相同的标题字体
+        method_title.setPos(method_x + 10, method_y + 5)
+        self.scene.addItem(method_title)
+        
+        # 添加计算方法说明内容
+        method_text = QGraphicsTextItem(
+            "采用Wright通径法计算近交系数：\n"
+            "F = Σ(0.5)^(n+n'+1) × (1+F_A)\n\n"
+            "• F: 个体的近交系数\n"
+            "• n: 父系到共同祖先的代数\n"
+            "• n': 母系到共同祖先的代数\n"
+            "• F_A: 共同祖先自身的近交系数\n"
+            "• 当有GIB值时，直接使用GIB作为近交系数"
+        )
+        method_text.setDefaultTextColor(QColor("#555555"))
+        method_text.setFont(text_font)  # 使用相同的文本字体
+        method_text.setPos(method_x + 10, method_y + 30)
+        self.scene.addItem(method_text)

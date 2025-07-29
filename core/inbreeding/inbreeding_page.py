@@ -1314,6 +1314,57 @@ class InbreedingPage(QWidget):
         explanation_label.setStyleSheet("color: #555; font-size: 12px; margin-bottom: 5px;")
         left_layout.addWidget(explanation_label)
         
+        # 添加计算方法说明
+        method_frame = QFrame()
+        method_frame.setFrameStyle(QFrame.Shape.Box)
+        method_frame.setStyleSheet("""
+            QFrame {
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background-color: #f0f8ff;
+                padding: 5px;
+                margin-bottom: 10px;
+            }
+        """)
+        method_layout = QVBoxLayout(method_frame)
+        method_layout.setContentsMargins(5, 5, 5, 5)
+        
+        method_title = QLabel("近交系数计算方法")
+        method_title.setStyleSheet("font-weight: bold; font-size: 12px; color: #2c3e50;")
+        method_layout.addWidget(method_title)
+        
+        method_text = QLabel(
+            "采用Wright通径法：F = Σ(0.5)^(n+n'+1) × (1+F_A)\n"
+            "• n: 父系到共同祖先的代数\n"
+            "• n': 母系到共同祖先的代数\n"
+            "• F_A: 共同祖先的近交系数\n"
+            "• 当有GIB值时直接使用"
+        )
+        method_text.setWordWrap(True)
+        method_text.setStyleSheet("font-size: 11px; color: #444;")
+        method_layout.addWidget(method_text)
+        
+        # 添加详细说明按钮
+        detail_btn = QPushButton("查看详细说明")
+        detail_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+                font-size: 11px;
+                max-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        detail_btn.clicked.connect(self.show_calculation_method_detail)
+        method_layout.addWidget(detail_btn)
+        
+        left_layout.addWidget(method_frame)
+        
         # 表格视图
         self.detail_table = QTableView()
         self.detail_model = InbreedingDetailModel()
@@ -2372,6 +2423,82 @@ class InbreedingPage(QWidget):
             if self.db_engine:
                 self.db_engine.dispose()
 
+    def show_calculation_method_detail(self):
+        """显示近交系数计算方法的详细说明"""
+        from PyQt6.QtWidgets import QTextBrowser
+        
+        # 创建详细说明对话框
+        dialog = QDialog(self)
+        dialog.setWindowTitle("近交系数计算方法详细说明")
+        dialog.resize(800, 600)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # 创建文本浏览器
+        text_browser = QTextBrowser()
+        text_browser.setOpenExternalLinks(True)
+        
+        # 设置详细说明内容
+        content = """
+        <h2>近交系数计算方法详细说明</h2>
+        
+        <h3>一、基本原理</h3>
+        <p>本系统采用Wright通径法（Wright's Path Method）计算动物的近交系数。</p>
+        
+        <h3>二、计算公式</h3>
+        <p><b>F = Σ(0.5)<sup>(n+n'+1)</sup> × (1+F<sub>A</sub>)</b></p>
+        <ul>
+            <li><b>F</b>: 被计算个体的近交系数</li>
+            <li><b>n</b>: 从父亲到共同祖先的代数</li>
+            <li><b>n'</b>: 从母亲到共同祖先的代数</li>
+            <li><b>F<sub>A</sub></b>: 共同祖先自身的近交系数</li>
+            <li><b>Σ</b>: 对所有共同祖先路径的贡献求和</li>
+        </ul>
+        
+        <h3>三、计算步骤</h3>
+        <ol>
+            <li><b>系谱构建</b>：追溯个体的父系和母系系谱，默认追溯6代</li>
+            <li><b>共同祖先识别</b>：查找父母双方系谱中的共同祖先</li>
+            <li><b>路径计算</b>：计算每条路径的贡献值</li>
+            <li><b>近交系数调整</b>：考虑共同祖先自身的近交系数</li>
+            <li><b>累加求和</b>：将所有路径贡献值累加得到最终结果</li>
+        </ol>
+        
+        <h3>四、特殊情况</h3>
+        <ul>
+            <li><b>GIB值优先</b>：当动物有基因组近交系数（GIB）时，直接使用GIB值</li>
+            <li><b>系谱信息不全</b>：缺失的祖先不参与计算</li>
+            <li><b>代数限制</b>：默认追溯6代，可根据需要调整</li>
+        </ul>
+        
+        <h3>五、结果解释</h3>
+        <ul>
+            <li><b>F < 3.125%</b>：低度近交，一般认为安全</li>
+            <li><b>3.125% ≤ F < 6.25%</b>：中度近交，需要注意</li>
+            <li><b>F ≥ 6.25%</b>：高度近交，建议避免</li>
+        </ul>
+        
+        <h3>六、计算示例</h3>
+        <p>假设母牛与公牛有共同祖先A：</p>
+        <ul>
+            <li>父系路径长度 n = 2</li>
+            <li>母系路径长度 n' = 3</li>
+            <li>祖先A的近交系数 F<sub>A</sub> = 0.05</li>
+        </ul>
+        <p>计算：基础贡献 = (0.5)<sup>6</sup> = 0.015625</p>
+        <p>调整后 = 0.015625 × (1 + 0.05) = 0.0164 = 1.64%</p>
+        """
+        
+        text_browser.setHtml(content)
+        layout.addWidget(text_browser)
+        
+        # 添加关闭按钮
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(dialog.close)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        
+        dialog.exec()
+    
     def export_results(self, auto_save=False):
         """导出分析结果到Excel文件
         
