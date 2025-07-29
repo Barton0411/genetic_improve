@@ -1399,7 +1399,27 @@ class MainWindow(QMainWindow):
     def on_db_update_error(self, error_message: str):
         """处理数据库更新错误的信号"""
         self.progress_dialog.close()
-        QMessageBox.critical(self, "更新错误", f"数据库更新过程中发生错误：\n{error_message}")
+        
+        # 判断错误类型并给出友好提示
+        friendly_message = "数据库更新失败"
+        
+        if "Can't connect to MySQL server" in error_message:
+            friendly_message = "无法连接到数据库服务器，请检查您的网络连接。\n\n程序将使用本地数据库继续运行。"
+        elif "nodename nor servname provided" in error_message:
+            friendly_message = "网络连接异常，无法解析服务器地址。\n\n程序将使用本地数据库继续运行。"
+        elif "timed out" in error_message.lower():
+            friendly_message = "连接超时，请检查网络连接。\n\n程序将使用本地数据库继续运行。"
+        elif "Access denied" in error_message:
+            friendly_message = "数据库访问被拒绝。\n\n请联系管理员检查权限设置。"
+        else:
+            # 对于其他错误，只显示简短信息
+            friendly_message = "数据库同步失败。\n\n程序将使用本地数据库继续运行。"
+        
+        # 记录详细错误到日志
+        logging.error(f"数据库更新错误详情: {error_message}")
+        
+        # 显示友好的错误提示
+        QMessageBox.warning(self, "数据库同步提示", friendly_message)
 
     def show_sub_nav_menu(self, pos, sub_items):
         """显示子导航菜单"""

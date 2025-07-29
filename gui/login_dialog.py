@@ -160,11 +160,25 @@ class LoginDialog(QDialog):
         except Exception as e:
             logging.error(f"数据库连接错误: {str(e)}")
             self.show_login_form()
+            
+            # 判断错误类型并给出友好提示
+            error_message = "无法连接到服务器，请检查网络连接。"
+            
+            if "Can't connect to MySQL server" in str(e):
+                error_message = "无法连接到数据库服务器，请检查您的网络连接是否正常。"
+            elif "Access denied" in str(e):
+                error_message = "数据库访问被拒绝，请联系管理员。"
+            elif "timed out" in str(e).lower():
+                error_message = "连接超时，请检查网络连接后重试。"
+            elif "nodename nor servname provided" in str(e):
+                error_message = "网络连接异常，无法解析服务器地址。\n请检查您的网络设置。"
+            
             QMessageBox.critical(
                 self, 
-                "数据库连接错误", 
-                f"连接数据库时发生错误，请联系管理员。\n{str(e)}"
+                "网络连接错误", 
+                error_message + "\n\n如果问题持续存在，请联系技术支持。"
             )
+            
             self.username_input.clear()
             self.password_input.clear()
             self.username_input.setFocus()
