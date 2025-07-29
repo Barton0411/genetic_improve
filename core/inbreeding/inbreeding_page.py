@@ -15,9 +15,47 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+from matplotlib import font_manager
 from typing import List, Dict, Tuple, Set, Optional
 import math
 import time
+import platform
+import os
+
+# 设置matplotlib中文字体
+def setup_chinese_font():
+    """设置matplotlib的中文字体支持"""
+    if platform.system() == 'Darwin':  # macOS
+        # 尝试多个字体路径
+        font_paths = [
+            '/Library/Fonts/Arial Unicode.ttf',
+            '/System/Library/Fonts/STHeiti Light.ttc',
+            '/System/Library/Fonts/STHeiti Medium.ttc',
+            '/System/Library/Fonts/Helvetica.ttc'
+        ]
+        
+        for font_path in font_paths:
+            if os.path.exists(font_path):
+                try:
+                    # 添加字体到matplotlib
+                    font_manager.fontManager.addfont(font_path)
+                    # 获取字体名称
+                    font = font_manager.FontProperties(fname=font_path)
+                    font_name = font.get_name()
+                    # 设置为默认字体
+                    plt.rcParams['font.sans-serif'] = [font_name, 'DejaVu Sans']
+                    plt.rcParams['axes.unicode_minus'] = False
+                    return font_path
+                except Exception:
+                    continue
+                    
+    # Windows和其他系统的默认设置
+    plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+    plt.rcParams['axes.unicode_minus'] = False
+    return None
+
+# 初始化时调用
+CHINESE_FONT_PATH = setup_chinese_font()
 
 from .models import InbreedingDetailModel, AbnormalDetailModel, StatisticsModel
 from gui.progress import ProgressDialog
@@ -226,16 +264,8 @@ class PedigreeDialog(QDialog):
         ax = self.figure.add_subplot(111)
         
         try:
-            # 配置中文字体支持
-            import platform
-            if platform.system() == 'Darwin':  # macOS
-                plt.rcParams['font.sans-serif'] = ['PingFang SC', 'Heiti TC', 'Arial Unicode MS']
-            elif platform.system() == 'Windows':
-                plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'SimSun']
-            else:
-                plt.rcParams['font.sans-serif'] = ['WenQuanYi Micro Hei', 'DejaVu Sans']
-            plt.rcParams['axes.unicode_minus'] = False  # 正确显示负号
-            plt.rcParams['font.size'] = 12  # 设置默认字体大小
+            # 字体已在文件开头初始化
+            plt.rcParams['font.size'] = 14  # 增大默认字体大小
             
             # 获取系谱库实例
             from core.data.update_manager import get_pedigree_db
@@ -508,39 +538,60 @@ class PedigreeDialog(QDialog):
                 naab_y_position = y + node_height/2 - node_height * 0.325
                 
                 # 在方框中显示REG号（下部）
-                ax.text(
-                    x, reg_y_position,  # REG号位置，框的下部
-                    display_text,
-                    family='SimHei',
-                    ha='center',
-                    va='center',
-                    fontsize=reg_fontsize,
-                    color=text_color,
-                    zorder=3
-                )
-                
-                # 在方框中显示NAAB号（上部）（加粗显示）
-                if naab and node_id not in ["预期后代", "父亲未知", "母亲未知"]:
+                if CHINESE_FONT_PATH:
+                    text_font = font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=reg_fontsize)
                     ax.text(
-                        x, naab_y_position,  # NAAB号位置，框的上部
-                        naab_text,
-                        family='SimHei',
+                        x, reg_y_position,  # REG号位置，框的下部
+                        display_text,
+                        fontproperties=text_font,
                         ha='center',
                         va='center',
-                        fontsize=naab_fontsize,
-                        fontweight='bold',
                         color=text_color,
                         zorder=3
                     )
+                else:
+                    ax.text(
+                        x, reg_y_position,  # REG号位置，框的下部
+                        display_text,
+                        ha='center',
+                        va='center',
+                        fontsize=reg_fontsize,
+                        color=text_color,
+                        zorder=3
+                    )
+                
+                # 在方框中显示NAAB号（上部）（加粗显示）
+                if naab and node_id not in ["预期后代", "父亲未知", "母亲未知"]:
+                    if CHINESE_FONT_PATH:
+                        naab_font = font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=naab_fontsize, weight='bold')
+                        ax.text(
+                            x, naab_y_position,  # NAAB号位置，框的上部
+                            naab_text,
+                            fontproperties=naab_font,
+                            ha='center',
+                            va='center',
+                            color=text_color,
+                            zorder=3
+                        )
+                    else:
+                        ax.text(
+                            x, naab_y_position,  # NAAB号位置，框的上部
+                            naab_text,
+                            ha='center',
+                            va='center',
+                            fontsize=naab_fontsize,
+                            fontweight='bold',
+                            color=text_color,
+                            zorder=3
+                        )
             
             # 设置图表属性
-            # 使用当前系统的字体设置标题
-            if platform.system() == 'Darwin':
-                ax.set_title("血缘关系图 (6代)", fontproperties='PingFang SC', fontsize=16)
-            elif platform.system() == 'Windows':
-                ax.set_title("血缘关系图 (6代)", fontproperties='Microsoft YaHei', fontsize=16)
+            # 使用系统字体设置标题
+            if CHINESE_FONT_PATH:
+                title_font = font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=18)
+                ax.set_title("血缘关系图 (6代)", fontproperties=title_font)
             else:
-                ax.set_title("血缘关系图 (6代)", fontproperties='WenQuanYi Micro Hei', fontsize=16)
+                ax.set_title("血缘关系图 (6代)", fontsize=18)
             ax.axis('off')  # 隐藏坐标轴
             
             # 自动调整布局，适应所有节点
@@ -965,16 +1016,8 @@ class MaximizedPedigreeDialog(QDialog):
         self.text_elements = []
         
         try:
-            # 配置中文字体支持
-            import platform
-            if platform.system() == 'Darwin':  # macOS
-                plt.rcParams['font.sans-serif'] = ['PingFang SC', 'Heiti TC', 'Arial Unicode MS']
-            elif platform.system() == 'Windows':
-                plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'SimSun']
-            else:
-                plt.rcParams['font.sans-serif'] = ['WenQuanYi Micro Hei', 'DejaVu Sans']
-            plt.rcParams['axes.unicode_minus'] = False  # 正确显示负号
-            plt.rcParams['font.size'] = 12  # 设置默认字体大小
+            # 字体已在文件开头初始化
+            plt.rcParams['font.size'] = 14  # 增大默认字体大小
             
             # 获取系谱库实例
             from core.data.update_manager import get_pedigree_db
