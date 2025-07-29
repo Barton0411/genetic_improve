@@ -227,8 +227,15 @@ class PedigreeDialog(QDialog):
         
         try:
             # 配置中文字体支持
-            plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun', 'Heiti TC', 'Arial Unicode MS']
+            import platform
+            if platform.system() == 'Darwin':  # macOS
+                plt.rcParams['font.sans-serif'] = ['PingFang SC', 'Heiti TC', 'Arial Unicode MS']
+            elif platform.system() == 'Windows':
+                plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'SimSun']
+            else:
+                plt.rcParams['font.sans-serif'] = ['WenQuanYi Micro Hei', 'DejaVu Sans']
             plt.rcParams['axes.unicode_minus'] = False  # 正确显示负号
+            plt.rcParams['font.size'] = 12  # 设置默认字体大小
             
             # 获取系谱库实例
             from core.data.update_manager import get_pedigree_db
@@ -527,7 +534,13 @@ class PedigreeDialog(QDialog):
                     )
             
             # 设置图表属性
-            ax.set_title("血缘关系图 (6代)", fontproperties='SimHei')
+            # 使用当前系统的字体设置标题
+            if platform.system() == 'Darwin':
+                ax.set_title("血缘关系图 (6代)", fontproperties='PingFang SC', fontsize=16)
+            elif platform.system() == 'Windows':
+                ax.set_title("血缘关系图 (6代)", fontproperties='Microsoft YaHei', fontsize=16)
+            else:
+                ax.set_title("血缘关系图 (6代)", fontproperties='WenQuanYi Micro Hei', fontsize=16)
             ax.axis('off')  # 隐藏坐标轴
             
             # 自动调整布局，适应所有节点
@@ -953,8 +966,15 @@ class MaximizedPedigreeDialog(QDialog):
         
         try:
             # 配置中文字体支持
-            plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun', 'Heiti TC', 'Arial Unicode MS']
+            import platform
+            if platform.system() == 'Darwin':  # macOS
+                plt.rcParams['font.sans-serif'] = ['PingFang SC', 'Heiti TC', 'Arial Unicode MS']
+            elif platform.system() == 'Windows':
+                plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'SimSun']
+            else:
+                plt.rcParams['font.sans-serif'] = ['WenQuanYi Micro Hei', 'DejaVu Sans']
             plt.rcParams['axes.unicode_minus'] = False  # 正确显示负号
+            plt.rcParams['font.size'] = 12  # 设置默认字体大小
             
             # 获取系谱库实例
             from core.data.update_manager import get_pedigree_db

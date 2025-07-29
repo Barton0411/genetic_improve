@@ -77,16 +77,24 @@ class PedigreeTreeView(QGraphicsView):
         return level_positions
 
     def wheelEvent(self, event):
-        """处理鼠标滚轮事件"""
-        # 直接处理滚轮事件进行缩放
+        """处理鼠标滚轮事件和触控板双指缩放"""
         # 获取当前缩放比例
         current_zoom = self.transform().m11()
         
-        # 计算缩放因子
-        if event.angleDelta().y() > 0:
-            factor = self.zoom_factor
-        else:
-            factor = 1 / self.zoom_factor
+        # 获取滚轮增量
+        delta = event.angleDelta()
+        
+        # 支持触控板的平滑缩放
+        # 触控板通常会产生较小的增量值
+        if abs(delta.y()) < 120:  # 触控板手势
+            # 使用更小的缩放步长以获得平滑效果
+            factor = 1 + delta.y() / 1000.0
+        else:  # 鼠标滚轮
+            # 传统的滚轮缩放
+            if delta.y() > 0:
+                factor = self.zoom_factor
+            else:
+                factor = 1 / self.zoom_factor
         
         # 检查是否超出缩放限制
         new_zoom = current_zoom * factor
@@ -313,14 +321,15 @@ class PedigreeTreeView(QGraphicsView):
 
     def add_calculation_details(self, F, calculation_method):
         """添加近交系数计算过程的详细显示"""
+        # 将计算详情放在场景底部，避免遮挡系谱图
+        scene_rect = self.scene.sceneRect()
+        detail_y = scene_rect.height() + 50  # 放在场景底部
+        
         # 创建背景矩形
-        detail_rect = QGraphicsRectItem(10, 10, 400, 200)
+        detail_rect = QGraphicsRectItem(10, detail_y, 600, 250)
         detail_rect.setBrush(QBrush(QColor(255, 255, 255, 230)))
         detail_rect.setPen(QPen(QColor("#666666")))
         self.scene.addItem(detail_rect)
-        
-        # 添加操作提示
-        self._add_operation_hints()
         
         # 添加标题
         title_text = QGraphicsTextItem("近交系数计算过程")
@@ -337,7 +346,7 @@ class PedigreeTreeView(QGraphicsView):
         font.setPointSize(12)
         font.setBold(True)
         title_text.setFont(font)
-        title_text.setPos(20, 20)
+        title_text.setPos(20, detail_y + 10)
         self.scene.addItem(title_text)
         
         # 添加总近交系数
@@ -354,16 +363,16 @@ class PedigreeTreeView(QGraphicsView):
         f_font.setPointSize(12)
         f_font.setBold(True)
         f_text.setFont(f_font)
-        f_text.setPos(20, 45)
+        f_text.setPos(20, detail_y + 35)
         self.scene.addItem(f_text)
         
         # 添加计算详情
         if calculation_method == "GIB":
-            self._add_gib_calculation_details(F)
+            self._add_gib_calculation_details(F, detail_y)
         else:
-            self._add_pedigree_calculation_details()
+            self._add_pedigree_calculation_details(detail_y)
 
-    def _add_gib_calculation_details(self, F: float):
+    def _add_gib_calculation_details(self, F: float, detail_y: float):
         """添加基于GIB的计算详情"""
         animal = self.calculator.get_cow_info(self.animal_id)
         if animal is None or pd.isna(animal['sire']):
@@ -393,12 +402,12 @@ class PedigreeTreeView(QGraphicsView):
             gib_font.setFamily("WenQuanYi Micro Hei")
         gib_font.setPointSize(9)
         gib_text.setFont(gib_font)
-        gib_text.setPos(10, 10)  # 位置可以根据需要调整
+        gib_text.setPos(20, detail_y + 65)  # 位置调整到详情框内
         self.scene.addItem(gib_text)
 
-    def _add_pedigree_calculation_details(self):
+    def _add_pedigree_calculation_details(self, detail_y: float):
         """添加基于系谱的计算详情"""
-        y_pos = 75
+        y_pos = detail_y + 65
         for ancestor_id in self.common_ancestors:
             paths = self.calculator.ancestor_paths.get(ancestor_id, {})
             if paths:
@@ -435,92 +444,4 @@ class PedigreeTreeView(QGraphicsView):
                 detail.setFont(detail_font)
                 detail.setPos(20, y_pos)
                 self.scene.addItem(detail)
-                y_pos += 120 
-    
-    def _add_operation_hints(self):
-        """添加操作提示"""
-        # 获取场景边界
-        scene_rect = self.scene.sceneRect()
-        
-        # 创建操作提示背景
-        hint_width = 280
-        hint_height = 120
-        hint_x = scene_rect.width() - hint_width - 20
-        hint_y = 20
-        
-        hint_rect = QGraphicsRectItem(hint_x, hint_y, hint_width, hint_height)
-        hint_rect.setBrush(QBrush(QColor(255, 255, 224, 200)))  # 淡黄色背景
-        hint_rect.setPen(QPen(QColor("#666666")))
-        self.scene.addItem(hint_rect)
-        
-        # 添加计算方法说明背景
-        method_width = 400
-        method_height = 180
-        method_x = scene_rect.width() - method_width - 20
-        method_y = hint_y + hint_height + 20
-        
-        method_rect = QGraphicsRectItem(method_x, method_y, method_width, method_height)
-        method_rect.setBrush(QBrush(QColor(240, 248, 255, 200)))  # 淡蓝色背景
-        method_rect.setPen(QPen(QColor("#666666")))
-        self.scene.addItem(method_rect)
-        
-        # 添加提示标题
-        hint_title = QGraphicsTextItem("操作提示")
-        hint_title.setDefaultTextColor(QColor("#333333"))
-        # 设置字体
-        title_font = QFont()
-        system = platform.system()
-        if system == "Windows":
-            title_font.setFamily("Microsoft YaHei")
-        elif system == "Darwin":
-            title_font.setFamily("PingFang SC")
-        else:
-            title_font.setFamily("WenQuanYi Micro Hei")
-        title_font.setPointSize(10)
-        title_font.setBold(True)
-        hint_title.setFont(title_font)
-        hint_title.setPos(hint_x + 10, hint_y + 5)
-        self.scene.addItem(hint_title)
-        
-        # 添加提示内容
-        hint_text = QGraphicsTextItem(
-            "• 鼠标左键拖拽：移动视图\n"
-            "• 鼠标滚轮：放大/缩小\n"
-            "• 空格键：重置视图\n"
-            "• +/- 键：放大/缩小"
-        )
-        hint_text.setDefaultTextColor(QColor("#555555"))
-        # 设置字体
-        text_font = QFont()
-        if system == "Windows":
-            text_font.setFamily("Microsoft YaHei")
-        elif system == "Darwin":
-            text_font.setFamily("PingFang SC")
-        else:
-            text_font.setFamily("WenQuanYi Micro Hei")
-        text_font.setPointSize(9)
-        hint_text.setFont(text_font)
-        hint_text.setPos(hint_x + 10, hint_y + 30)
-        self.scene.addItem(hint_text)
-        
-        # 添加计算方法说明标题
-        method_title = QGraphicsTextItem("近交系数计算方法")
-        method_title.setDefaultTextColor(QColor("#333333"))
-        method_title.setFont(title_font)  # 使用相同的标题字体
-        method_title.setPos(method_x + 10, method_y + 5)
-        self.scene.addItem(method_title)
-        
-        # 添加计算方法说明内容
-        method_text = QGraphicsTextItem(
-            "采用Wright通径法计算近交系数：\n"
-            "F = Σ(0.5)^(n+n'+1) × (1+F_A)\n\n"
-            "• F: 个体的近交系数\n"
-            "• n: 父系到共同祖先的代数\n"
-            "• n': 母系到共同祖先的代数\n"
-            "• F_A: 共同祖先自身的近交系数\n"
-            "• 当有GIB值时，直接使用GIB作为近交系数"
-        )
-        method_text.setDefaultTextColor(QColor("#555555"))
-        method_text.setFont(text_font)  # 使用相同的文本字体
-        method_text.setPos(method_x + 10, method_y + 30)
-        self.scene.addItem(method_text)
+                y_pos += 120
