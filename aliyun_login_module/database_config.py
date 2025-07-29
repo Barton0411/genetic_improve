@@ -6,7 +6,8 @@ from cryptography.fernet import Fernet
 import logging
 
 # 阿里云 MySQL 数据库连接参数
-CLOUD_DB_HOST = 'defectgene-new.mysql.polardb.rds.aliyuncs.com'
+# CLOUD_DB_HOST = 'defectgene-new.mysql.polardb.rds.aliyuncs.com'
+CLOUD_DB_HOST = '8.147.221.122'  # 使用IP地址避免DNS解析问题
 CLOUD_DB_PORT = 3306
 CLOUD_DB_USER = 'defect_genetic_checking'
 CLOUD_DB_PASSWORD_RAW = 'Jaybz@890411'  # 原始密码

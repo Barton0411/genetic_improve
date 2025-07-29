@@ -21,7 +21,10 @@ VERSION_HISTORY = [
             "新增选配推荐详情示例页",
             "新增项目总结与改良建议页",
             "优化PPT页面布局和数据展示",
-            "增强PPT内容的完整性和专业性"
+            "增强PPT内容的完整性和专业性",
+            "修复数据库DNS解析问题，使用IP地址直连",
+            "更新requirements.txt，添加所有缺失的依赖项",
+            "修复opencv-python、networkx、scikit-learn依赖缺失问题"
         ]
     },
     {
