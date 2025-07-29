@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QRectF, QPointF
 from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QFont, QTransform, QMouseEvent
 import pandas as pd
+import platform
 
 
 class PedigreeTreeView(QGraphicsView):
@@ -15,10 +16,10 @@ class PedigreeTreeView(QGraphicsView):
         self.scene = QGraphicsScene()
         self.setScene(self.scene)
         
-        # 启用拖动功能
+        # 默认启用拖动功能（使用左键）
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         
         # 设置抗锯齿
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -96,39 +97,19 @@ class PedigreeTreeView(QGraphicsView):
         self.scale(factor, factor)
         event.accept()  # 标记事件已处理
 
-    def mousePressEvent(self, event):
-        """处理鼠标按下事件"""
-        if event.button() == Qt.MouseButton.MiddleButton:
-            # 中键按下时启用拖动
-            self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-            # 创建新的事件对象来模拟左键点击
-            new_event = QMouseEvent(
-                event.type(),
-                event.pos(),
-                Qt.MouseButton.LeftButton,
-                Qt.MouseButton.LeftButton,
-                event.modifiers()
-            )
-            super().mousePressEvent(new_event)
+    def keyPressEvent(self, event):
+        """处理键盘按下事件"""
+        if event.key() == Qt.Key.Key_Space:
+            # 空格键用于重置视图
+            self.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        elif event.key() == Qt.Key.Key_Plus or event.key() == Qt.Key.Key_Equal:
+            # + 键放大
+            self.scale(self.zoom_factor, self.zoom_factor)
+        elif event.key() == Qt.Key.Key_Minus:
+            # - 键缩小
+            self.scale(1 / self.zoom_factor, 1 / self.zoom_factor)
         else:
-            super().mousePressEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        """处理鼠标释放事件"""
-        if event.button() == Qt.MouseButton.MiddleButton:
-            # 中键释放时恢复默认模式
-            self.setDragMode(QGraphicsView.DragMode.NoDrag)
-            # 创建新的事件对象来模拟左键释放
-            new_event = QMouseEvent(
-                event.type(),
-                event.pos(),
-                Qt.MouseButton.LeftButton,
-                Qt.MouseButton.LeftButton,
-                event.modifiers()
-            )
-            super().mouseReleaseEvent(new_event)
-        else:
-            super().mouseReleaseEvent(event)
+            super().keyPressEvent(event)
 
     def initUI(self):
         # 计算近交系数
@@ -305,7 +286,17 @@ class PedigreeTreeView(QGraphicsView):
         # 添加文本
         text_item = QGraphicsTextItem(text)
         text_item.setDefaultTextColor(QColor("#000000") if not is_unknown else QColor("#666666"))
+        # 设置中文字体
         font = QFont()
+        # 根据操作系统设置合适的字体
+        system = platform.system()
+        if system == "Windows":
+            font.setFamily("Microsoft YaHei")  # 微软雅黑
+        elif system == "Darwin":  # macOS
+            font.setFamily("PingFang SC")  # 苹方字体
+        else:  # Linux 或其他
+            font.setFamily("WenQuanYi Micro Hei")  # 文泉驿微米黑
+        
         font.setPointSize(8)
         if is_unknown:
             font.setItalic(True)
@@ -328,10 +319,21 @@ class PedigreeTreeView(QGraphicsView):
         detail_rect.setPen(QPen(QColor("#666666")))
         self.scene.addItem(detail_rect)
         
+        # 添加操作提示
+        self._add_operation_hints()
+        
         # 添加标题
         title_text = QGraphicsTextItem("近交系数计算过程")
         title_text.setDefaultTextColor(QColor("#333333"))
         font = QFont()
+        # 设置中文字体
+        system = platform.system()
+        if system == "Windows":
+            font.setFamily("Microsoft YaHei")
+        elif system == "Darwin":  # macOS
+            font.setFamily("PingFang SC")
+        else:
+            font.setFamily("WenQuanYi Micro Hei")
         font.setPointSize(12)
         font.setBold(True)
         title_text.setFont(font)
@@ -341,7 +343,17 @@ class PedigreeTreeView(QGraphicsView):
         # 添加总近交系数
         f_text = QGraphicsTextItem(f"总近交系数: {F*100:.2f}%")
         f_text.setDefaultTextColor(QColor("#FF4500"))
-        f_text.setFont(font)
+        # 创建新的字体对象
+        f_font = QFont()
+        if system == "Windows":
+            f_font.setFamily("Microsoft YaHei")
+        elif system == "Darwin":
+            f_font.setFamily("PingFang SC")
+        else:
+            f_font.setFamily("WenQuanYi Micro Hei")
+        f_font.setPointSize(12)
+        f_font.setBold(True)
+        f_text.setFont(f_font)
         f_text.setPos(20, 45)
         self.scene.addItem(f_text)
         
@@ -370,6 +382,17 @@ class PedigreeTreeView(QGraphicsView):
             
         gib_text.setPlainText(text)
         gib_text.setDefaultTextColor(Qt.GlobalColor.blue)
+        # 设置字体
+        gib_font = QFont()
+        system = platform.system()
+        if system == "Windows":
+            gib_font.setFamily("Microsoft YaHei")
+        elif system == "Darwin":
+            gib_font.setFamily("PingFang SC")
+        else:
+            gib_font.setFamily("WenQuanYi Micro Hei")
+        gib_font.setPointSize(9)
+        gib_text.setFont(gib_font)
         gib_text.setPos(10, 10)  # 位置可以根据需要调整
         self.scene.addItem(gib_text)
 
@@ -399,6 +422,72 @@ class PedigreeTreeView(QGraphicsView):
                     f"  最终贡献: {final_contribution*100:.4f}%\n"
                 )
                 detail.setDefaultTextColor(QColor("#333333"))
+                # 设置字体
+                detail_font = QFont()
+                system = platform.system()
+                if system == "Windows":
+                    detail_font.setFamily("Microsoft YaHei")
+                elif system == "Darwin":
+                    detail_font.setFamily("PingFang SC")
+                else:
+                    detail_font.setFamily("WenQuanYi Micro Hei")
+                detail_font.setPointSize(9)
+                detail.setFont(detail_font)
                 detail.setPos(20, y_pos)
                 self.scene.addItem(detail)
                 y_pos += 120 
+    
+    def _add_operation_hints(self):
+        """添加操作提示"""
+        # 获取场景边界
+        scene_rect = self.scene.sceneRect()
+        
+        # 创建提示背景
+        hint_width = 280
+        hint_height = 120
+        hint_x = scene_rect.width() - hint_width - 20
+        hint_y = 20
+        
+        hint_rect = QGraphicsRectItem(hint_x, hint_y, hint_width, hint_height)
+        hint_rect.setBrush(QBrush(QColor(255, 255, 224, 200)))  # 淡黄色背景
+        hint_rect.setPen(QPen(QColor("#666666")))
+        self.scene.addItem(hint_rect)
+        
+        # 添加提示标题
+        hint_title = QGraphicsTextItem("操作提示")
+        hint_title.setDefaultTextColor(QColor("#333333"))
+        # 设置字体
+        title_font = QFont()
+        system = platform.system()
+        if system == "Windows":
+            title_font.setFamily("Microsoft YaHei")
+        elif system == "Darwin":
+            title_font.setFamily("PingFang SC")
+        else:
+            title_font.setFamily("WenQuanYi Micro Hei")
+        title_font.setPointSize(10)
+        title_font.setBold(True)
+        hint_title.setFont(title_font)
+        hint_title.setPos(hint_x + 10, hint_y + 5)
+        self.scene.addItem(hint_title)
+        
+        # 添加提示内容
+        hint_text = QGraphicsTextItem(
+            "• 鼠标左键拖拽：移动视图\n"
+            "• 鼠标滚轮：放大/缩小\n"
+            "• 空格键：重置视图\n"
+            "• +/- 键：放大/缩小"
+        )
+        hint_text.setDefaultTextColor(QColor("#555555"))
+        # 设置字体
+        text_font = QFont()
+        if system == "Windows":
+            text_font.setFamily("Microsoft YaHei")
+        elif system == "Darwin":
+            text_font.setFamily("PingFang SC")
+        else:
+            text_font.setFamily("WenQuanYi Micro Hei")
+        text_font.setPointSize(9)
+        hint_text.setFont(text_font)
+        hint_text.setPos(hint_x + 10, hint_y + 30)
+        self.scene.addItem(hint_text)
