@@ -1192,16 +1192,27 @@ class MaximizedPedigreeDialog(QDialog):
                 naab_y_position = y + self.node_height/2 - self.node_height * 0.325
                 
                 # 在方框中显示REG号（下部）
-                reg_text = ax.text(
-                    x, reg_y_position,
-                    display_text,
-                    family='SimHei',
-                    ha='center',
-                    va='center',
-                    size=self.base_node_text_size,
-                    color=text_color,
-                    zorder=3
-                )
+                if CHINESE_FONT_PATH:
+                    text_font = font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=self.base_node_text_size)
+                    reg_text = ax.text(
+                        x, reg_y_position,
+                        display_text,
+                        fontproperties=text_font,
+                        ha='center',
+                        va='center',
+                        color=text_color,
+                        zorder=3
+                    )
+                else:
+                    reg_text = ax.text(
+                        x, reg_y_position,
+                        display_text,
+                        ha='center',
+                        va='center',
+                        size=self.base_node_text_size,
+                        color=text_color,
+                        zorder=3
+                    )
                 self.text_elements.append({
                     'text_obj': reg_text,
                     'base_size': self.base_node_text_size,
@@ -1210,17 +1221,28 @@ class MaximizedPedigreeDialog(QDialog):
                 
                 # 在方框中显示NAAB号（上部）（加粗显示）
                 if naab and animal_id not in ["预期后代", "父亲未知", "母亲未知"]:
-                    naab_text_obj = ax.text(
-                        x, naab_y_position,
-                        naab_text,
-                        family='SimHei',
-                        ha='center',
-                        va='center',
-                        size=self.base_naab_size,
-                        fontweight='bold',
-                        color=text_color,
-                        zorder=3
-                    )
+                    if CHINESE_FONT_PATH:
+                        naab_font = font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=self.base_naab_size, weight='bold')
+                        naab_text_obj = ax.text(
+                            x, naab_y_position,
+                            naab_text,
+                            fontproperties=naab_font,
+                            ha='center',
+                            va='center',
+                            color=text_color,
+                            zorder=3
+                        )
+                    else:
+                        naab_text_obj = ax.text(
+                            x, naab_y_position,
+                            naab_text,
+                            ha='center',
+                            va='center',
+                            size=self.base_naab_size,
+                            fontweight='bold',
+                            color=text_color,
+                            zorder=3
+                        )
                     self.text_elements.append({
                         'text_obj': naab_text_obj,
                         'base_size': self.base_naab_size,
@@ -1229,7 +1251,11 @@ class MaximizedPedigreeDialog(QDialog):
             
             # 设置图表属性
             title_size = self.node_height * 3
-            title_obj = ax.set_title("血缘关系图 (6代完整视图)", size=title_size, fontfamily='SimHei')
+            if CHINESE_FONT_PATH:
+                title_font = font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=title_size)
+                title_obj = ax.set_title("血缘关系图 (6代完整视图)", fontproperties=title_font)
+            else:
+                title_obj = ax.set_title("血缘关系图 (6代完整视图)", size=title_size)
             self.text_elements.append({
                 'text_obj': title_obj,
                 'base_size': title_size,
