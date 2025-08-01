@@ -217,19 +217,39 @@ class PedigreeDatabase:
                 mgs_reg = str(row['MGS REG']).strip() if pd.notna(row['MGS REG']) else None
                 mmgs_reg = str(row['MMGS REG']).strip() if pd.notna(row['MMGS REG']) else None
                 
-                # 处理GIB值（百分比格式）
+                # 处理GIB值（可能是百分比格式）
                 gib_value = None
                 if pd.notna(row['GIB']):
                     try:
-                        gib_percentage = float(row['GIB'])
-                        # 将百分比转换为小数形式 (70 -> 0.7)
-                        gib_value = gib_percentage / 100.0
-                        # 验证值是否在合理范围内
-                        if gib_value < 0 or gib_value > 1:
-                            logging.warning(f"公牛 {bull_reg} 的GIB值 {gib_percentage}% 超出正常范围(0-100)，将不使用此值")
+                        gib_str = str(row['GIB']).strip()
+                        # 检查是否包含百分号
+                        if gib_str.endswith('%'):
+                            # 移除百分号并转换为浮点数
+                            gib_percentage = float(gib_str.rstrip('%'))
+                            # 已经是百分比形式，直接除以100
+                            gib_value = gib_percentage / 100.0
+                        else:
+                            # 没有百分号，假设是数值形式
+                            gib_percentage = float(gib_str)
+                            # 判断是否已经是小数形式（0-1之间）还是百分比形式（0-100）
+                            if -10 <= gib_percentage <= 10:
+                                # 看起来像是百分比形式（-10到10之间）
+                                gib_value = gib_percentage / 100.0
+                            else:
+                                # 可能已经是小数形式，或者是大于10的百分比
+                                if gib_percentage > 10:
+                                    # 大于10，应该是百分比
+                                    gib_value = gib_percentage / 100.0
+                                else:
+                                    # 直接使用
+                                    gib_value = gib_percentage
+                        
+                        # 验证值是否在合理范围内（允许负值，因为GIB可以是负的）
+                        if gib_value < -0.5 or gib_value > 1:
+                            logging.warning(f"公牛 {bull_reg} 的GIB值 {gib_str} (转换后: {gib_value:.4f}) 超出正常范围(-50%到100%)，将不使用此值")
                             gib_value = None
-                    except (ValueError, TypeError):
-                        logging.warning(f"公牛 {bull_reg} 的GIB值 '{row['GIB']}' 无法转换为数值，将不使用此值")
+                    except (ValueError, TypeError) as e:
+                        logging.warning(f"公牛 {bull_reg} 的GIB值 '{row['GIB']}' 无法转换为数值: {e}")
                         gib_value = None
                 
                 if not bull_reg:

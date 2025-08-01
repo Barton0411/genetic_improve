@@ -342,6 +342,12 @@ class PedigreeDialog(QDialog):
             # 字体已在文件开头初始化
             plt.rcParams['font.size'] = 14  # 增大默认字体大小
             
+            # 在Windows上重新设置字体，避免字体缓存问题
+            if platform.system() == 'Windows':
+                import matplotlib
+                matplotlib.rcParams['font.sans-serif'] = plt.rcParams['font.sans-serif']
+                matplotlib.rcParams['axes.unicode_minus'] = False
+            
             # 获取系谱库实例
             from core.data.update_manager import get_pedigree_db
             pedigree_db = get_pedigree_db()
@@ -811,18 +817,38 @@ class PedigreeDialog(QDialog):
             
         except Exception as e:
             logging.error(f"绘制血缘关系图时出错: {str(e)}")
-            ax.text(0.5, 0.5, f"绘制血缘关系图时出错: {str(e)}", 
-                   horizontalalignment='center', verticalalignment='center')
+            import traceback
+            logging.error(traceback.format_exc())
             
-        self.canvas.draw()
+            # 尝试显示错误信息
+            try:
+                ax.text(0.5, 0.5, f"绘制血缘关系图时出错: {str(e)}", 
+                       horizontalalignment='center', verticalalignment='center')
+            except:
+                pass
+                
+        # 安全地绘制画布
+        try:
+            self.canvas.draw()
+        except Exception as e:
+            logging.error(f"Canvas draw error in PedigreeDialog: {e}")
+            # 不显示对话框，因为这只是预览窗口
 
     def on_canvas_click(self, event):
         """画布点击事件处理"""
         if event.dblclick:  # 检测双击事件
-            # 创建并显示最大化图像对话框
-            max_dialog = MaximizedPedigreeDialog(self, self.cow_id, self.sire_id, self.bull_id, 
-                                               self.offspring_details)
-            max_dialog.exec()
+            try:
+                # 创建并显示最大化图像对话框
+                max_dialog = MaximizedPedigreeDialog(self, self.cow_id, self.sire_id, self.bull_id, 
+                                                   self.offspring_details)
+                max_dialog.exec()
+            except Exception as e:
+                logging.error(f"打开血缘关系图详细视图时出错: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
+                QMessageBox.critical(self, "错误", 
+                                   f"无法打开血缘关系图详细视图:\n\n{str(e)}\n\n"
+                                   f"请查看日志文件获取详细信息。")
 
     def query_naab_numbers(self, pedigree_db):
         """查询所有相关公牛的NAAB号码"""
@@ -1174,6 +1200,12 @@ class MaximizedPedigreeDialog(QDialog):
             # 字体已在文件开头初始化
             plt.rcParams['font.size'] = 14  # 增大默认字体大小
             
+            # 在Windows上重新设置字体，避免字体缓存问题
+            if platform.system() == 'Windows':
+                import matplotlib
+                matplotlib.rcParams['font.sans-serif'] = plt.rcParams['font.sans-serif']
+                matplotlib.rcParams['axes.unicode_minus'] = False
+            
             # 获取系谱库实例
             from core.data.update_manager import get_pedigree_db
             pedigree_db = get_pedigree_db()
@@ -1464,12 +1496,28 @@ class MaximizedPedigreeDialog(QDialog):
         except Exception as e:
             logging.error(f"绘制完整血缘关系图时出错: {str(e)}")
             import traceback
-            traceback.print_exc()
-            ax.text(0.5, 0.5, f"绘制血缘关系图时出错: {str(e)}", 
-                   horizontalalignment='center', verticalalignment='center')
+            error_details = traceback.format_exc()
+            logging.error(error_details)
+            
+            # 尝试显示错误信息
+            try:
+                ax.text(0.5, 0.5, f"绘制血缘关系图时出错: {str(e)}", 
+                       horizontalalignment='center', verticalalignment='center')
+            except:
+                pass
+            
+            # 显示错误对话框
+            QMessageBox.critical(self, "绘图错误", 
+                               f"绘制血缘关系图时出错:\n\n{str(e)}\n\n"
+                               f"请查看日志文件获取详细信息。")
         
         # 绘制
-        self.canvas.draw()
+        try:
+            self.canvas.draw()
+        except Exception as e:
+            logging.error(f"Canvas draw error: {e}")
+            QMessageBox.critical(self, "绘图错误", 
+                               f"显示图形时出错:\n\n{str(e)}")
     
     def on_lim_change(self, event=None):
         """处理坐标轴范围变化事件，用于动态调整文本大小"""

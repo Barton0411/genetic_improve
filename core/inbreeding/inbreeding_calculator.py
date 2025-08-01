@@ -91,7 +91,7 @@ class InbreedingCalculator:
                         'sire': info.get('SIRE REG'),     # 父亲的 REG 号
                         'mgs': info.get('MGS REG'),       # 母亲的父亲的 REG 号
                         'mmgs': info.get('MMGS REG'),     # 母亲的母亲的父亲的 REG 号
-                        'GIB': info.get('GIB', 0)
+                        'GIB': info.get('gib', 0)
                     }
                     self._bull_cache[bull_info['reg']] = bull_data
                     return bull_data
@@ -145,7 +145,7 @@ class InbreedingCalculator:
                             'id': sire_info['reg'],
                             'type': 'bull',
                             'generation': generation + 1,
-                            'gib': bull_info.get('GIB')
+                            'gib': bull_info.get('gib')
                         }
                         # 递归构建父亲的系谱
                         if bull_info.get('sire'):
@@ -199,7 +199,7 @@ class InbreedingCalculator:
                                     'id': mgs_info['reg'],
                                     'type': 'bull',
                                     'generation': generation + 2,
-                                    'gib': bull_info.get('GIB')
+                                    'gib': bull_info.get('gib')
                                 }
                                 # 递归构建外祖父的系谱
                                 if bull_info.get('sire'):
@@ -228,7 +228,7 @@ class InbreedingCalculator:
                 if complete_info:
                     result['type'] = 'bull'
                     result['id'] = bull_info['reg']
-                    result['gib'] = complete_info.get('GIB')
+                    result['gib'] = complete_info.get('gib')
                     
                     # 添加父亲系谱
                     if complete_info.get('sire'):
@@ -284,7 +284,7 @@ class InbreedingCalculator:
                         return {
                             'naab': bull_id,
                             'reg': bull_info.get('BULL REG'),
-                            'gib': bull_info.get('GIB', 0)
+                            'gib': bull_info.get('gib', 0)
                         }
                 
                 # 2. 再尝试作为 REG 号查询
@@ -297,7 +297,7 @@ class InbreedingCalculator:
                     return {
                         'naab': bull_info.get('BULL NAAB'),
                         'reg': bull_id,
-                        'gib': bull_info.get('GIB', 0)
+                        'gib': bull_info.get('gib', 0)
                     }
                 
                 return None
@@ -457,9 +457,9 @@ class InbreedingCalculator:
                         # 考虑共同祖先自身的近交系数
                         ancestor_f = 0.0
                         # 如果有GIB值，使用GIB估计
-                        if ancestor['gib'] and ancestor['gib'] > 0:
-                            # GIB值通常是百分比，需要转为小数
-                            ancestor_f = ancestor['gib'] / 100
+                        if ancestor['gib'] is not None and ancestor['gib'] > 0:
+                            # GIB值已经是小数形式（pedigree_database中已转换）
+                            ancestor_f = ancestor['gib']
                         
                         # Wright公式包含祖先自身的近交系数：(0.5)^(n+n'+1) * (1+F_A)
                         final_contribution = base_contribution * (1 + ancestor_f)
@@ -473,8 +473,8 @@ class InbreedingCalculator:
                 # 如果没有找到共同祖先，尝试使用父系GIB值估算
                 sire_info = self.prepare_bull_id(animal['sire'])
                 if sire_info and sire_info.get('gib') is not None:
-                    # 父系GIB值的一半作为近交系数估计
-                    F = sire_info['gib'] / 200  
+                    # 父系GIB值的一半作为近交系数估计（GIB已经是小数形式）
+                    F = sire_info['gib'] / 2  
                     result = (F, "Using GIB value", "GIB")
                     self._calculation_cache[animal_id] = result
                     return result
@@ -512,7 +512,7 @@ class InbreedingCalculator:
                         'bull_id': naab_no,
                         'REG': bull_info.get('BULL REG'),
                         'NAAB': bull_info.get('BULL NAAB'),
-                        'GIB': bull_info.get('GIB', 0)
+                        'GIB': bull_info.get('gib', 0)
                     }
                 return None
                 
@@ -539,7 +539,7 @@ class InbreedingCalculator:
                         'bull_id': reg_no,
                         'REG': bull_info.get('BULL REG'),
                         'NAAB': bull_info.get('BULL NAAB'),
-                        'GIB': bull_info.get('GIB', 0)
+                        'GIB': bull_info.get('gib', 0)
                     }
                 return None
                 
