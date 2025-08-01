@@ -5,7 +5,8 @@
 from PyQt6.QtCore import QThread, pyqtSignal
 from pathlib import Path
 import logging
-from core.matching.recommendation_generator import RecommendationGenerator
+from core.matching.simple_recommendation_generator import SimpleRecommendationGenerator
+from core.matching.matrix_recommendation_generator import MatrixRecommendationGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -16,42 +17,53 @@ class RecommendationWorker(QThread):
     progress_updated = pyqtSignal(str, int)  # 进度信息, 百分比
     recommendation_completed = pyqtSignal(Path)    # 推荐完成，传递报告文件路径
     error_occurred = pyqtSignal(str)         # 错误信息
+    prerequisites_needed = pyqtSignal(str)  # 需要前置条件
     
     def __init__(self, project_path: Path):
         super().__init__()
         self.project_path = project_path
-        self.generator = RecommendationGenerator()
+        self.matrix_generator = MatrixRecommendationGenerator(project_path)
+        self.simple_generator = SimpleRecommendationGenerator()
         
     def run(self):
         """执行推荐生成任务"""
         try:
-            # 步骤1: 数据加载
-            self.progress_updated.emit("正在加载数据文件...", 10)
-            if not self.generator.load_data(self.project_path):
-                self.error_occurred.emit("数据加载失败，请检查必要文件是否存在")
+            # 更新进度
+            self.progress_updated.emit("正在加载数据...", 10)
+            
+            # 使用矩阵生成器
+            if not self.matrix_generator.load_data():
+                error_msg = (
+                    "数据加载失败！\n\n"
+                    "可能的原因：\n"
+                    "1. 缺少母牛育种指数数据 - 请先进行「母牛育种指数计算」\n"
+                    "2. 缺少公牛育种指数数据 - 请先进行「公牛育种指数计算」\n"
+                    "3. 缺少近交系数和隐性基因数据 - 请先进行「备选公牛近交和隐性基因分析」\n"
+                    "4. 必要的数据文件不存在或格式不正确\n\n"
+                    "请按顺序完成以上计算后再试。"
+                )
+                self.error_occurred.emit(error_msg)
                 return
             
-            # 步骤2: 生成推荐
-            self.progress_updated.emit("正在生成选配推荐...", 20)
+            # 生成配对矩阵
+            self.progress_updated.emit("正在生成配对矩阵...", 30)
+            matrices = self.matrix_generator.generate_matrices()
             
-            def progress_callback(message, progress):
-                # 将20-90的进度范围映射给推荐生成过程
-                actual_progress = 20 + int(progress * 0.7)
-                self.progress_updated.emit(message, actual_progress)
-            
-            recommendations_df = self.generator.generate_recommendations(progress_callback)
-            
-            # 步骤3: 保存结果
-            self.progress_updated.emit("正在保存推荐报告...", 95)
-            output_file = self.project_path / "analysis_results" / "individual_mating_report.xlsx"
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            if self.generator.save_recommendations(recommendations_df, output_file):
+            # 保存矩阵结果
+            self.progress_updated.emit("正在保存配对矩阵...", 70)
+            output_file = self.project_path / "analysis_results" / "individual_mating_matrices.xlsx"
+            if self.matrix_generator.save_matrices(matrices, output_file):
+                # 同时保存兼容格式的推荐汇总
+                self.progress_updated.emit("正在保存推荐汇总...", 90)
+                summary_file = self.project_path / "analysis_results" / "individual_mating_report.xlsx"
+                matrices['推荐汇总'].to_excel(summary_file, index=False)
+                
+                # 推荐完成
                 self.progress_updated.emit("选配推荐生成完成！", 100)
                 self.recommendation_completed.emit(output_file)
             else:
-                self.error_occurred.emit("保存推荐报告失败")
-            
+                self.error_occurred.emit("保存推荐结果失败")
+                
         except Exception as e:
             logger.error(f"选配推荐生成失败: {e}")
             import traceback

@@ -1,5 +1,8 @@
 """
 个体选配后台工作者
+
+⚠️ 废弃警告：此模块已被废弃，主窗口现在直接使用 CycleBasedMatcher
+DEPRECATED: This module is deprecated. Main window now uses CycleBasedMatcher directly.
 """
 
 from PyQt6.QtCore import QThread, pyqtSignal

@@ -1,0 +1,84 @@
+{
+  "source_files": {
+    "cow_info": {
+      "filename": "牛只信息.xlsx",
+      "description": "母牛基本信息",
+      "required": true,
+      "columns": ["cow_id", "birth_date", "lac", "是否在场", "sex"]
+    },
+    "bull_traits": {
+      "filename": "公牛性状数据.xlsx",
+      "description": "公牛性状评估数据",
+      "required": true,
+      "columns": ["NAAB", "TPI", "NM$", "MILK", "FAT", "PROT"]
+    },
+    "pedigree_info": {
+      "filename": "系谱信息.xlsx",
+      "description": "牛只系谱信息",
+      "required": true,
+      "columns": ["cow_id", "sire_id", "dam_id", "birth_year", "sire_identified", "mgs_identified"]
+    },
+    "cow_traits": {
+      "filename": "母牛性状数据.xlsx",
+      "description": "母牛性状评估数据",
+      "required": true,
+      "columns": ["ID", "TPI", "NM$", "MILK", "FAT", "PROT"]
+    },
+    "breeding_records": {
+      "filename": "配种记录.xlsx",
+      "description": "配种记录数据",
+      "required": false,
+      "columns": ["cow_id", "配种日期", "BULL NAAB", "冻精类型"]
+    },
+    "breeding_index": {
+      "filename": "育种指数得分.xlsx",
+      "description": "母牛育种指数计算结果",
+      "required": false,
+      "columns": ["cow_id", "育种指数得分"]
+    },
+    "merged_cow_traits": {
+      "filename": "母牛关键性状合并.xlsx",
+      "description": "合并的母牛关键性状数据",
+      "required": false,
+      "columns": ["cow_id", "birth_date", "lac", "是否在场", "TPI", "NM$"]
+    }
+  },
+  "generated_files": {
+    "index_ranking": {
+      "filename": "结果-指数排名结果.xlsx",
+      "description": "母牛育种指数排名"
+    },
+    "cow_key_traits": {
+      "filename": "结果-母牛关键性状指数.xlsx",
+      "description": "母牛关键性状汇总"
+    },
+    "pedigree_analysis": {
+      "filename": "结果-系谱识别情况分析.xlsx",
+      "description": "系谱识别率统计"
+    },
+    "traits_annual": {
+      "filename": "结果-牛群关键性状年度变化.xlsx",
+      "description": "性状年度变化趋势"
+    },
+    "nm_distribution": {
+      "filename": "在群牛只净利润值分布.xlsx",
+      "description": "NM$分布统计"
+    },
+    "semen_trend": {
+      "filename": "结果-冻精使用趋势图.xlsx",
+      "description": "冻精使用趋势数据"
+    },
+    "nm_normal": {
+      "filename": "NM$_年份正态分布.png",
+      "description": "NM$正态分布图"
+    },
+    "index_normal": {
+      "filename": "育种指数得分_年份正态分布.png",
+      "description": "育种指数正态分布图"
+    },
+    "traits_progress": {
+      "folder": "结果-牛群关键性状进展图",
+      "description": "各性状进展图文件夹"
+    }
+  }
+}

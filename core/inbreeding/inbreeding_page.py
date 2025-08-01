@@ -898,6 +898,7 @@ class MaximizedPedigreeDialog(QDialog):
         
         # 启用matplotlib的拖拽功能
         self.pan_cid = None  # 保存连接ID用于启用/禁用拖拽
+        self.pan_start = None  # 初始化拖拽起始位置
         
         # 绘制完整的6代系谱图
         self.draw_pedigree()

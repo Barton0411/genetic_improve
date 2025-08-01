@@ -1,6 +1,9 @@
 """
 个体选配核心逻辑模块
 实现基于组优先级的双轮分配机制
+
+⚠️ 废弃警告：此模块已被废弃，请使用 CycleBasedMatcher 替代
+DEPRECATED: This module is deprecated. Please use CycleBasedMatcher instead.
 """
 
 import pandas as pd

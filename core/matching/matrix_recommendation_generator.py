@@ -1,0 +1,604 @@
+"""
+矩阵式推荐生成器
+生成完整的母牛×公牛配对矩阵，包含所有配对信息
+"""
+
+import pandas as pd
+import numpy as np
+import logging
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
+import json
+
+logger = logging.getLogger(__name__)
+
+class MatrixRecommendationGenerator:
+    """生成完整配对矩阵的推荐生成器"""
+    
+    def __init__(self, project_path: Path):
+        self.project_path = project_path
+        self.cow_data = None
+        self.bull_data = None
+        self.inbreeding_data = None
+        self.genetic_defect_data = None
+        self.cow_score_columns = []  # 存储找到的母牛得分列
+        self.group_manager = None  # 分组管理器
+        
+    def load_data(self) -> bool:
+        """加载所需数据"""
+        try:
+            # 加载母牛数据
+            cow_file = self.project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
+            if not cow_file.exists():
+                logger.error("未找到母牛指数数据")
+                return False
+            self.cow_data = pd.read_excel(cow_file)
+            
+            # 检查母牛得分列 - 查找任何包含 '_index' 或 'Index' 的列
+            index_cols = [col for col in self.cow_data.columns if '_index' in col.lower() or 'index' in col.lower()]
+            
+            # 过滤掉明显不是得分的列（如 index_date 等）
+            score_cols = [col for col in index_cols if not any(
+                exclude in col.lower() for exclude in ['date', 'time', 'id', 'name', 'type']
+            )]
+            
+            if not score_cols:
+                logger.error("母牛数据中缺少育种指数得分列（如 *_index 或 *Index*），请先进行母牛育种指数计算")
+                return False
+            
+            # 记录找到的得分列
+            self.cow_score_columns = score_cols
+            logger.info(f"找到母牛得分列: {score_cols}")
+                
+            logger.info(f"加载了 {len(self.cow_data)} 头母牛数据")
+            
+            # 加载公牛数据
+            bull_file = self.project_path / "standardized_data" / "processed_bull_data.xlsx"
+            if not bull_file.exists():
+                logger.error("未找到公牛数据")
+                return False
+            self.bull_data = pd.read_excel(bull_file)
+            
+            # 加载公牛性状数据（从数据库或其他文件）
+            if not self._load_bull_traits():
+                return False
+            
+            logger.info(f"加载了 {len(self.bull_data)} 头公牛数据")
+            
+            # 加载近交系数数据
+            if not self._load_inbreeding_data():
+                return False
+            
+            # 加载隐性基因数据
+            if not self._load_genetic_defect_data():
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"加载数据失败: {e}")
+            return False
+            
+    def _load_inbreeding_data(self):
+        """加载近交系数数据"""
+        try:
+            # 尝试查找备选公牛近交系数文件
+            possible_files = list(self.project_path.glob("**/备选公牛_近交系数及隐性基因分析结果_*.xlsx"))
+            
+            if not possible_files:
+                logger.error("未找到备选公牛近交系数及隐性基因分析结果文件")
+                logger.error("请先进行「备选公牛近交和隐性基因分析」")
+                return False
+            
+            # 使用最新的文件
+            latest_file = max(possible_files, key=lambda x: x.stat().st_mtime)
+            self.inbreeding_data = pd.read_excel(latest_file)
+            logger.info(f"从 {latest_file.name} 加载了近交系数数据")
+            
+            # 验证数据完整性
+            required_cols = ['母牛号', '原始备选公牛号', '后代近交系数']
+            missing_cols = [col for col in required_cols if col not in self.inbreeding_data.columns]
+            if missing_cols:
+                logger.error(f"近交系数文件缺少必要列: {missing_cols}")
+                return False
+                
+            return True
+                
+        except Exception as e:
+            logger.error(f"加载近交系数数据失败: {e}")
+            return False
+            
+    def _load_genetic_defect_data(self):
+        """加载隐性基因数据"""
+        try:
+            # 通常和近交系数在同一个文件中
+            if self.inbreeding_data is not None:
+                self.genetic_defect_data = self.inbreeding_data
+                
+                # 验证是否包含隐性基因列
+                defect_genes = ['HH1', 'HH2', 'HH3', 'HH4', 'HH5', 'HH6']
+                found_genes = [gene for gene in defect_genes if gene in self.genetic_defect_data.columns]
+                
+                if not found_genes:
+                    logger.warning("近交系数文件中未找到隐性基因数据列")
+                    logger.warning("将跳过隐性基因检查")
+                else:
+                    logger.info(f"找到隐性基因列: {found_genes}")
+                
+                return True
+            else:
+                logger.error("隐性基因数据依赖于近交系数数据")
+                return False
+                    
+        except Exception as e:
+            logger.error(f"加载隐性基因数据失败: {e}")
+            return False
+            
+    def _load_bull_traits(self):
+        """加载公牛性状数据"""
+        try:
+            # 优先尝试从项目的公牛指数计算结果文件加载
+            bull_scores_file = self.project_path / "analysis_results" / "processed_index_bull_scores.xlsx"
+            if bull_scores_file.exists():
+                bull_scores_df = pd.read_excel(bull_scores_file)
+                
+                # 查找指数列（类似母牛的处理方式）
+                index_cols = [col for col in bull_scores_df.columns if '_index' in col.lower() or 'index' in col.lower()]
+                score_cols = [col for col in index_cols if not any(
+                    exclude in col.lower() for exclude in ['date', 'time', 'id', 'name', 'type']
+                )]
+                
+                if score_cols:
+                    # 使用找到的第一个指数列
+                    score_col = score_cols[0]
+                    logger.info(f"使用公牛指数列: {score_col}")
+                    
+                    # 合并到公牛数据
+                    self.bull_data = self.bull_data.merge(
+                        bull_scores_df[['bull_id', score_col]].rename(columns={score_col: 'Index Score'}),
+                        on='bull_id',
+                        how='left'
+                    )
+                    
+                    # 检查是否有缺失值
+                    missing_bulls = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
+                    if missing_bulls:
+                        logger.warning(f"以下公牛在指数文件中缺少数据: {missing_bulls}")
+                        # 不再返回False，尝试从数据库获取
+                    else:
+                        logger.info("成功从公牛指数文件加载数据")
+                        return True
+                else:
+                    logger.warning("公牛指数文件中未找到指数列")
+            
+            # 如果文件不存在或数据不完整，尝试从数据库获取
+            from sqlalchemy import create_engine, text
+            import os
+            
+            # 查找数据库文件
+            db_path = self.project_path.parent.parent.parent / "local_bull_library.db"
+            if not db_path.exists():
+                # 尝试其他可能的路径
+                db_path = Path("/Users/Shared/Files From d.localized/projects/mating/genetic_improve/local_bull_library.db")
+            
+            if db_path.exists():
+                engine = create_engine(f'sqlite:///{db_path}')
+                
+                # 查询公牛性状
+                query = """
+                SELECT `BULL NAAB` as bull_id, `NM$`, `TPI`, `MILK`, `FAT`, `FAT %`, 
+                       `PROT`, `PROT%`, `PL`, `DPR`, `UDC`, `FLC`, `RFI`
+                FROM bull_library
+                """
+                
+                with engine.connect() as conn:
+                    bull_traits = pd.read_sql(text(query), conn)
+                    
+                # 合并到公牛数据中
+                if not bull_traits.empty:
+                    # 计算综合指数得分（使用TPI或NM$作为主要指标）
+                    bull_traits['Index Score'] = bull_traits[['TPI', 'NM$']].max(axis=1)
+                    
+                    # 合并数据
+                    self.bull_data = self.bull_data.merge(
+                        bull_traits[['bull_id', 'Index Score', 'TPI', 'NM$']], 
+                        on='bull_id', 
+                        how='left'
+                    )
+                    
+                    # 补充缺失数据的公牛性状
+                    missing_bulls = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
+                    if missing_bulls:
+                        # 只为缺失的公牛补充数据
+                        missing_traits = bull_traits[bull_traits['bull_id'].isin(missing_bulls)]
+                        if not missing_traits.empty:
+                            missing_traits['Index Score'] = missing_traits[['TPI', 'NM$']].max(axis=1)
+                            # 更新缺失的数据
+                            for _, bull in missing_traits.iterrows():
+                                self.bull_data.loc[self.bull_data['bull_id'] == bull['bull_id'], 'Index Score'] = bull['Index Score']
+                    
+                    engine.dispose()
+                    
+                    # 最终检查
+                    final_missing = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
+                    if final_missing:
+                        logger.error(f"以下公牛缺少性状数据: {final_missing}")
+                        logger.error("请先进行公牛育种指数计算或更新公牛数据库")
+                        return False
+                    
+                    logger.info("成功从数据库补充公牛性状数据")
+                    return True
+                else:
+                    engine.dispose()
+                    # 检查是否已经有数据
+                    if 'Index Score' in self.bull_data.columns and self.bull_data['Index Score'].notna().any():
+                        logger.info("使用已有的公牛指数数据")
+                        return True
+                    else:
+                        logger.error("公牛数据库中没有性状数据")
+                        logger.error("请先进行公牛育种指数计算")
+                        return False
+            else:
+                # 检查是否已经从文件加载了数据
+                if 'Index Score' in self.bull_data.columns and self.bull_data['Index Score'].notna().all():
+                    logger.info("使用公牛指数文件数据")
+                    return True
+                else:
+                    logger.error("未找到公牛指数数据")
+                    logger.error("请先进行公牛育种指数计算")
+                    return False
+                
+        except Exception as e:
+            logger.error(f"加载公牛性状失败: {e}")
+            # 检查是否已经有数据
+            if 'Index Score' in self.bull_data.columns and self.bull_data['Index Score'].notna().any():
+                logger.info("使用已有的公牛指数数据")
+                return True
+            else:
+                logger.error("请先进行公牛育种指数计算")
+                return False
+            
+    def generate_matrices(self) -> Dict[str, pd.DataFrame]:
+        """生成所有配对矩阵"""
+        logger.info("开始生成配对矩阵...")
+        
+        # 准备母牛和公牛ID列表
+        cow_ids = self.cow_data['cow_id'].astype(str).tolist()
+        
+        # 分别处理常规和性控公牛
+        regular_bulls = self.bull_data[self.bull_data['classification'] == '常规']
+        sexed_bulls = self.bull_data[self.bull_data['classification'] == '性控']
+        
+        regular_bull_ids = regular_bulls['bull_id'].astype(str).tolist() if not regular_bulls.empty else []
+        sexed_bull_ids = sexed_bulls['bull_id'].astype(str).tolist() if not sexed_bulls.empty else []
+        
+        # 创建结果字典
+        matrices = {}
+        
+        # 生成常规冻精矩阵
+        if regular_bull_ids:
+            logger.info(f"生成常规冻精配对矩阵 ({len(cow_ids)}×{len(regular_bull_ids)})")
+            matrices['常规_后代得分'] = self._create_score_matrix(cow_ids, regular_bull_ids, regular_bulls)
+            matrices['常规_近交系数'] = self._create_inbreeding_matrix(cow_ids, regular_bull_ids)
+            matrices['常规_隐性基因'] = self._create_genetic_defect_matrix(cow_ids, regular_bull_ids)
+            
+        # 生成性控冻精矩阵
+        if sexed_bull_ids:
+            logger.info(f"生成性控冻精配对矩阵 ({len(cow_ids)}×{len(sexed_bull_ids)})")
+            matrices['性控_后代得分'] = self._create_score_matrix(cow_ids, sexed_bull_ids, sexed_bulls)
+            matrices['性控_近交系数'] = self._create_inbreeding_matrix(cow_ids, sexed_bull_ids)
+            matrices['性控_隐性基因'] = self._create_genetic_defect_matrix(cow_ids, sexed_bull_ids)
+            
+        # 生成推荐汇总（保持原有格式的兼容性）
+        logger.info("生成推荐汇总...")
+        matrices['推荐汇总'] = self._generate_recommendation_summary()
+        
+        return matrices
+        
+    def _create_score_matrix(self, cow_ids: List[str], bull_ids: List[str], bull_df: pd.DataFrame) -> pd.DataFrame:
+        """创建后代得分矩阵"""
+        # 创建空矩阵
+        score_matrix = pd.DataFrame(index=cow_ids, columns=bull_ids)
+        
+        # 获取公牛得分字典
+        if 'Index Score' not in bull_df.columns:
+            raise ValueError("公牛数据缺少Index Score列")
+            
+        bull_scores = dict(zip(
+            bull_df['bull_id'].astype(str), 
+            bull_df['Index Score']
+        ))
+        
+        # 计算每个配对的后代得分
+        for cow_id in cow_ids:
+            cow_row = self.cow_data[self.cow_data['cow_id'].astype(str) == cow_id]
+            if not cow_row.empty:
+                # 从已识别的得分列中获取得分
+                score_found = False
+                for col in self.cow_score_columns:
+                    if col in cow_row.columns and pd.notna(cow_row.iloc[0][col]):
+                        cow_score = cow_row.iloc[0][col]
+                        score_found = True
+                        break
+                        
+                if not score_found:
+                    raise ValueError(f"母牛 {cow_id} 缺少得分数据")
+                
+                for bull_id in bull_ids:
+                    if bull_id not in bull_scores:
+                        raise ValueError(f"公牛 {bull_id} 缺少得分数据")
+                    bull_score = bull_scores[bull_id]
+                    # 后代得分 = 双亲平均
+                    offspring_score = 0.5 * (cow_score + bull_score)
+                    score_matrix.loc[cow_id, bull_id] = round(offspring_score, 2)
+                    
+        return score_matrix
+        
+    def _create_inbreeding_matrix(self, cow_ids: List[str], bull_ids: List[str]) -> pd.DataFrame:
+        """创建近交系数矩阵"""
+        inbreeding_matrix = pd.DataFrame(index=cow_ids, columns=bull_ids)
+        
+        # 调试：检查前几个配对
+        debug_count = 0
+        non_zero_count = 0
+        
+        for i, cow_id in enumerate(cow_ids):
+            for j, bull_id in enumerate(bull_ids):
+                coeff = self._get_inbreeding_coefficient(cow_id, bull_id)
+                # 转换为百分比形式
+                inbreeding_matrix.loc[cow_id, bull_id] = f"{coeff*100:.3f}%"
+                
+                # 调试信息
+                if debug_count < 5 and i < 2 and j < 2:
+                    logger.debug(f"配对 ({cow_id}, {bull_id}): 近交系数 = {coeff}")
+                    debug_count += 1
+                    
+                if coeff > 0:
+                    non_zero_count += 1
+                    
+        logger.info(f"近交系数矩阵：非零值数量 = {non_zero_count}/{len(cow_ids)*len(bull_ids)}")
+                
+        return inbreeding_matrix
+        
+    def _create_genetic_defect_matrix(self, cow_ids: List[str], bull_ids: List[str]) -> pd.DataFrame:
+        """创建隐性基因状态矩阵"""
+        genetic_matrix = pd.DataFrame(index=cow_ids, columns=bull_ids)
+        
+        for cow_id in cow_ids:
+            for bull_id in bull_ids:
+                status = self._check_genetic_defects(cow_id, bull_id)
+                genetic_matrix.loc[cow_id, bull_id] = status
+                
+        return genetic_matrix
+        
+    def _get_inbreeding_coefficient(self, cow_id: str, bull_id: str) -> float:
+        """获取近交系数"""
+        if self.inbreeding_data is None:
+            return 0.0
+            
+        try:
+            # 尝试不同的列名组合
+            cow_cols = ['母牛号', 'dam_id', 'cow_id']
+            bull_cols = ['原始备选公牛号', '备选公牛号', '公牛号', 'sire_id', 'bull_id']
+            coeff_cols = ['后代近交系数', '近交系数', 'inbreeding_coefficient']  # 优先使用后代近交系数
+            
+            # 找到实际的列名
+            cow_col = next((col for col in cow_cols if col in self.inbreeding_data.columns), None)
+            bull_col = next((col for col in bull_cols if col in self.inbreeding_data.columns), None)
+            coeff_col = next((col for col in coeff_cols if col in self.inbreeding_data.columns), None)
+            
+            if not all([cow_col, bull_col, coeff_col]):
+                logger.debug(f"缺少必要列: cow_col={cow_col}, bull_col={bull_col}, coeff_col={coeff_col}")
+                return 0.0
+                
+            # 查找数据
+            mask = (self.inbreeding_data[cow_col].astype(str) == str(cow_id)) & \
+                   (self.inbreeding_data[bull_col].astype(str) == str(bull_id))
+            
+            # 调试特定配对
+            if cow_id == '24115' and bull_id == '007HO16284':
+                logger.debug(f"调试配对 24115-007HO16284:")
+                logger.debug(f"  使用列: {cow_col}={cow_id}, {bull_col}={bull_id}")
+                logger.debug(f"  找到记录数: {mask.sum()}")
+                if mask.any():
+                    row = self.inbreeding_data.loc[mask].iloc[0]
+                    logger.debug(f"  {coeff_col}: {row[coeff_col]}")
+                   
+            if mask.any():
+                coeff = self.inbreeding_data.loc[mask, coeff_col].iloc[0]
+                # 处理百分比格式
+                if isinstance(coeff, str):
+                    if '%' in coeff:
+                        # 去掉百分号并转换
+                        value = float(coeff.replace('%', '')) / 100
+                        if cow_id == '24115' and bull_id == '007HO16284':
+                            logger.debug(f"  解析结果: '{coeff}' -> {value}")
+                        return value
+                    else:
+                        # 尝试直接转换
+                        try:
+                            return float(coeff)
+                        except:
+                            return 0.0
+                return float(coeff) if pd.notna(coeff) else 0.0
+                
+        except Exception as e:
+            logger.debug(f"获取近交系数失败 ({cow_id}, {bull_id}): {e}")
+            
+        return 0.0
+    
+    def _get_cow_score(self, cow_data):
+        """从母牛数据中获取得分"""
+        # 尝试从已识别的得分列中获取
+        for col in self.cow_score_columns:
+            if isinstance(cow_data, pd.Series):
+                if col in cow_data.index and pd.notna(cow_data[col]):
+                    return cow_data[col]
+            elif isinstance(cow_data, dict):
+                if col in cow_data and pd.notna(cow_data.get(col)):
+                    return cow_data[col]
+        return None
+        
+    def _check_genetic_defects(self, cow_id: str, bull_id: str) -> str:
+        """检查隐性基因状态"""
+        if self.genetic_defect_data is None:
+            return "Safe"
+            
+        try:
+            # 尝试不同的列名组合
+            cow_cols = ['母牛号', 'dam_id', 'cow_id']
+            bull_cols = ['原始备选公牛号', '备选公牛号', '公牛号', 'sire_id', 'bull_id']
+            
+            # 找到实际的列名
+            cow_col = next((col for col in cow_cols if col in self.genetic_defect_data.columns), None)
+            bull_col = next((col for col in bull_cols if col in self.genetic_defect_data.columns), None)
+            
+            if not all([cow_col, bull_col]):
+                return "Safe"
+                
+            # 查找数据
+            mask = (self.genetic_defect_data[cow_col].astype(str) == str(cow_id)) & \
+                   (self.genetic_defect_data[bull_col].astype(str) == str(bull_id))
+                   
+            if mask.any():
+                row = self.genetic_defect_data.loc[mask].iloc[0]
+                
+                # 检查各种隐性基因
+                defect_genes = ['HH1', 'HH2', 'HH3', 'HH4', 'HH5', 'HH6', 
+                               'MW', 'BLAD', 'CVM', 'DUMPS', 'Citrullinemia',
+                               'Brachyspina', 'Factor XI', 'Mulefoot', 
+                               'Cholesterol deficiency', 'Chondrodysplasia']
+                
+                for gene in defect_genes:
+                    if gene in row.index:
+                        status = str(row[gene]).strip()
+                        # 检查各种风险状态（不区分大小写）
+                        status_lower = status.lower()
+                        if any(risk in status_lower for risk in ['no safe', 'no_safe', 'unsafe', 'risk']) or status_lower == 'tc':
+                            logger.debug(f"检测到隐性基因风险: {gene}={row[gene]} for {cow_id} x {bull_id}")
+                            return "Risk"
+                            
+        except Exception as e:
+            logger.debug(f"检查隐性基因失败 ({cow_id}, {bull_id}): {e}")
+            
+        return "Safe"
+        
+    def _generate_recommendation_summary(self) -> pd.DataFrame:
+        """生成推荐汇总（兼容原有格式）"""
+        recommendations = []
+        skipped_cows = 0
+        
+        logger.info(f"开始生成推荐汇总，母牛总数: {len(self.cow_data)}")
+        
+        for _, cow in self.cow_data.iterrows():
+            cow_id = str(cow['cow_id'])
+            
+            # 复制母牛基本信息
+            rec = {
+                'cow_id': cow_id,
+                'breed': cow.get('breed', ''),
+                'group': cow.get('group', ''),
+                'birth_date': cow.get('birth_date', ''),
+                'index_score': self._get_cow_score(cow)
+            }
+            
+            has_valid_bulls = False  # 标记是否有任何有效的公牛
+            
+            # 为每种冻精类型生成前3个推荐
+            for semen_type in ['常规', '性控']:
+                type_bulls = self.bull_data[self.bull_data['classification'] == semen_type]
+                
+                if not type_bulls.empty:
+                    # 计算所有公牛的得分
+                    bull_scores = []
+                    for _, bull in type_bulls.iterrows():
+                        bull_id = str(bull['bull_id'])
+                        if 'Index Score' not in bull:
+                            continue  # 跳过没有得分的公牛
+                        bull_score = bull['Index Score']
+                        
+                        # 获取母牛得分
+                        cow_score = self._get_cow_score(cow)
+                        
+                        if cow_score is None:
+                            # 跳过没有得分的母牛
+                            if len(bull_scores) == 0:  # 只在第一次记录
+                                logger.warning(f"母牛 {cow_id} 没有得分，跳过该母牛")
+                                skipped_cows += 1
+                            continue
+                        offspring_score = 0.5 * (cow_score + bull_score)
+                        inbreeding_coeff = self._get_inbreeding_coefficient(cow_id, bull_id)
+                        gene_status = self._check_genetic_defects(cow_id, bull_id)
+                        
+                        # 只添加满足约束的公牛
+                        if inbreeding_coeff <= 0.03125 and gene_status == 'Safe':
+                            bull_scores.append({
+                                'bull_id': bull_id,
+                                'offspring_score': offspring_score,
+                                'inbreeding_coeff': inbreeding_coeff,
+                                'gene_status': gene_status
+                            })
+                    
+                    # 按得分排序
+                    bull_scores.sort(key=lambda x: x['offspring_score'], reverse=True)
+                    
+                    if bull_scores:  # 如果有有效的公牛
+                        has_valid_bulls = True
+                    
+                    # 保存前3个推荐
+                    for i in range(min(3, len(bull_scores))):
+                        if i < len(bull_scores):
+                            rec[f'推荐{semen_type}冻精{i+1}选'] = bull_scores[i]['bull_id']
+                            rec[f'{semen_type}冻精{i+1}近交系数'] = f"{bull_scores[i]['inbreeding_coeff']*100:.3f}%"
+                            rec[f'{semen_type}冻精{i+1}隐性基因情况'] = bull_scores[i]['gene_status']
+                            rec[f'{semen_type}冻精{i+1}得分'] = round(bull_scores[i]['offspring_score'], 2)
+                        else:
+                            rec[f'推荐{semen_type}冻精{i+1}选'] = ''
+                            rec[f'{semen_type}冻精{i+1}近交系数'] = ''
+                            rec[f'{semen_type}冻精{i+1}隐性基因情况'] = ''
+                            rec[f'{semen_type}冻精{i+1}得分'] = ''
+                    
+                    # 保存所有有效公牛信息（不只是前3个，用于递进机制）
+                    rec[f'{semen_type}_valid_bulls'] = str(bull_scores)
+            
+            if not has_valid_bulls:
+                logger.warning(f"母牛 {cow_id} 没有任何有效的公牛可选（可能因为近交系数或隐性基因约束）")
+                skipped_cows += 1
+                # 但仍然添加到推荐列表中，以便在分配时显示为无法分配
+                            
+            recommendations.append(rec)
+        
+        logger.info(f"推荐汇总生成完成:")
+        logger.info(f"  总母牛数: {len(self.cow_data)}")
+        logger.info(f"  跳过的母牛数: {skipped_cows}")
+        logger.info(f"  生成推荐的母牛数: {len(recommendations)}")
+        
+        return pd.DataFrame(recommendations)
+        
+    def save_matrices(self, matrices: Dict[str, pd.DataFrame], output_file: Path):
+        """保存所有矩阵到Excel文件"""
+        try:
+            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                for sheet_name, df in matrices.items():
+                    df.to_excel(writer, sheet_name=sheet_name)
+                    
+                    # 调整列宽
+                    worksheet = writer.sheets[sheet_name]
+                    for column in worksheet.columns:
+                        max_length = 0
+                        column = [cell for cell in column]
+                        for cell in column:
+                            try:
+                                if len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        adjusted_width = min(max_length + 2, 30)
+                        worksheet.column_dimensions[column[0].column_letter].width = adjusted_width
+                        
+            logger.info(f"配对矩阵已保存至: {output_file}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"保存配对矩阵失败: {e}")
+            return False

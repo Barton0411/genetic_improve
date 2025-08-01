@@ -277,7 +277,9 @@ class GroupManager:
                 if pd.isna(services):
                     services = 0
                     
-                # 获取对应的配种方法（超过3次使用最后一个方法）
+                # 获取对应的配种方法（根据已配种次数确定下次使用什么）
+                # services=0表示还没配过，下次是第1次，对应索引0
+                # services=1表示已配1次，下次是第2次，对应索引1
                 method_idx = min(int(services), len(breeding_methods)-1)
                 method = breeding_methods[method_idx]
                 
@@ -342,6 +344,7 @@ class GroupManager:
         
         if progress_callback:
             progress_callback.update_info(f"筛选在场母牛: {original_count} -> {filtered_count} 头")
+        
         
         if progress_callback:
             progress_callback.set_task_info("正在计算日龄和DIM...")
@@ -611,33 +614,51 @@ class GroupManager:
                     # 对每头牛应用配种策略
                     sexed_count = 0
                     non_sexed_count = 0
+                    beef_count = 0
                     
                     for idx, row in group_df.iterrows():
-                        # 获取该牛的配种次数，如果为空则默认为1
-                        services = row.get('services_time', 1)
+                        # 获取该牛的配种次数，如果为空则默认为0（未配种）
+                        services = row.get('services_time', 0)
                         if pd.isna(services):
-                            services = 1
+                            services = 0
                         services = int(services)
                         
-                        # 获取对应的配种方法（配种次数从1开始，列表索引从0开始）
-                        method_idx = min(services - 1, len(breeding_methods) - 1)
+                        # 获取对应的配种方法（根据已配种次数确定下次使用什么）
+                        # services=0表示还没配过，下次是第1次，对应索引0
+                        # services=1表示已配1次，下次是第2次，对应索引1
+                        method_idx = min(services, len(breeding_methods) - 1)
                         method = breeding_methods[method_idx]
                         
-                        # 判断是否为性控
-                        is_sexed = method in ["普通性控", "超级性控"]
-                        breeding_type = "性控" if is_sexed else "非性控"
+                        # 判断配种类型
+                        if method in ["普通性控", "超级性控"]:
+                            breeding_type = "性控"
+                        else:
+                            breeding_type = "非性控"
+                        
+                        # 检查该牛的所有配种方法中是否有肉牛冻精
+                        has_beef = "肉牛冻精" in breeding_methods
+                        
+                        # 如果有肉牛冻精，添加肉牛标记
+                        if has_beef:
+                            breeding_type += "（肉牛）"
                         
                         # 更新分组信息
                         new_group = f"{cycle_group}+{breeding_type}"
                         result_df.loc[idx, 'group'] = new_group
                         processed_cows.add(idx)
                         
-                        if is_sexed:
+                        if "性控（肉牛）" in breeding_type:
                             sexed_count += 1
+                            beef_count += 1
+                        elif "性控" in breeding_type:
+                            sexed_count += 1
+                        elif "非性控（肉牛）" in breeding_type:
+                            beef_count += 1
+                            non_sexed_count += 1
                         else:
                             non_sexed_count += 1
                     
-                    summary = f"    {group} 完成: 性控 {sexed_count} 头, 非性控 {non_sexed_count} 头"
+                    summary = f"    {group} 完成: 性控 {sexed_count} 头, 非性控 {non_sexed_count} 头, 肉牛 {beef_count} 头"
                     print(summary)
                     if progress_callback:
                         progress_callback.update_info(summary)
@@ -699,33 +720,51 @@ class GroupManager:
                     # 对每头牛应用配种策略
                     sexed_count = 0
                     non_sexed_count = 0
+                    beef_count = 0
                     
                     for idx, row in group_df.iterrows():
-                        # 获取该牛的配种次数，如果为空则默认为1
-                        services = row.get('services_time', 1)
+                        # 获取该牛的配种次数，如果为空则默认为0（未配种）
+                        services = row.get('services_time', 0)
                         if pd.isna(services):
-                            services = 1
+                            services = 0
                         services = int(services)
                         
-                        # 获取对应的配种方法（配种次数从1开始，列表索引从0开始）
-                        method_idx = min(services - 1, len(breeding_methods) - 1)
+                        # 获取对应的配种方法（根据已配种次数确定下次使用什么）
+                        # services=0表示还没配过，下次是第1次，对应索引0
+                        # services=1表示已配1次，下次是第2次，对应索引1
+                        method_idx = min(services, len(breeding_methods) - 1)
                         method = breeding_methods[method_idx]
                         
-                        # 判断是否为性控
-                        is_sexed = method in ["普通性控", "超级性控"]
-                        breeding_type = "性控" if is_sexed else "非性控"
+                        # 判断配种类型
+                        if method in ["普通性控", "超级性控"]:
+                            breeding_type = "性控"
+                        else:
+                            breeding_type = "非性控"
+                        
+                        # 检查该牛的所有配种方法中是否有肉牛冻精
+                        has_beef = "肉牛冻精" in breeding_methods
+                        
+                        # 如果有肉牛冻精，添加肉牛标记
+                        if has_beef:
+                            breeding_type += "（肉牛）"
                         
                         # 更新分组信息
                         new_group = f"成母牛未孕牛+{breeding_type}"
                         result_df.loc[idx, 'group'] = new_group
                         processed_cows.add(idx)
                         
-                        if is_sexed:
+                        if "性控（肉牛）" in breeding_type:
                             sexed_count += 1
+                            beef_count += 1
+                        elif "性控" in breeding_type:
+                            sexed_count += 1
+                        elif "非性控（肉牛）" in breeding_type:
+                            beef_count += 1
+                            non_sexed_count += 1
                         else:
                             non_sexed_count += 1
                     
-                    summary = f"  {group} 完成: 性控 {sexed_count} 头, 非性控 {non_sexed_count} 头"
+                    summary = f"  {group} 完成: 性控 {sexed_count} 头, 非性控 {non_sexed_count} 头, 肉牛 {beef_count} 头"
                     print(summary)
                     if progress_callback:
                         progress_callback.update_info(summary)
@@ -742,7 +781,7 @@ class GroupManager:
             if progress_callback:
                 progress_callback.update_info(info)
         
-        # 3. 处理已孕牛和难孕牛 - 统一使用非性控
+        # 3. 处理已孕牛和难孕牛 - 根据配种策略决定是否使用肉牛冻精
         if progress_callback:
             progress_callback.update_info("处理已孕牛和难孕牛...")
         
@@ -751,23 +790,67 @@ class GroupManager:
         if 'group' in result_df.columns:
             special_mask = result_df['group'].fillna('').str.contains('已孕牛|难孕牛', na=False)
             special_mask = special_mask & ~result_df.index.isin(processed_cows)
-            special_count = special_mask.sum()
+            special_df = result_df[special_mask]
+            special_count = len(special_df)
             
             if progress_callback:
                 progress_callback.update_info(f"处理特殊牛只: {special_count} 头 (已孕牛和难孕牛)")
             
-            for idx in result_df[special_mask].index:
-                current_group = result_df.loc[idx, 'group']
+            # 统计各类型数量
+            beef_count = 0
+            regular_count = 0
+            
+            for idx, row in special_df.iterrows():
+                current_group = row['group']
                 if pd.notna(current_group) and not ('+性控' in current_group or '+非性控' in current_group):
-                    result_df.loc[idx, 'group'] = f"{current_group}+非性控"
+                    # 获取该牛的配种次数
+                    services = row.get('services_time', 0)
+                    if pd.isna(services):
+                        services = 0
+                    services = int(services)
+                    
+                    # 从策略表中查找对应的配种方法
+                    # 已孕牛和难孕牛通常使用最后一个配种方法（第4次+）
+                    breeding_method = None
+                    
+                    # 判断是后备牛还是成母牛
+                    if '后备牛' in current_group:
+                        # 查找后备牛策略（使用任意一个后备牛策略组，因为难孕牛和已孕牛的处理相同）
+                        for strategy_row in heifer_strategies:
+                            if strategy_row['breeding_methods']:
+                                # 使用最后一个配种方法（第4次+）
+                                breeding_method = strategy_row['breeding_methods'][-1]
+                                break
+                    else:  # 成母牛
+                        # 查找成母牛策略
+                        for strategy_row in mature_strategies:
+                            if strategy_row['breeding_methods']:
+                                # 使用最后一个配种方法（第4次+）
+                                breeding_method = strategy_row['breeding_methods'][-1]
+                                break
+                    
+                    # 根据配种方法决定分组
+                    if breeding_method == "肉牛冻精":
+                        result_df.loc[idx, 'group'] = f"{current_group}+非性控（肉牛）"
+                        beef_count += 1
+                    else:
+                        result_df.loc[idx, 'group'] = f"{current_group}+非性控"
+                        regular_count += 1
+                    
                     processed_cows.add(idx)
+            
+            if special_count > 0:
+                summary = f"  已孕牛和难孕牛处理完成: 常规非性控 {regular_count} 头, 肉牛 {beef_count} 头"
+                print(summary)
+                if progress_callback:
+                    progress_callback.update_info(summary)
         else:
             warning = "警告：结果数据中没有group列"
             print(warning)
             if progress_callback:
                 progress_callback.update_info(warning)
         
-        # 处理任何剩余未添加性控/非性控标记的牛 - 默认使用非性控
+        # 处理任何剩余未添加性控/非性控/肉牛标记的牛 - 默认使用非性控
         if 'group' in result_df.columns:
             # 确保安全地处理可能的NaN值
             has_group_mask = result_df['group'].notna()
@@ -785,11 +868,25 @@ class GroupManager:
                     current_group = result_df.loc[idx, 'group']
                     if pd.notna(current_group):
                         result_df.loc[idx, 'group'] = f"{current_group}+非性控"
+                        processed_cows.add(idx)
         
         final_info = f"分组完成，共处理 {len(processed_cows)} 头牛"
         print(final_info)
         if progress_callback:
             progress_callback.update_info(final_info)
+        
+        # 输出最终分组统计
+        print("\n===== 最终分组统计 =====")
+        group_stats = result_df['group'].value_counts()
+        for group, count in group_stats.items():
+            print(f"{group}: {count}头")
+            
+        # 统计肉牛组数量
+        beef_groups = group_stats[group_stats.index.str.contains('（肉牛）')]
+        if not beef_groups.empty:
+            print(f"\n肉牛标记组总计: {beef_groups.sum()}头")
+            for group, count in beef_groups.items():
+                print(f"  {group}: {count}头")
         
         if progress_callback:
             progress_callback.set_task_info("分组完成")

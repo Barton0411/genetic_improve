@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QFrame, QTreeView, QGridLayout, QAbstractItemView, QMenu, QGraphicsOpacityEffect,
     QStackedLayout, QGroupBox, QComboBox, QCheckBox, QTableWidget, QTableWidgetItem, 
     QHeaderView, QLineEdit, QTabWidget, QFormLayout, QSpinBox, QDialogButtonBox, 
-    QDialog, QProgressDialog, QApplication, QTextBrowser, QSizePolicy
+    QDialog, QProgressDialog, QApplication, QTextBrowser, QSizePolicy, QStyle
 )
 import warnings
 import pandas as pd
@@ -41,7 +41,7 @@ from gui.db_update_worker import DBUpdateWorker
 from core.breeding_calc.bull_traits_calc import BullKeyTraitsPage  
 from core.breeding_calc.index_page import IndexCalculationPage
 from core.breeding_calc.mated_bull_traits_calc import MatedBullKeyTraitsPage  
-from gui.matching_worker import MatchingWorker
+# from gui.matching_worker import MatchingWorker  # DEPRECATED - 使用 CycleBasedMatcher 替代
 from gui.recommendation_worker import RecommendationWorker
 
 # 策略表格管理器，用于处理表格创建和数据逻辑
@@ -1549,31 +1549,50 @@ class MainWindow(QMainWindow):
         # 添加选配操作按钮
         mating_button_layout = QHBoxLayout()
         clear_mating_btn = QPushButton("清空选配")
-        generate_recommendations_btn = QPushButton("生成选配推荐")
+        generate_recommendations_btn = QPushButton("执行个体选配")
         # start_mating_btn = QPushButton("开始选配")  # 隐藏开始选配按钮
         
         clear_mating_btn.setStyleSheet(button_style)
         generate_recommendations_btn.setStyleSheet("""
             QPushButton {
-                background-color: #f39c12;
+                background-color: #27ae60;
                 color: white;
                 border: none;
-                padding: 8px 16px;
+                padding: 10px 20px;
                 border-radius: 4px;
-                min-width: 100px;
+                min-width: 150px;
+                font-weight: bold;
+                font-size: 14px;
             }
             QPushButton:hover {
-                background-color: #e67e22;
+                background-color: #229954;
             }
         """)
         # start_mating_btn.setStyleSheet(button_style)  # 隐藏开始选配按钮
         
         clear_mating_btn.clicked.connect(self.on_clear_mating)
-        generate_recommendations_btn.clicked.connect(self.on_generate_recommendations)
+        generate_recommendations_btn.clicked.connect(self.on_execute_complete_mating)
         # start_mating_btn.clicked.connect(self.on_start_mating)  # 隐藏开始选配按钮
+        
+        # 添加选配分配按钮
+        allocate_mating_btn = QPushButton("选配分配")
+        allocate_mating_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        allocate_mating_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2ecc71;
+                color: white;
+                font-weight: bold;
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QPushButton:hover { background-color: #27ae60; }
+            QPushButton:pressed { background-color: #229954; }
+        """)
+        allocate_mating_btn.clicked.connect(self.on_allocate_mating)
         
         mating_button_layout.addWidget(clear_mating_btn)
         mating_button_layout.addWidget(generate_recommendations_btn)
+        # mating_button_layout.addWidget(allocate_mating_btn)  # 注释掉，使用一键完成
         # mating_button_layout.addWidget(start_mating_btn)  # 隐藏开始选配按钮
         mating_button_layout.addStretch()
         
@@ -2035,66 +2054,9 @@ class MainWindow(QMainWindow):
         self._execute_matching()
     
     def _execute_matching(self):
-        """执行选配的核心逻辑"""
-        # 获取选中的组
-        selected_groups = []
-        for row in range(self.group_preview_table.rowCount()):
-            checkbox_item = self.group_preview_table.cellWidget(row, 0)
-            if checkbox_item and isinstance(checkbox_item, QWidget):
-                checkbox = checkbox_item.findChild(QCheckBox)
-                if checkbox and checkbox.isChecked():
-                    group_name = self.group_preview_table.item(row, 1).text()
-                    selected_groups.append(group_name)
-        
-        if not selected_groups:
-            if hasattr(self, 'progress_dialog'):
-                self.progress_dialog.close()
-            QMessageBox.warning(self, "警告", "请先选择要进行选配的组")
-            return
-        
-        # 首先保存所有冻精支数
-        self.save_all_semen_counts()
-        
-        # 收集冻精支数信息
-        semen_counts = self._collect_semen_counts()
-        if not semen_counts:
-            if hasattr(self, 'progress_dialog'):
-                self.progress_dialog.close()
-            QMessageBox.warning(self, "警告", "未找到任何冻精支数信息")
-            return
-        
-        # 获取选配参数
-        inbreeding_threshold = self._get_inbreeding_threshold()
-        control_defect_genes = self.gene_control_checkbox.isChecked()
-        
-        # 如果进度对话框还未创建，创建一个
-        if not hasattr(self, 'progress_dialog') or not self.progress_dialog.isVisible():
-            self.progress_dialog = ProgressDialog(self)
-            self.progress_dialog.setWindowTitle("个体选配")
-            self.progress_dialog.set_task_info("正在进行个体选配...")
-            self.progress_dialog.show()
-        
-        # 创建并启动选配工作者
-        self.matching_worker = MatchingWorker(
-            self.selected_project_path,
-            selected_groups,
-            semen_counts,
-            inbreeding_threshold,
-            control_defect_genes
-        )
-        
-        # 连接信号
-        self.matching_worker.progress_updated.connect(
-            lambda msg, progress: (
-                self.progress_dialog.set_task_info(msg),
-                self.progress_dialog.update_progress(progress)
-            )[1]
-        )
-        self.matching_worker.matching_completed.connect(self.on_matching_completed)
-        self.matching_worker.error_occurred.connect(self.on_matching_error)
-        
-        # 启动工作者
-        self.matching_worker.start()
+        """执行选配的核心逻辑 - 重定向到新的分配方法"""
+        # 直接调用新的选配分配方法
+        self.on_allocate_mating()
     
     def _collect_semen_counts(self) -> dict:
         """收集冻精支数信息"""
@@ -2131,7 +2093,7 @@ class MainWindow(QMainWindow):
             return 1.0
     
     def on_matching_completed(self, output_file: Path):
-        """个体选配完成处理"""
+        """个体选配完成处理 - DEPRECATED: 此方法已废弃，保留仅用于兼容"""
         self.progress_dialog.close()
         
         # 显示成功消息
@@ -2171,7 +2133,7 @@ class MainWindow(QMainWindow):
         self.load_group_preview()
     
     def on_matching_error(self, error_message: str):
-        """个体选配错误处理"""
+        """个体选配错误处理 - DEPRECATED: 此方法已废弃，保留仅用于兼容"""
         self.progress_dialog.close()
         QMessageBox.critical(self, "选配失败", f"个体选配失败:\n{error_message}")
 
@@ -2244,6 +2206,52 @@ class MainWindow(QMainWindow):
             import traceback
             print(traceback.format_exc())
             QMessageBox.critical(self, "保存错误", f"保存支数时发生错误: {e}")
+    
+    def _get_inbreeding_threshold(self):
+        """获取近交系数阈值"""
+        threshold_text = self.inbreeding_combo.currentText()
+        if "3.125" in threshold_text:
+            return 3.125
+        elif "6.25" in threshold_text:
+            return 6.25
+        elif "12.5" in threshold_text:
+            return 12.5
+        else:  # 无视近交
+            return 100.0
+    
+    def _collect_semen_counts(self):
+        """收集冻精支数信息"""
+        semen_inventory = {}
+        
+        # 遍历所有标签页
+        for tab_index in range(self.semen_tab_widget.count()):
+            tab_widget = self.semen_tab_widget.widget(tab_index)
+            if not tab_widget:
+                continue
+                
+            layout = tab_widget.layout()
+            if not layout or layout.count() == 0:
+                continue
+                
+            table = layout.itemAt(0).widget()
+            if not isinstance(table, QTableWidget):
+                continue
+                
+            # 从表格中收集支数
+            for row in range(table.rowCount()):
+                bull_id_item = table.item(row, 0)  # 公牛ID
+                count_item = table.item(row, 13)   # 支数
+                
+                if bull_id_item and count_item:
+                    bull_id = bull_id_item.text()
+                    count_text = count_item.text()
+                    
+                    if count_text.isdigit():
+                        semen_inventory[bull_id] = int(count_text)
+                    else:
+                        semen_inventory[bull_id] = 0
+        
+        return semen_inventory
 
     def on_manual_grouping(self):
         """手动分组按钮点击事件"""
@@ -2386,6 +2394,7 @@ class MainWindow(QMainWindow):
         )
         self.recommendation_worker.recommendation_completed.connect(self.on_recommendation_completed)
         self.recommendation_worker.error_occurred.connect(self.on_recommendation_error)
+        self.recommendation_worker.prerequisites_needed.connect(self.on_prerequisites_needed)
         
         # 启动工作者
         self.recommendation_worker.start()
@@ -2395,10 +2404,21 @@ class MainWindow(QMainWindow):
         self.progress_dialog.close()
         
         # 显示成功消息
+        message = (
+            "选配推荐已生成！\n\n"
+            "生成了以下文件：\n"
+            f"1. 配对矩阵文件：{output_file.name}\n"
+            f"   - 包含所有母牛×公牛的配对信息\n"
+            f"   - 分别显示后代得分、近交系数、隐性基因状态\n\n"
+            f"2. 推荐汇总文件：individual_mating_report.xlsx\n"
+            f"   - 用于选配分配功能\n\n"
+            "是否打开配对矩阵文件查看？"
+        )
+        
         reply = QMessageBox.information(
             self, 
             "推荐完成", 
-            f"选配推荐已生成！\n报告已保存至: {output_file.name}\n\n是否立即打开查看？",
+            message,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes
         )
@@ -2415,100 +2435,379 @@ class MainWindow(QMainWindow):
         self.progress_dialog.close()
         QMessageBox.critical(self, "推荐失败", f"生成选配推荐失败:\n{error_message}")
     
+    def on_prerequisites_needed(self, message: str):
+        """处理前置条件缺失"""
+        QMessageBox.warning(
+            self, 
+            "前置条件提醒", 
+            f"{message}\n\n系统将使用安全默认值继续生成推荐。"
+        )
+    
+    def on_execute_complete_mating(self):
+        """执行完整的个体选配流程（一键完成）"""
+        if not self.selected_project_path:
+            QMessageBox.warning(self, "警告", "请先选择一个项目")
+            return
+        
+        # 获取选中的分组
+        selected_groups = []
+        for row in range(self.group_preview_table.rowCount()):
+            checkbox_item = self.group_preview_table.cellWidget(row, 0)
+            if checkbox_item and isinstance(checkbox_item, QWidget):
+                checkbox = checkbox_item.findChild(QCheckBox)
+                if checkbox and checkbox.isChecked():
+                    group_name = self.group_preview_table.item(row, 1).text()
+                    selected_groups.append(group_name)
+        
+        if not selected_groups:
+            QMessageBox.warning(self, "警告", "请先在分组预览中勾选要进行选配的组")
+            return
+        
+        # 保存冻精支数
+        self.save_all_semen_counts()
+        
+        # 收集冻精库存
+        semen_inventory = self._collect_semen_counts()
+        
+        # 检查库存
+        all_zero = all(count == 0 for count in semen_inventory.values())
+        if all_zero:
+            QMessageBox.warning(
+                self, 
+                "警告", 
+                "所有公牛的冻精支数都为0！\n\n"
+                "请在「冻精预览」表格中设置冻精支数后再进行选配。"
+            )
+            return
+        
+        # 创建进度对话框
+        self.progress_dialog = ProgressDialog(self)
+        self.progress_dialog.setWindowTitle("执行个体选配")
+        self.progress_dialog.set_task_info("正在执行个体选配...")
+        self.progress_dialog.show()
+        
+        try:
+            # 使用完整执行器
+            from core.matching.complete_mating_executor import CompleteMatingExecutor
+            
+            executor = CompleteMatingExecutor(self.selected_project_path)
+            
+            # 获取参数
+            inbreeding_threshold = self._get_inbreeding_threshold()
+            control_defect_genes = self.gene_control_checkbox.isChecked()
+            
+            # 执行完整流程
+            def progress_callback(msg, pct):
+                self.progress_dialog.set_task_info(msg)
+                self.progress_dialog.update_progress(pct)
+            
+            result = executor.execute(
+                bull_inventory=semen_inventory,
+                inbreeding_threshold=inbreeding_threshold,
+                control_defect_genes=control_defect_genes,
+                heifer_age_days=420,  # 可以从设置中获取
+                cycle_days=21,        # 可以从设置中获取
+                progress_callback=progress_callback
+            )
+            
+            self.progress_dialog.close()
+            
+            if result['success']:
+                # 显示成功消息
+                message = (
+                    f"个体选配完成！\n\n"
+                    f"已生成完整的选配报告：\n"
+                    f"{result['report_path'].name}\n\n"
+                    f"报告包含了所有分组的母牛选配结果。\n\n"
+                    f"是否打开查看报告？"
+                )
+                
+                reply = QMessageBox.question(
+                    self, 
+                    "选配完成", 
+                    message,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    try:
+                        QDesktopServices.openUrl(QUrl.fromLocalFile(str(result['report_path'])))
+                    except Exception as e:
+                        QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}")
+                
+                # 更新分组预览
+                self.load_group_preview()
+                
+            else:
+                QMessageBox.critical(
+                    self, 
+                    "选配失败", 
+                    f"个体选配失败:\n{result.get('error', '未知错误')}"
+                )
+                
+        except Exception as e:
+            self.progress_dialog.close()
+            logger.error(f"执行个体选配失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            QMessageBox.critical(self, "错误", f"执行个体选配失败:\n{str(e)}")
+    
+    def on_allocate_mating(self):
+        """选配分配按钮点击事件"""
+        if not self.selected_project_path:
+            QMessageBox.warning(self, "警告", "请先选择一个项目")
+            return
+        
+        # 检查必要文件是否存在
+        report_file = self.selected_project_path / "analysis_results" / "individual_mating_report.xlsx"
+        if not report_file.exists():
+            reply = QMessageBox.question(
+                self, 
+                "缺少推荐报告", 
+                "未找到选配推荐报告，请先生成推荐报告。\n\n是否现在生成？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self.on_generate_recommendations()
+            return
+        
+        # 获取选中的组
+        selected_groups = []
+        for row in range(self.group_preview_table.rowCount()):
+            checkbox_item = self.group_preview_table.cellWidget(row, 0)
+            if checkbox_item and isinstance(checkbox_item, QWidget):
+                checkbox = checkbox_item.findChild(QCheckBox)
+                if checkbox and checkbox.isChecked():
+                    group_name = self.group_preview_table.item(row, 1).text()
+                    selected_groups.append(group_name)
+        
+        if not selected_groups:
+            QMessageBox.warning(self, "警告", "请先在分组预览中勾选要分配的组")
+            return
+        
+        # 首先保存所有冻精支数
+        self.save_all_semen_counts()
+        
+        # 收集冻精库存信息
+        semen_inventory = self._collect_semen_counts()
+        
+        # 检查是否所有冻精支数都为0
+        all_zero = all(count == 0 for count in semen_inventory.values())
+        if all_zero:
+            QMessageBox.warning(
+                self, 
+                "警告", 
+                "所有公牛的冻精支数都为0！\n\n"
+                "请在「冻精预览」表格中设置冻精支数后再进行分配。"
+            )
+            return
+        
+        # 创建进度对话框
+        self.progress_dialog = ProgressDialog(self)
+        self.progress_dialog.setWindowTitle("选配分配")
+        self.progress_dialog.set_task_info("正在进行选配分配...")
+        self.progress_dialog.show()
+        
+        # 执行分配
+        try:
+            from core.matching.cycle_based_matcher import CycleBasedMatcher
+            
+            # 创建匹配器
+            matcher = CycleBasedMatcher()
+            matcher.inbreeding_threshold = self._get_inbreeding_threshold()
+            matcher.control_defect_genes = self.gene_control_checkbox.isChecked()
+            
+            # 加载数据
+            self.progress_dialog.set_task_info("正在加载推荐数据...")
+            self.progress_dialog.update_progress(10)
+            
+            recommendations_df = pd.read_excel(report_file)
+            bull_data_path = self.selected_project_path / "standardized_data" / "processed_bull_data.xlsx"
+            
+            if not matcher.load_data(recommendations_df, bull_data_path):
+                self.progress_dialog.close()
+                QMessageBox.critical(self, "错误", "数据加载失败")
+                return
+            
+            # 设置库存
+            self.progress_dialog.set_task_info("正在设置冻精库存...")
+            self.progress_dialog.update_progress(20)
+            matcher.set_inventory(semen_inventory)
+            
+            # 执行分配
+            self.progress_dialog.set_task_info("正在执行分配...")
+            self.progress_dialog.update_progress(30)
+            
+            def progress_callback(message, progress):
+                self.progress_dialog.set_task_info(message)
+                self.progress_dialog.update_progress(30 + int(progress * 0.6))
+            
+            result_df = matcher.perform_allocation(selected_groups, progress_callback)
+            
+            # 保存结果
+            self.progress_dialog.set_task_info("正在保存结果...")
+            self.progress_dialog.update_progress(90)
+            
+            # 保存详细分配结果
+            allocation_file = self.selected_project_path / "analysis_results" / "individual_allocation_result.xlsx"
+            success = matcher.save_allocation_result(result_df, allocation_file)
+            
+            # 保存汇总信息
+            summary_file = self.selected_project_path / "analysis_results" / "allocation_summary.xlsx"
+            summary_df = matcher.get_allocation_summary()
+            summary_df.to_excel(summary_file, index=False)
+            
+            self.progress_dialog.update_progress(100)
+            self.progress_dialog.close()
+            
+            # 显示完成信息
+            message = (
+                f"选配分配完成！\n\n"
+                f"已分配 {len(selected_groups)} 个组的母牛\n"
+                f"分配结果已保存至:\n"
+                f"- {allocation_file.name}\n"
+                f"- {summary_file.name}\n\n"
+                f"是否打开查看分配结果？"
+            )
+            
+            reply = QMessageBox.question(
+                self, 
+                "分配完成", 
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(allocation_file)))
+                except Exception as e:
+                    QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}")
+                    
+        except Exception as e:
+            self.progress_dialog.close()
+            logger.error(f"选配分配失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            QMessageBox.critical(self, "错误", f"选配分配失败:\n{str(e)}")
+    
     def on_generate_ppt(self):
         """生成PPT报告"""
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
             
-        # 获取牧场名称
-        farm_name = self.selected_project_path.name
-        
-        # 导入PPT生成器
-        from core.reporting.ppt import PPTGenerator
-        
-        # 创建PPT生成器
-        ppt_generator = PPTGenerator(self.selected_project_path, farm_name)
-        
-        # 检查必要文件
-        can_generate, error_msg = ppt_generator.check_required_files()
-        if not can_generate:
-            # 解析缺少的文件类型
-            missing_analyses = []
-            if "系谱识别情况分析" in error_msg:
-                missing_analyses.append(("系谱识别情况分析", self.run_pedigree_analysis))
-            if "母牛关键性状指数" in error_msg:
-                missing_analyses.append(("母牛关键性状指数", self.run_cow_key_traits))
-            if "母牛育种指数" in error_msg:
-                missing_analyses.append(("母牛育种指数", self.run_cow_index_calculation))
+        try:
+            # 导入新的PPT生成器
+            from core.report.ppt_generator import PPTGenerator
             
-            # 构建提示信息
-            missing_names = [name for name, _ in missing_analyses]
-            message = f"生成PPT报告需要先完成以下分析：\n\n• " + "\n• ".join(missing_names)
-            message += "\n\n是否现在自动执行这些分析？"
+            # 获取用户名（从设置或默认值）
+            username = getattr(self, 'username', '用户')
             
-            reply = QMessageBox.question(
-                self,
-                "缺少必要分析",
-                message,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
+            # 创建输出文件夹路径
+            output_folder = self.selected_project_path / "analysis_results"
+            output_folder.mkdir(exist_ok=True)
             
-            if reply == QMessageBox.StandardButton.Yes:
-                # 执行缺失的分析
-                for name, func in missing_analyses:
-                    try:
-                        QMessageBox.information(self, "提示", f"正在执行{name}...")
-                        QApplication.processEvents()
-                        func()
-                    except Exception as e:
-                        QMessageBox.critical(self, "错误", f"执行{name}时出错：{str(e)}")
-                        return
+            # 创建PPT生成器
+            ppt_generator = PPTGenerator(str(output_folder), username)
+            
+            # 生成报告
+            success = ppt_generator.generate_report(parent_widget=self)
+            
+            if not success:
+                # 错误消息已经在generate_report中显示
+                return
                 
-                # 重新检查文件
+        except ImportError as e:
+            # 如果新模块还未完全实现，回退到旧的实现
+            logging.warning(f"无法导入新的PPT生成器: {e}")
+            # 使用旧的PPT生成器
+            try:
+                from core.reporting.ppt import PPTGenerator as OldPPTGenerator
+                
+                # 获取牧场名称
+                farm_name = self.selected_project_path.name
+                
+                # 创建PPT生成器
+                ppt_generator = OldPPTGenerator(self.selected_project_path, farm_name)
+                
+                # 检查必要文件
                 can_generate, error_msg = ppt_generator.check_required_files()
                 if not can_generate:
-                    QMessageBox.warning(self, "错误", "部分分析执行失败，无法生成PPT报告。")
-                    return
-            else:
-                return
-            
-        # 创建进度对话框
-        progress_dialog = ProgressDialog(self)
-        progress_dialog.setWindowTitle("生成PPT报告")
-        progress_dialog.set_task_info("正在生成PPT报告...")
-        progress_dialog.show()
-        
-        try:
-            # 生成PPT
-            def progress_callback(message, progress):
-                progress_dialog.set_task_info(message)
-                progress_dialog.update_progress(progress)
-                QApplication.processEvents()
-                
-            ppt_generator.generate_ppt(progress_callback)
-            
-            progress_dialog.close()
-            
-            # 询问是否打开
-            output_file = self.selected_project_path / "analysis_results" / f"{farm_name}牧场遗传改良项目专项服务报告.pptx"
-            reply = QMessageBox.information(
-                self,
-                "生成成功",
-                f"PPT报告已生成！\n\n是否立即打开查看？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                try:
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_file)))
-                except Exception as e:
-                    QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}")
+                    # 解析缺少的文件类型
+                    missing_analyses = []
+                    if "系谱识别情况分析" in error_msg:
+                        missing_analyses.append(("系谱识别情况分析", self.run_pedigree_analysis))
+                    if "母牛关键性状指数" in error_msg:
+                        missing_analyses.append(("母牛关键性状指数", self.run_cow_key_traits))
+                    if "母牛育种指数" in error_msg:
+                        missing_analyses.append(("母牛育种指数", self.run_cow_index_calculation))
                     
-        except Exception as e:
-            progress_dialog.close()
-            QMessageBox.critical(self, "生成失败", f"生成PPT报告时发生错误：\n{str(e)}")
+                    # 构建提示信息
+                    missing_names = [name for name, _ in missing_analyses]
+                    message = f"生成PPT报告需要先完成以下分析：\n\n• " + "\n• ".join(missing_names)
+                    message += "\n\n是否现在自动执行这些分析？"
+                    
+                    reply = QMessageBox.question(
+                        self,
+                        "缺少必要分析",
+                        message,
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    )
+                    
+                    if reply == QMessageBox.StandardButton.Yes:
+                        # 执行缺失的分析
+                        for name, func in missing_analyses:
+                            try:
+                                QMessageBox.information(self, "提示", f"正在执行{name}...")
+                                QApplication.processEvents()
+                                func()
+                            except Exception as e:
+                                QMessageBox.critical(self, "错误", f"执行{name}时出错：{str(e)}")
+                                return
+                        
+                        # 重新检查文件
+                        can_generate, error_msg = ppt_generator.check_required_files()
+                        if not can_generate:
+                            QMessageBox.warning(self, "错误", "部分分析执行失败，无法生成PPT报告。")
+                            return
+                    else:
+                        return
+                    
+                # 创建进度对话框
+                progress_dialog = ProgressDialog(self)
+                progress_dialog.setWindowTitle("生成PPT报告")
+                progress_dialog.set_task_info("正在生成PPT报告...")
+                progress_dialog.show()
+                
+                # 生成PPT
+                def progress_callback(message, progress):
+                    progress_dialog.set_task_info(message)
+                    progress_dialog.update_progress(progress)
+                    QApplication.processEvents()
+                    
+                ppt_generator.generate_ppt(progress_callback)
+                
+                progress_dialog.close()
+                
+                # 询问是否打开
+                output_file = self.selected_project_path / "analysis_results" / f"{farm_name}牧场遗传改良项目专项服务报告.pptx"
+                reply = QMessageBox.information(
+                    self,
+                    "生成成功",
+                    f"PPT报告已生成！\n\n是否立即打开查看？",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    try:
+                        QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_file)))
+                    except Exception as e:
+                        QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}")
+                        
+            except Exception as e:
+                QMessageBox.critical(self, "生成失败", f"生成PPT报告时发生错误：\n{str(e)}")
     
     def run_pedigree_analysis(self):
         """运行系谱识别情况分析"""
