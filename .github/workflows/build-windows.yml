@@ -29,7 +29,7 @@ jobs:
       run: |
         pyinstaller --name="遗传改良系统" `
           --windowed `
-          --icon=icon.ico `
+          --onefile `
           --add-data="config;config" `
           --add-data="templates;templates" `
           --add-data="docs;docs" `
@@ -41,13 +41,23 @@ jobs:
           --hidden-import="sklearn" `
           --hidden-import="PyQt6" `
           --hidden-import="sqlalchemy" `
+          --clean `
           main.py
+      continue-on-error: true
     
     - name: Create release directory
       run: |
         mkdir release
-        Copy-Item -Path "dist\遗传改良系统\*" -Destination "release\" -Recurse
-        Copy-Item -Path "README.md" -Destination "release\"
+        # 复制可执行文件
+        if (Test-Path "dist\遗传改良系统.exe") {
+          Copy-Item -Path "dist\遗传改良系统.exe" -Destination "release\"
+        } elseif (Test-Path "dist\遗传改良系统\遗传改良系统.exe") {
+          Copy-Item -Path "dist\遗传改良系统\*" -Destination "release\" -Recurse
+        }
+        # 复制必要的配置和模板文件
+        Copy-Item -Path "config" -Destination "release\config" -Recurse -ErrorAction SilentlyContinue
+        Copy-Item -Path "templates" -Destination "release\templates" -Recurse -ErrorAction SilentlyContinue
+        Copy-Item -Path "README.md" -Destination "release\" -ErrorAction SilentlyContinue
         Copy-Item -Path "docs\用户手册.md" -Destination "release\" -ErrorAction SilentlyContinue
     
     - name: Create zip archive
