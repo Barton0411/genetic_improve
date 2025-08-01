@@ -88,6 +88,7 @@ jobs:
           --collect-all="utils" `
           --collect-all="config" `
           --clean `
+          --console `
           main.py
       continue-on-error: true
     

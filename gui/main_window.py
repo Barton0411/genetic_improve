@@ -338,29 +338,47 @@ class DragDropArea(QFrame):
 
 class MainWindow(QMainWindow):
     def __init__(self, username=None):
-        super().__init__()
-        self.settings = Settings()
-        self.username = username
-        self.content_stack = QStackedWidget()
-        self.selected_project_path = None
-        self.templates_path = Path(__file__).parent.parent / "templates"
-        
-        # 导入版本信息
-        from version import get_version
-        self.version = get_version()
-        
-        # 创建所有页面实例
-        self.cow_key_traits_page = CowKeyTraitsPage(parent=self)
-        self.bull_key_traits_page = BullKeyTraitsPage(parent=self)
-        self.index_calculation_page = IndexCalculationPage(parent=self)
-        self.mated_bull_key_traits_page = MatedBullKeyTraitsPage(parent=self)
-        # 添加新的近交分析页面实例
-        self.inbreeding_page = InbreedingPage(parent=self)  # 新增
-        
-        self.setup_ui()
-        # Delay database update until after window is shown
-        # self.check_and_update_database_on_startup()
-        self._db_update_triggered = False  # Flag to ensure update only happens once
+        try:
+            logging.info(f"MainWindow.__init__ started with username: {username}")
+            super().__init__()
+            logging.info("QMainWindow initialized")
+            
+            self.settings = Settings()
+            self.username = username
+            self.content_stack = QStackedWidget()
+            self.selected_project_path = None
+            self.templates_path = Path(__file__).parent.parent / "templates"
+            
+            # 导入版本信息
+            from version import get_version
+            self.version = get_version()
+            logging.info(f"Version: {self.version}")
+            
+            # 创建所有页面实例
+            logging.info("Creating page instances...")
+            self.cow_key_traits_page = CowKeyTraitsPage(parent=self)
+            logging.info("CowKeyTraitsPage created")
+            self.bull_key_traits_page = BullKeyTraitsPage(parent=self)
+            logging.info("BullKeyTraitsPage created")
+            self.index_calculation_page = IndexCalculationPage(parent=self)
+            logging.info("IndexCalculationPage created")
+            self.mated_bull_key_traits_page = MatedBullKeyTraitsPage(parent=self)
+            logging.info("MatedBullKeyTraitsPage created")
+            # 添加新的近交分析页面实例
+            self.inbreeding_page = InbreedingPage(parent=self)  # 新增
+            logging.info("InbreedingPage created")
+            
+            logging.info("Setting up UI...")
+            self.setup_ui()
+            logging.info("UI setup completed")
+            # Delay database update until after window is shown
+            # self.check_and_update_database_on_startup()
+            self._db_update_triggered = False  # Flag to ensure update only happens once
+            
+            logging.info("MainWindow.__init__ completed successfully")
+        except Exception as e:
+            logging.exception(f"Error in MainWindow.__init__: {e}")
+            raise
 
     def showEvent(self, event):
         """Override showEvent to trigger database update after window is shown"""
