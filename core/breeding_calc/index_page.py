@@ -19,7 +19,12 @@ class IndexCalculationPage(QWidget):
         self.current_weight_name = None
         self.setup_ui()
         # 初始化时就更新权重列表
-        self.update_weight_list()
+        try:
+            self.update_weight_list()
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to update weight list during initialization: {e}")
+            # 继续初始化，避免崩溃
 
     def setup_ui(self):
         main_layout = QHBoxLayout(self)
@@ -187,12 +192,17 @@ class IndexCalculationPage(QWidget):
         """更新权重列表"""
         self.weight_list.clear()
  
-        # 直接从计算器加载权重
-        weights = self.index_calculator.load_weights()
-        for name in weights.keys():
-            item = QListWidgetItem(name)
-            item.setData(Qt.ItemDataRole.UserRole, name)
-            self.weight_list.addItem(item)
+        try:
+            # 直接从计算器加载权重
+            weights = self.index_calculator.load_weights()
+            for name in weights.keys():
+                item = QListWidgetItem(name)
+                item.setData(Qt.ItemDataRole.UserRole, name)
+                self.weight_list.addItem(item)
+        except Exception as e:
+            import logging
+            logging.error(f"Error loading weights: {e}")
+            # 如果加载失败，至少保证程序不崩溃
 
     def on_weight_selected(self, item):
         """处理权重选择"""

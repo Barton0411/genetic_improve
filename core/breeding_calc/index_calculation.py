@@ -46,14 +46,37 @@ class IndexCalculation(BaseCowCalculation):
     @staticmethod
     def get_global_weights_path() -> Path:
         """获取全局权重配置文件路径"""
-        # 找到genetic_projects目录
-        current_dir = Path(__file__).resolve().parent  # core/breeding_calc
-        while current_dir.name != 'genetic_improve':
-            current_dir = current_dir.parent
+        import sys
+        import os
         
-        # genetic_projects是genetic_improve的同级目录
-        weights_path = current_dir.parent / "genetic_projects" / "index_weights"
-        weights_path.mkdir(parents=True, exist_ok=True)
+        # 在打包的应用中，使用用户数据目录
+        if hasattr(sys, '_MEIPASS'):
+            # Windows: C:\Users\<username>\AppData\Local\genetic_improve
+            # Mac: ~/Library/Application Support/genetic_improve
+            if sys.platform == 'win32':
+                app_data = Path(os.environ['LOCALAPPDATA']) / 'genetic_improve'
+            else:
+                app_data = Path.home() / 'Library' / 'Application Support' / 'genetic_improve'
+            weights_path = app_data / "index_weights"
+        else:
+            # 开发环境，使用原来的路径
+            current_dir = Path(__file__).resolve().parent  # core/breeding_calc
+            while current_dir.name != 'genetic_improve':
+                current_dir = current_dir.parent
+            
+            # genetic_projects是genetic_improve的同级目录
+            weights_path = current_dir.parent / "genetic_projects" / "index_weights"
+        
+        try:
+            weights_path.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to create weights directory: {e}")
+            # 返回临时目录作为备选
+            import tempfile
+            weights_path = Path(tempfile.gettempdir()) / "genetic_improve_weights"
+            weights_path.mkdir(parents=True, exist_ok=True)
+            
         return weights_path
         
     def load_weights(self) -> Dict[str, Dict[str, float]]:

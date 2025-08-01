@@ -356,17 +356,46 @@ class MainWindow(QMainWindow):
             
             # 创建所有页面实例
             logging.info("Creating page instances...")
-            self.cow_key_traits_page = CowKeyTraitsPage(parent=self)
-            logging.info("CowKeyTraitsPage created")
-            self.bull_key_traits_page = BullKeyTraitsPage(parent=self)
-            logging.info("BullKeyTraitsPage created")
-            self.index_calculation_page = IndexCalculationPage(parent=self)
-            logging.info("IndexCalculationPage created")
-            self.mated_bull_key_traits_page = MatedBullKeyTraitsPage(parent=self)
-            logging.info("MatedBullKeyTraitsPage created")
+            try:
+                self.cow_key_traits_page = CowKeyTraitsPage(parent=self)
+                logging.info("CowKeyTraitsPage created")
+            except Exception as e:
+                logging.exception(f"Failed to create CowKeyTraitsPage: {e}")
+                raise
+                
+            try:
+                self.bull_key_traits_page = BullKeyTraitsPage(parent=self)
+                logging.info("BullKeyTraitsPage created")
+            except Exception as e:
+                logging.exception(f"Failed to create BullKeyTraitsPage: {e}")
+                raise
+                
+            try:
+                logging.info("Creating IndexCalculationPage...")
+                self.index_calculation_page = IndexCalculationPage(parent=self)
+                logging.info("IndexCalculationPage created")
+            except Exception as e:
+                logging.exception(f"Failed to create IndexCalculationPage: {e}")
+                # 创建一个空的占位页面避免崩溃
+                self.index_calculation_page = QWidget()
+                logging.warning("Using placeholder for IndexCalculationPage")
+                
+            try:
+                self.mated_bull_key_traits_page = MatedBullKeyTraitsPage(parent=self)
+                logging.info("MatedBullKeyTraitsPage created")
+            except Exception as e:
+                logging.exception(f"Failed to create MatedBullKeyTraitsPage: {e}")
+                self.mated_bull_key_traits_page = QWidget()
+                logging.warning("Using placeholder for MatedBullKeyTraitsPage")
+                
             # 添加新的近交分析页面实例
-            self.inbreeding_page = InbreedingPage(parent=self)  # 新增
-            logging.info("InbreedingPage created")
+            try:
+                self.inbreeding_page = InbreedingPage(parent=self)  # 新增
+                logging.info("InbreedingPage created")
+            except Exception as e:
+                logging.exception(f"Failed to create InbreedingPage: {e}")
+                self.inbreeding_page = QWidget()
+                logging.warning("Using placeholder for InbreedingPage")
             
             logging.info("Setting up UI...")
             self.setup_ui()
