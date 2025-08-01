@@ -35,6 +35,12 @@ opencv-python>=4.5.0
 
 # 其他工具
 python-dateutil>=2.8.0  # 日期处理
+xlsxwriter>=3.0.0  # Excel文件写入
+scipy>=1.7.0  # 科学计算
+joblib>=1.0.0  # 并行处理
+requests>=2.25.0  # HTTP请求
+Pillow>=8.0.0  # 图像处理（PIL）
+cffi>=1.14.0  # C外部函数接口（cryptography依赖）
 
 # 注意：如果在macOS上安装PyQt6遇到问题，可能需要：
 # brew install qt@6

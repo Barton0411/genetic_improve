@@ -37,21 +37,46 @@ jobs:
           --add-data="*.jpg;." `
           --add-data="*.ico;." `
           --hidden-import="pandas" `
+          --hidden-import="pandas._libs" `
+          --hidden-import="pandas._libs.tslibs.timedeltas" `
           --hidden-import="numpy" `
+          --hidden-import="numpy.core._multiarray_umath" `
           --hidden-import="openpyxl" `
+          --hidden-import="xlrd" `
+          --hidden-import="xlsxwriter" `
           --hidden-import="matplotlib" `
           --hidden-import="matplotlib.pyplot" `
           --hidden-import="matplotlib.backends.backend_qt5agg" `
+          --hidden-import="seaborn" `
           --hidden-import="scipy" `
+          --hidden-import="scipy.special._ufuncs_cxx" `
+          --hidden-import="scipy.stats" `
           --hidden-import="sklearn" `
+          --hidden-import="sklearn.utils._weight_vector" `
+          --hidden-import="sklearn.preprocessing" `
+          --hidden-import="sklearn.neighbors._typedefs" `
+          --hidden-import="sklearn.tree._tree" `
+          --hidden-import="sklearn.ensemble._forest" `
+          --hidden-import="joblib" `
           --hidden-import="PyQt6" `
+          --hidden-import="PyQt6.sip" `
           --hidden-import="sqlalchemy" `
+          --hidden-import="sqlalchemy.sql.default_comparator" `
           --hidden-import="cv2" `
+          --hidden-import="PIL" `
+          --hidden-import="PIL.Image" `
+          --hidden-import="networkx" `
+          --hidden-import="dateutil" `
+          --hidden-import="requests" `
+          --hidden-import="cryptography" `
+          --hidden-import="cffi" `
+          --hidden-import="pptx" `
           --hidden-import="gui.main_window" `
           --hidden-import="gui.login_dialog" `
           --hidden-import="gui.splash_screen" `
           --hidden-import="core.data.uploader" `
           --hidden-import="core.breeding_calc" `
+          --hidden-import="core.breeding_calc.traits_calculation" `
           --hidden-import="core.grouping.group_manager" `
           --hidden-import="core.matching.complete_mating_executor" `
           --hidden-import="core.inbreeding.inbreeding_page" `
@@ -62,8 +87,6 @@ jobs:
           --collect-all="core" `
           --collect-all="utils" `
           --collect-all="config" `
-          --exclude-module="scipy" `
-          --exclude-module="sklearn" `
           --clean `
           main.py
       continue-on-error: true
