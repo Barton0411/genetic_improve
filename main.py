@@ -2,7 +2,7 @@ import sys
 import os
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QDialog
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 
 # 延迟导入重量级模块
 def lazy_import():
