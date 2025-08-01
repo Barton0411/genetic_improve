@@ -1,0 +1,82 @@
+name: Build Windows Executable
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Build executable with PyInstaller
+      run: |
+        pyinstaller --name="遗传改良系统" `
+          --windowed `
+          --icon=icon.ico `
+          --add-data="config;config" `
+          --add-data="templates;templates" `
+          --add-data="docs;docs" `
+          --hidden-import="pandas" `
+          --hidden-import="numpy" `
+          --hidden-import="openpyxl" `
+          --hidden-import="matplotlib" `
+          --hidden-import="scipy" `
+          --hidden-import="sklearn" `
+          --hidden-import="PyQt6" `
+          --hidden-import="sqlalchemy" `
+          main.py
+    
+    - name: Create release directory
+      run: |
+        mkdir release
+        Copy-Item -Path "dist\遗传改良系统\*" -Destination "release\" -Recurse
+        Copy-Item -Path "README.md" -Destination "release\"
+        Copy-Item -Path "docs\用户手册.md" -Destination "release\" -ErrorAction SilentlyContinue
+    
+    - name: Create zip archive
+      run: |
+        Compress-Archive -Path "release\*" -DestinationPath "genetic_improve_system_win64.zip"
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: genetic-improve-system-windows
+        path: genetic_improve_system_win64.zip
+    
+    - name: Create Release
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ github.run_number }}
+        name: Release Build ${{ github.run_number }}
+        body: |
+          自动构建版本 #${{ github.run_number }}
+          
+          更新内容：
+          - 完善个体选配功能：肉牛标记和递进机制
+          - 修复肉牛标记逻辑
+          - 实现真正的递进分配机制
+          - 添加推荐矩阵保存功能
+          - 改进分组同步机制
+          
+          下载后解压即可使用。
+        files: genetic_improve_system_win64.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
