@@ -25,17 +25,14 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
     
-    - name: Build executable with PyInstaller
+    - name: Build executable with PyInstaller (Folder Mode)
       run: |
-        # 直接使用命令行参数构建，避免spec文件的复杂性
+        # 使用文件夹模式，启动更快
         pyinstaller --name="遗传改良系统" `
           --windowed `
           --add-data="config;config" `
           --add-data="templates;templates" `
           --add-data="docs;docs" `
-          --add-data="gui;gui" `
-          --add-data="core;core" `
-          --add-data="utils;utils" `
           --add-data="*.mp4;." `
           --add-data="*.jpg;." `
           --add-data="*.ico;." `
@@ -63,6 +60,9 @@ jobs:
           --collect-all="core" `
           --collect-all="utils" `
           --collect-all="config" `
+          --exclude-module="matplotlib" `
+          --exclude-module="scipy" `
+          --exclude-module="sklearn" `
           --clean `
           main.py
       continue-on-error: true

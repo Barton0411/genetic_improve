@@ -2,10 +2,14 @@ import sys
 import os
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QDialog
-from gui.main_window import MainWindow
-from gui.login_dialog import LoginDialog
-from gui.splash_screen import VideoSplashScreen
 from PyQt6.QtCore import Qt
+
+# 延迟导入重量级模块
+def lazy_import():
+    global MainWindow, LoginDialog, VideoSplashScreen
+    from gui.main_window import MainWindow
+    from gui.login_dialog import LoginDialog
+    from gui.splash_screen import VideoSplashScreen
 
 def main():
     # 设置项目根目录环境变量
@@ -13,6 +17,9 @@ def main():
     os.environ['GENETIC_IMPROVE_ROOT'] = str(root_dir)
     
     app = QApplication(sys.argv)
+    
+    # 延迟导入模块
+    lazy_import()
     
     # 创建并显示启动画面
     splash = VideoSplashScreen()

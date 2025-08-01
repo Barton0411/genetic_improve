@@ -358,7 +358,19 @@ class MainWindow(QMainWindow):
         self.inbreeding_page = InbreedingPage(parent=self)  # 新增
         
         self.setup_ui()
-        self.check_and_update_database_on_startup()
+        # Delay database update until after window is shown
+        # self.check_and_update_database_on_startup()
+        self._db_update_triggered = False  # Flag to ensure update only happens once
+
+    def showEvent(self, event):
+        """Override showEvent to trigger database update after window is shown"""
+        super().showEvent(event)
+        
+        # Only trigger database update once, after the window is first shown
+        if not self._db_update_triggered:
+            self._db_update_triggered = True
+            # Use QTimer to delay the database update slightly
+            QTimer.singleShot(100, self.check_and_update_database_on_startup)
 
     def setup_ui(self):
         self.setWindowTitle(f"奶牛育种智选报告专家 v{self.version}")
@@ -1367,6 +1379,10 @@ class MainWindow(QMainWindow):
 
     def check_and_update_database_on_startup(self):
         """在应用启动时自动检查和更新数据库"""
+        # Ensure the main window is visible before showing progress dialog
+        if not self.isVisible():
+            return
+            
         self.progress_dialog = ProgressDialog(self)
         self.progress_dialog.setWindowTitle("数据库更新")
         self.progress_dialog.title_label.setText("正在检查和更新本地数据库...")
@@ -1393,12 +1409,14 @@ class MainWindow(QMainWindow):
 
     def on_db_update_finished(self):
         """处理数据库更新完成的信号"""
-        self.progress_dialog.close()
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.close()
         QMessageBox.information(self, "更新完成", "本地数据库已成功检查和更新。")
 
     def on_db_update_error(self, error_message: str):
         """处理数据库更新错误的信号"""
-        self.progress_dialog.close()
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.close()
         
         # 判断错误类型并给出友好提示
         friendly_message = "数据库更新失败"
