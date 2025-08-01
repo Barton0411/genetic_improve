@@ -25,92 +25,46 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
     
-    - name: Create spec file
-      run: |
-        @"
-# -*- mode: python ; coding: utf-8 -*-
-import os
-import sys
-
-block_cipher = None
-
-a = Analysis(
-    ['main.py'],
-    pathex=['.'],
-    binaries=[],
-    datas=[
-        ('config', 'config'),
-        ('templates', 'templates'),
-        ('docs', 'docs'),
-        ('gui', 'gui'),
-        ('core', 'core'),
-        ('utils', 'utils'),
-        ('*.mp4', '.'),
-        ('*.jpg', '.'),
-        ('*.ico', '.'),
-    ],
-    hiddenimports=[
-        'pandas', 'numpy', 'openpyxl', 'matplotlib', 'scipy', 'sklearn',
-        'PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets',
-        'PyQt6.QtMultimedia', 'PyQt6.QtMultimediaWidgets',
-        'sqlalchemy', 'cv2', 'cryptography', 'dateutil', 'networkx', 'seaborn',
-        'gui', 'gui.main_window', 'gui.login_dialog', 'gui.splash_screen',
-        'gui.dialogs', 'gui.progress', 'gui.worker', 'gui.db_update_worker',
-        'gui.allocation_dialog', 'gui.matching_worker', 'gui.recommendation_worker',
-        'gui.simple_recommendation_worker', 'gui.auto_grouping_dialog',
-        'core', 'core.data', 'core.data.uploader', 'core.data.processor',
-        'core.data.update_manager', 'core.data.data_loader',
-        'core.breeding_calc', 'core.breeding_calc.cow_traits_calc',
-        'core.breeding_calc.bull_traits_calc', 'core.breeding_calc.index_page',
-        'core.breeding_calc.mated_bull_traits_calc',
-        'core.grouping', 'core.grouping.group_manager',
-        'core.matching', 'core.matching.complete_mating_executor',
-        'core.matching.cycle_based_matcher', 'core.matching.matrix_recommendation_generator',
-        'core.matching.allocation_utils', 'core.matching.models',
-        'core.inbreeding', 'core.inbreeding.inbreeding_page',
-        'core.inbreeding.inbreeding_calculator', 'core.inbreeding.animal',
-        'core.report', 'core.report.ppt_generator',
-        'utils', 'utils.file_manager', 'utils.database',
-        'config', 'config.settings', 'config.index_library',
-    ],
-    hookspath=[],
-    hooksconfig={},
-    runtime_hooks=[],
-    excludes=['test', 'tests'],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
-    noarchive=False,
-)
-
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name='遗传改良系统',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    runtime_tmpdir=None,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon='icon.ico'
-)
-"@ | Out-File -FilePath "genetic_improve.spec" -Encoding UTF8
-
     - name: Build executable with PyInstaller
       run: |
-        pyinstaller genetic_improve.spec --clean
+        # 直接使用命令行参数构建，避免spec文件的复杂性
+        pyinstaller --name="遗传改良系统" `
+          --windowed `
+          --add-data="config;config" `
+          --add-data="templates;templates" `
+          --add-data="docs;docs" `
+          --add-data="gui;gui" `
+          --add-data="core;core" `
+          --add-data="utils;utils" `
+          --add-data="*.mp4;." `
+          --add-data="*.jpg;." `
+          --add-data="*.ico;." `
+          --hidden-import="pandas" `
+          --hidden-import="numpy" `
+          --hidden-import="openpyxl" `
+          --hidden-import="matplotlib" `
+          --hidden-import="scipy" `
+          --hidden-import="sklearn" `
+          --hidden-import="PyQt6" `
+          --hidden-import="sqlalchemy" `
+          --hidden-import="cv2" `
+          --hidden-import="gui.main_window" `
+          --hidden-import="gui.login_dialog" `
+          --hidden-import="gui.splash_screen" `
+          --hidden-import="core.data.uploader" `
+          --hidden-import="core.breeding_calc" `
+          --hidden-import="core.grouping.group_manager" `
+          --hidden-import="core.matching.complete_mating_executor" `
+          --hidden-import="core.inbreeding.inbreeding_page" `
+          --hidden-import="utils.file_manager" `
+          --hidden-import="config.settings" `
+          --paths="." `
+          --collect-all="gui" `
+          --collect-all="core" `
+          --collect-all="utils" `
+          --collect-all="config" `
+          --clean `
+          main.py
       continue-on-error: true
     
     - name: Create release directory
