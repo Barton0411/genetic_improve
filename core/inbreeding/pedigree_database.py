@@ -229,24 +229,15 @@ class PedigreeDatabase:
                             # 已经是百分比形式，直接除以100
                             gib_value = gib_percentage / 100.0
                         else:
-                            # 没有百分号，假设是数值形式
+                            # 没有百分号，数据库中的值是百分比形式（如18.6代表18.6%）
                             gib_percentage = float(gib_str)
-                            # 判断是否已经是小数形式（0-1之间）还是百分比形式（0-100）
-                            if -10 <= gib_percentage <= 10:
-                                # 看起来像是百分比形式（-10到10之间）
-                                gib_value = gib_percentage / 100.0
-                            else:
-                                # 可能已经是小数形式，或者是大于10的百分比
-                                if gib_percentage > 10:
-                                    # 大于10，应该是百分比
-                                    gib_value = gib_percentage / 100.0
-                                else:
-                                    # 直接使用
-                                    gib_value = gib_percentage
+                            # 始终将其视为百分比，需要除以100转换为小数
+                            gib_value = gib_percentage / 100.0
                         
                         # 验证值是否在合理范围内（允许负值，因为GIB可以是负的）
-                        if gib_value < -0.5 or gib_value > 1:
-                            logging.warning(f"公牛 {bull_reg} 的GIB值 {gib_str} (转换后: {gib_value:.4f}) 超出正常范围(-50%到100%)，将不使用此值")
+                        # 根据实际数据调整范围：允许-30%到100%
+                        if gib_value < -0.3 or gib_value > 1:
+                            logging.warning(f"公牛 {bull_reg} 的GIB值 {gib_str} (转换后: {gib_value:.4f}) 超出正常范围(-30%到100%)，将不使用此值")
                             gib_value = None
                     except (ValueError, TypeError) as e:
                         logging.warning(f"公牛 {bull_reg} 的GIB值 '{row['GIB']}' 无法转换为数值: {e}")
