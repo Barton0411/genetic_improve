@@ -40,6 +40,8 @@ jobs:
           --hidden-import="numpy" `
           --hidden-import="openpyxl" `
           --hidden-import="matplotlib" `
+          --hidden-import="matplotlib.pyplot" `
+          --hidden-import="matplotlib.backends.backend_qt5agg" `
           --hidden-import="scipy" `
           --hidden-import="sklearn" `
           --hidden-import="PyQt6" `
@@ -60,7 +62,6 @@ jobs:
           --collect-all="core" `
           --collect-all="utils" `
           --collect-all="config" `
-          --exclude-module="matplotlib" `
           --exclude-module="scipy" `
           --exclude-module="sklearn" `
           --clean `
