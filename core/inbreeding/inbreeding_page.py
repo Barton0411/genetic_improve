@@ -96,7 +96,7 @@ def setup_chinese_font():
                     plt.rcParams['axes.unicode_minus'] = False
                     import logging
                     logging.info(f"Using Chinese font from file: {font_path}")
-                    return font_path
+                    return font_name  # 返回字体名称而不是路径
                 except Exception as e:
                     import logging
                     logging.warning(f"Failed to load font from {font_path}: {e}")
@@ -114,21 +114,22 @@ CHINESE_FONT_PATH = setup_chinese_font()
 
 def get_chinese_font_prop(size=10, weight='normal'):
     """获取中文字体属性，如果没有找到中文字体则返回None"""
-    if CHINESE_FONT_PATH and isinstance(CHINESE_FONT_PATH, str):
-        try:
-            return font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=size, weight=weight)
-        except:
-            pass
-    
-    # 如果是Windows系统，尝试直接使用系统字体名称
+    # Windows系统优先使用字体族名称，避免路径问题
     if platform.system() == 'Windows':
         # 使用plt.rcParams中设置的字体
         font_names = plt.rcParams['font.sans-serif']
         if font_names and font_names[0] != 'DejaVu Sans':
             try:
                 return font_manager.FontProperties(family=font_names[0], size=size, weight=weight)
-            except:
-                pass
+            except Exception as e:
+                logging.warning(f"Failed to use font family {font_names[0]}: {e}")
+    
+    # 其他系统或Windows失败时，尝试使用字体文件路径
+    if CHINESE_FONT_PATH and isinstance(CHINESE_FONT_PATH, str) and os.path.exists(CHINESE_FONT_PATH):
+        try:
+            return font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=size, weight=weight)
+        except Exception as e:
+            logging.warning(f"Failed to use font file {CHINESE_FONT_PATH}: {e}")
     
     return None
 
@@ -217,6 +218,12 @@ class PedigreeDialog(QDialog):
             offspring_layout = QVBoxLayout(offspring_tab)
             self.create_inbreeding_details_widget(offspring_layout, self.offspring_details, "潜在后代近交详情")
             tab_widget.addTab(offspring_tab, "潜在后代近交详情")
+            
+            # 添加计算过程标签页
+            calc_tab = QWidget()
+            calc_layout = QVBoxLayout(calc_tab)
+            self.create_calculation_process_widget(calc_layout, self.offspring_details)
+            tab_widget.addTab(calc_tab, "计算过程")
         
         splitter.addWidget(lower_widget)
         
@@ -325,6 +332,165 @@ class PedigreeDialog(QDialog):
             # 初始选择第一个祖先
             if ancestor_combo.count() > 0:
                 ancestor_combo.setCurrentIndex(0)
+    
+    def create_calculation_process_widget(self, layout, details):
+        """创建显示近交系数计算过程的组件"""
+        if not details or 'common_ancestors' not in details:
+            layout.addWidget(QLabel("没有找到计算详情"))
+            return
+            
+        # 创建HTML内容显示计算过程
+        html_content = self._generate_calculation_html(details)
+        
+        # 创建文本浏览器显示HTML
+        text_browser = QTextEdit()
+        text_browser.setHtml(html_content)
+        text_browser.setReadOnly(True)
+        layout.addWidget(text_browser)
+    
+    def _generate_calculation_html(self, details):
+        """生成近交系数计算过程的HTML内容"""
+        html_content = """
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; padding: 10px; }
+                h2 { color: #2c3e50; }
+                h3 { color: #34495e; margin-top: 15px; }
+                .formula { 
+                    background-color: #f0f0f0; 
+                    padding: 10px; 
+                    margin: 10px 0;
+                    font-family: 'Courier New', monospace;
+                    border-radius: 5px;
+                    border: 1px solid #ddd;
+                }
+                .ancestor { 
+                    background-color: #e8f4f8; 
+                    padding: 8px; 
+                    margin: 8px 0;
+                    border-left: 3px solid #3498db;
+                }
+                .warning { color: #e74c3c; font-weight: bold; }
+                .result { 
+                    background-color: #d5f4e6; 
+                    padding: 10px; 
+                    margin: 15px 0;
+                    font-weight: bold;
+                    border-radius: 5px;
+                }
+                table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+                th { background-color: #3498db; color: white; padding: 8px; text-align: left; }
+                td { border: 1px solid #ddd; padding: 8px; }
+                tr:nth-child(even) { background-color: #f2f2f2; }
+                .contribution { color: #27ae60; font-weight: bold; }
+                .path-info { font-size: 0.9em; color: #666; }
+            </style>
+        </head>
+        <body>
+        """
+        
+        # 添加标题
+        html_content += f"<h2>近交系数计算过程</h2>"
+        
+        # 添加基本信息
+        total_inbreeding = details.get('system', 0.0)
+        html_content += f"<p><strong>母牛:</strong> {self.cow_id}</p>"
+        html_content += f"<p><strong>配种公牛:</strong> {self.bull_id}</p>"
+        html_content += f"<div class='result'>计算结果: F = {total_inbreeding:.4f} ({total_inbreeding*100:.2f}%)</div>"
+        
+        # 添加Wright公式说明
+        html_content += """
+        <h3>计算公式 (Wright公式)</h3>
+        <div class='formula'>
+            F = Σ [(1/2)^(n₁+n₂+1) × (1 + F_CA)]<br>
+            <br>
+            其中：<br>
+            - n₁ = 从父亲到共同祖先的世代数<br>
+            - n₂ = 从母亲到共同祖先的世代数<br>
+            - F_CA = 共同祖先的近交系数（如果有GIB值则使用，否则为0）<br>
+            - Σ = 对所有共同祖先求和
+        </div>
+        """
+        
+        # 添加计算步骤
+        html_content += "<h3>计算步骤</h3>"
+        
+        if 'common_ancestors' in details and details['common_ancestors']:
+            # 创建表格显示每个共同祖先的贡献
+            html_content += """
+            <table>
+                <tr>
+                    <th>共同祖先</th>
+                    <th>路径长度(n₁+n₂)</th>
+                    <th>祖先近交系数(F_CA)</th>
+                    <th>计算公式</th>
+                    <th>贡献值</th>
+                    <th>贡献率</th>
+                </tr>
+            """
+            
+            # 对共同祖先按贡献排序
+            sorted_ancestors = sorted(details['common_ancestors'].items(), 
+                                    key=lambda x: x[1], reverse=True)
+            
+            for ancestor_id, contribution in sorted_ancestors:
+                if contribution < 0.0001:  # 忽略太小的贡献
+                    continue
+                
+                # 获取路径信息（如果有）
+                path_info = ""
+                ancestor_f = 0.0
+                path_lengths = "未知"
+                
+                if 'paths' in details and ancestor_id in details['paths']:
+                    # 从路径信息中提取长度（简化显示）
+                    paths = details['paths'][ancestor_id]
+                    if paths:
+                        # 假设路径格式中包含长度信息
+                        path_info = f"<br><span class='path-info'>共{len(paths)}条路径</span>"
+                
+                # 计算贡献百分比
+                contribution_percent = (contribution / total_inbreeding * 100) if total_inbreeding > 0 else 0
+                
+                # 构建表格行
+                html_content += f"""
+                <tr>
+                    <td>{ancestor_id}{path_info}</td>
+                    <td>{path_lengths}</td>
+                    <td>{ancestor_f:.4f}</td>
+                    <td>(1/2)^(n₁+n₂+1) × (1 + {ancestor_f:.4f})</td>
+                    <td class='contribution'>{contribution:.6f}</td>
+                    <td>{contribution_percent:.2f}%</td>
+                </tr>
+                """
+            
+            html_content += "</table>"
+            
+            # 添加总结
+            html_content += f"""
+            <h3>计算总结</h3>
+            <p>共找到 <strong>{len(details['common_ancestors'])}</strong> 个共同祖先</p>
+            <p>近交系数总和: <strong class='result'>F = {total_inbreeding:.4f} ({total_inbreeding*100:.2f}%)</strong></p>
+            """
+            
+            # 添加解释
+            if total_inbreeding > 0.0625:
+                html_content += "<p class='warning'>⚠️ 注意：近交系数超过6.25%，建议谨慎考虑此配对</p>"
+            elif total_inbreeding > 0.03125:
+                html_content += "<p style='color: #f39c12;'>⚠️ 提示：近交系数超过3.125%，需要注意潜在风险</p>"
+            else:
+                html_content += "<p style='color: #27ae60;'>✓ 近交系数在安全范围内</p>"
+                
+        else:
+            html_content += "<p>未找到共同祖先，近交系数为0</p>"
+        
+        html_content += """
+        </body>
+        </html>
+        """
+        
+        return html_content
         
     def get_project_path(self):
         """获取项目路径"""
