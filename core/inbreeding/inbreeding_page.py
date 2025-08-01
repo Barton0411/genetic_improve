@@ -25,7 +25,9 @@ import os
 # 设置matplotlib中文字体
 def setup_chinese_font():
     """设置matplotlib的中文字体支持"""
-    if platform.system() == 'Darwin':  # macOS
+    system = platform.system()
+    
+    if system == 'Darwin':  # macOS
         # 尝试多个字体路径
         font_paths = [
             '/Library/Fonts/Arial Unicode.ttf',
@@ -49,13 +51,86 @@ def setup_chinese_font():
                 except Exception:
                     continue
                     
-    # Windows和其他系统的默认设置
+    elif system == 'Windows':  # Windows
+        # Windows系统的中文字体
+        chinese_fonts = [
+            'Microsoft YaHei',      # 微软雅黑
+            'SimHei',              # 黑体
+            'SimSun',              # 宋体
+            'Microsoft JhengHei',   # 微软正黑体
+            'FangSong',            # 仿宋
+            'KaiTi',               # 楷体
+            'NSimSun'              # 新宋体
+        ]
+        
+        # 尝试设置中文字体
+        for font_name in chinese_fonts:
+            try:
+                # 检查字体是否存在
+                font_list = [f.name for f in font_manager.fontManager.ttflist]
+                if font_name in font_list:
+                    plt.rcParams['font.sans-serif'] = [font_name, 'DejaVu Sans']
+                    plt.rcParams['axes.unicode_minus'] = False
+                    import logging
+                    logging.info(f"Using Chinese font: {font_name}")
+                    return font_name
+            except Exception as e:
+                import logging
+                logging.warning(f"Failed to set font {font_name}: {e}")
+                continue
+        
+        # 如果没有找到合适的中文字体，尝试使用系统字体文件
+        windows_font_paths = [
+            'C:/Windows/Fonts/msyh.ttc',     # 微软雅黑
+            'C:/Windows/Fonts/simhei.ttf',   # 黑体
+            'C:/Windows/Fonts/simsun.ttc',   # 宋体
+        ]
+        
+        for font_path in windows_font_paths:
+            if os.path.exists(font_path):
+                try:
+                    font_manager.fontManager.addfont(font_path)
+                    font = font_manager.FontProperties(fname=font_path)
+                    font_name = font.get_name()
+                    plt.rcParams['font.sans-serif'] = [font_name, 'DejaVu Sans']
+                    plt.rcParams['axes.unicode_minus'] = False
+                    import logging
+                    logging.info(f"Using Chinese font from file: {font_path}")
+                    return font_path
+                except Exception as e:
+                    import logging
+                    logging.warning(f"Failed to load font from {font_path}: {e}")
+                    continue
+                    
+    # 默认设置（如果找不到中文字体）
     plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
     plt.rcParams['axes.unicode_minus'] = False
+    import logging
+    logging.warning("No Chinese font found, using default font")
     return None
 
 # 初始化时调用
 CHINESE_FONT_PATH = setup_chinese_font()
+
+def get_chinese_font_prop(size=10, weight='normal'):
+    """获取中文字体属性，如果没有找到中文字体则返回None"""
+    if CHINESE_FONT_PATH and isinstance(CHINESE_FONT_PATH, str):
+        try:
+            return font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=size, weight=weight)
+        except:
+            pass
+    
+    # 如果是Windows系统，尝试直接使用系统字体名称
+    if platform.system() == 'Windows':
+        # 使用plt.rcParams中设置的字体
+        font_names = plt.rcParams['font.sans-serif']
+        if font_names and font_names[0] != 'DejaVu Sans':
+            try:
+                return font_manager.FontProperties(family=font_names[0], size=size, weight=weight)
+            except:
+                pass
+    
+    return None
 
 from .models import InbreedingDetailModel, AbnormalDetailModel, StatisticsModel
 from gui.progress import ProgressDialog
@@ -538,8 +613,8 @@ class PedigreeDialog(QDialog):
                 naab_y_position = y + node_height/2 - node_height * 0.325
                 
                 # 在方框中显示REG号（下部）
-                if CHINESE_FONT_PATH:
-                    text_font = font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=reg_fontsize)
+                text_font = get_chinese_font_prop(size=reg_fontsize)
+                if text_font:
                     ax.text(
                         x, reg_y_position,  # REG号位置，框的下部
                         display_text,
@@ -562,8 +637,8 @@ class PedigreeDialog(QDialog):
                 
                 # 在方框中显示NAAB号（上部）（加粗显示）
                 if naab and node_id not in ["预期后代", "父亲未知", "母亲未知"]:
-                    if CHINESE_FONT_PATH:
-                        naab_font = font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=naab_fontsize, weight='bold')
+                    naab_font = get_chinese_font_prop(size=naab_fontsize, weight='bold')
+                    if naab_font:
                         ax.text(
                             x, naab_y_position,  # NAAB号位置，框的上部
                             naab_text,
@@ -587,8 +662,8 @@ class PedigreeDialog(QDialog):
             
             # 设置图表属性
             # 使用系统字体设置标题
-            if CHINESE_FONT_PATH:
-                title_font = font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=18)
+            title_font = get_chinese_font_prop(size=18)
+            if title_font:
                 ax.set_title("血缘关系图 (6代)", fontproperties=title_font)
             else:
                 ax.set_title("血缘关系图 (6代)", fontsize=18)
@@ -1272,8 +1347,8 @@ class MaximizedPedigreeDialog(QDialog):
                 naab_y_position = y + self.node_height/2 - self.node_height * 0.325
                 
                 # 在方框中显示REG号（下部）
-                if CHINESE_FONT_PATH:
-                    text_font = font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=self.base_node_text_size)
+                text_font = get_chinese_font_prop(size=self.base_node_text_size)
+                if text_font:
                     reg_text = ax.text(
                         x, reg_y_position,
                         display_text,
@@ -1301,8 +1376,8 @@ class MaximizedPedigreeDialog(QDialog):
                 
                 # 在方框中显示NAAB号（上部）（加粗显示）
                 if naab and animal_id not in ["预期后代", "父亲未知", "母亲未知"]:
-                    if CHINESE_FONT_PATH:
-                        naab_font = font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=self.base_naab_size, weight='bold')
+                    naab_font = get_chinese_font_prop(size=self.base_naab_size, weight='bold')
+                    if naab_font:
                         naab_text_obj = ax.text(
                             x, naab_y_position,
                             naab_text,
@@ -1331,8 +1406,8 @@ class MaximizedPedigreeDialog(QDialog):
             
             # 设置图表属性
             title_size = self.node_height * 3
-            if CHINESE_FONT_PATH:
-                title_font = font_manager.FontProperties(fname=CHINESE_FONT_PATH, size=title_size)
+            title_font = get_chinese_font_prop(size=title_size)
+            if title_font:
                 title_obj = ax.set_title("血缘关系图 (6代完整视图)", fontproperties=title_font)
             else:
                 title_obj = ax.set_title("血缘关系图 (6代完整视图)", size=title_size)
