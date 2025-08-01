@@ -18,10 +18,10 @@ class VideoSplashScreen(QSplashScreen):
         self.height = self.screen_height
         self.setGeometry(0, 0, self.width, self.height)
         
-        # 设置窗口属性
-        self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | 
-                          Qt.WindowType.FramelessWindowHint |
-                          Qt.WindowType.Window)
+        # 设置窗口属性，移除WindowStaysOnTopHint避免阻塞主窗口
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint |
+                          Qt.WindowType.Window |
+                          Qt.WindowType.SplashScreen)  # 使用SplashScreen类型
 
         # 创建容器窗口小部件
         self.container = QWidget(self)
@@ -48,6 +48,20 @@ class VideoSplashScreen(QSplashScreen):
 
     def startVideo(self):
         video_path = str(Path(__file__).parent.parent / "startup.mp4")
+        
+        # 在打包的应用中，资源可能在不同位置
+        import sys
+        if hasattr(sys, '_MEIPASS'):
+            # PyInstaller临时文件夹
+            alt_path = Path(sys._MEIPASS) / "startup.mp4"
+            if alt_path.exists():
+                video_path = str(alt_path)
+        
+        # 如果视频文件不存在，直接关闭启动画面
+        if not Path(video_path).exists():
+            print(f"Warning: Video file not found at {video_path}")
+            self.close()
+            return
         if Path(video_path).exists():
             self.video_capture = cv2.VideoCapture(video_path)
             if self.video_capture.isOpened():

@@ -369,8 +369,10 @@ class MainWindow(QMainWindow):
         # Only trigger database update once, after the window is first shown
         if not self._db_update_triggered:
             self._db_update_triggered = True
-            # Use QTimer to delay the database update slightly
-            QTimer.singleShot(100, self.check_and_update_database_on_startup)
+            # Use QTimer to delay the database update more on Windows
+            # Windows needs more time to fully render the window
+            delay = 1000 if sys.platform == 'win32' else 100
+            QTimer.singleShot(delay, self.check_and_update_database_on_startup)
 
     def setup_ui(self):
         self.setWindowTitle(f"奶牛育种智选报告专家 v{self.version}")
@@ -1382,12 +1384,23 @@ class MainWindow(QMainWindow):
         # Ensure the main window is visible before showing progress dialog
         if not self.isVisible():
             return
+        
+        # Force the window to update on Windows
+        if sys.platform == 'win32':
+            QApplication.processEvents()
             
-        self.progress_dialog = ProgressDialog(self)
-        self.progress_dialog.setWindowTitle("数据库更新")
-        self.progress_dialog.title_label.setText("正在检查和更新本地数据库...")
-        self.progress_dialog.progress_bar.setRange(0, 0)  # 不显示具体进度
-        self.progress_dialog.show()
+        try:
+            self.progress_dialog = ProgressDialog(self)
+            self.progress_dialog.setWindowTitle("数据库更新")
+            self.progress_dialog.title_label.setText("正在检查和更新本地数据库...")
+            self.progress_dialog.progress_bar.setRange(0, 0)  # 不显示具体进度
+            # Make sure the dialog is non-modal
+            self.progress_dialog.setWindowModality(Qt.WindowModality.NonModal)
+            self.progress_dialog.show()
+        except Exception as e:
+            logging.error(f"创建进度对话框失败: {e}")
+            # If dialog creation fails, still try to update database
+            pass
 
         # 创建线程和 worker
         self.db_update_thread = QThread()
@@ -1409,14 +1422,22 @@ class MainWindow(QMainWindow):
 
     def on_db_update_finished(self):
         """处理数据库更新完成的信号"""
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.close()
+        try:
+            if hasattr(self, 'progress_dialog') and self.progress_dialog:
+                self.progress_dialog.close()
+                self.progress_dialog = None
+        except:
+            pass
         QMessageBox.information(self, "更新完成", "本地数据库已成功检查和更新。")
 
     def on_db_update_error(self, error_message: str):
         """处理数据库更新错误的信号"""
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.close()
+        try:
+            if hasattr(self, 'progress_dialog') and self.progress_dialog:
+                self.progress_dialog.close()
+                self.progress_dialog = None
+        except:
+            pass
         
         # 判断错误类型并给出友好提示
         friendly_message = "数据库更新失败"

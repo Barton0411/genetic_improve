@@ -18,9 +18,8 @@ class LoginDialog(QDialog):
         self.setWindowTitle("奶牛育种智选报告专家 - 登录")
         self.setFixedSize(350, 200)
         
-        # 设置窗口标志，确保总是在最前面
+        # 设置窗口标志，移除WindowStaysOnTopHint避免Windows上的层级问题
         self.setWindowFlags(
-            Qt.WindowType.WindowStaysOnTopHint |  # 窗口保持在最前
             Qt.WindowType.CustomizeWindowHint |   # 自定义窗口外观
             Qt.WindowType.WindowTitleHint |      # 显示标题栏
             Qt.WindowType.WindowCloseButtonHint  # 显示关闭按钮
