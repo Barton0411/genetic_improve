@@ -22,6 +22,7 @@ class CycleBasedMatcher:
         self.recommendations_df = None
         self.bull_data = None
         self.bull_inventory = {}  # 公牛库存 {bull_id: remaining_count}
+        self.bull_scores = {}  # 公牛得分 {bull_id: score}
         self.allocation_results = []  # 分配结果
         self.inbreeding_threshold = 3.125  # 默认近交系数阈值
         self.control_defect_genes = True  # 默认控制隐性基因
@@ -56,7 +57,39 @@ class CycleBasedMatcher:
             if bull_data_path.exists():
                 self.bull_data = pd.read_excel(bull_data_path)
                 
-                # 初始化库存
+                # 加载公牛指数得分
+                bull_index_file = project_path / "analysis_results" / "processed_index_bull_scores.xlsx"
+                if bull_index_file.exists():
+                    try:
+                        bull_index_df = pd.read_excel(bull_index_file)
+                        # 查找指数列（可能是 xxx_index 格式）
+                        index_columns = [col for col in bull_index_df.columns if col.endswith('_index')]
+                        
+                        if 'bull_id' in bull_index_df.columns and index_columns:
+                            # 使用第一个找到的指数列
+                            index_col = index_columns[0]
+                            # 将指数列重命名为Bull Index Score
+                            bull_index_df['Bull Index Score'] = bull_index_df[index_col]
+                            
+                            # 确保bull_id是字符串类型
+                            bull_index_df['bull_id'] = bull_index_df['bull_id'].astype(str)
+                            self.bull_data['bull_id'] = self.bull_data['bull_id'].astype(str)
+                            
+                            # 合并公牛指数得分
+                            self.bull_data = self.bull_data.merge(
+                                bull_index_df[['bull_id', 'Bull Index Score']],
+                                on='bull_id',
+                                how='left'
+                            )
+                            logger.info(f"成功加载公牛指数得分（使用列: {index_col}）")
+                        else:
+                            logger.warning("公牛指数文件格式不正确，未找到指数列")
+                    except Exception as e:
+                        logger.warning(f"加载公牛指数得分失败: {e}")
+                else:
+                    logger.warning("未找到公牛指数得分文件，将使用默认值0")
+                
+                # 初始化库存和得分
                 for _, bull in self.bull_data.iterrows():
                     bull_id = str(bull['bull_id'])
                     # 支持多种列名，bull 是一个 Series
@@ -67,6 +100,9 @@ class CycleBasedMatcher:
                     else:
                         count = 0
                     self.bull_inventory[bull_id] = int(count)
+                    
+                    # 保存公牛得分
+                    self.bull_scores[bull_id] = bull.get('Bull Index Score', 0)
                     
                 # 检查是否所有支数都是0
                 if all(count == 0 for count in self.bull_inventory.values()):
@@ -262,7 +298,16 @@ class CycleBasedMatcher:
             if not valid_bulls:
                 continue
             
-            # 按得分排序
+            # 计算每个公牛的后代得分并排序
+            cow_score = cow.get('Combine Index Score', 0)
+            for bull in valid_bulls:
+                bull_id = bull['bull_id']
+                bull_score = self.bull_scores.get(bull_id, 0)
+                # 后代得分 = 母牛得分和公牛得分的平均值
+                bull['offspring_score'] = 0.5 * (cow_score + bull_score)
+                bull['bull_score'] = bull_score
+            
+            # 按后代得分排序（高分优先）
             valid_bulls.sort(key=lambda x: x.get('offspring_score', 0), reverse=True)
             
             # 获取已分配的公牛
@@ -372,19 +417,30 @@ class CycleBasedMatcher:
                 
                 # 无论是否有满足配额的公牛，都保存所有有效公牛供后续递进使用
                 if valid_bulls:
-                    # 按后代得分排序
+                    # 计算每个公牛的后代得分
+                    cow_score = cow.get('Combine Index Score', 0)
+                    for bull in valid_bulls:
+                        bull_id = bull['bull_id']
+                        bull_score = self.bull_scores.get(bull_id, 0)
+                        # 后代得分 = 母牛得分和公牛得分的平均值
+                        bull['offspring_score'] = 0.5 * (cow_score + bull_score)
+                        bull['bull_score'] = bull_score
+                    
+                    # 按后代得分排序（高分优先）
                     valid_bulls.sort(key=lambda x: x.get('offspring_score', 0), reverse=True)
                     
                 # 获取原始的所有有效公牛（不过滤配额）
+                all_valid_bulls_raw = cow.get(valid_bulls_key, None)
                 all_valid_bulls = []
-                if isinstance(valid_bulls, str):
-                    try:
-                        import ast
-                        all_valid_bulls = ast.literal_eval(valid_bulls)
-                    except:
-                        all_valid_bulls = []
-                else:
-                    all_valid_bulls = cow.get(valid_bulls_key, [])
+                if all_valid_bulls_raw is not None:
+                    if isinstance(all_valid_bulls_raw, str):
+                        try:
+                            import ast
+                            all_valid_bulls = ast.literal_eval(all_valid_bulls_raw)
+                        except:
+                            all_valid_bulls = []
+                    else:
+                        all_valid_bulls = all_valid_bulls_raw
                     
                 if all_valid_bulls:
                     candidates.append({
@@ -468,7 +524,16 @@ class CycleBasedMatcher:
                     except:
                         valid_bulls = []
                 
-                # 按得分排序
+                # 计算每个公牛的后代得分
+                cow_score = cow.get('Combine Index Score', 0)
+                for bull in valid_bulls:
+                    bull_id = bull['bull_id']
+                    bull_score = self.bull_scores.get(bull_id, 0)
+                    # 后代得分 = 母牛得分和公牛得分的平均值
+                    bull['offspring_score'] = 0.5 * (cow_score + bull_score)
+                    bull['bull_score'] = bull_score
+                
+                # 按后代得分排序（高分优先）
                 valid_bulls.sort(key=lambda x: x.get('offspring_score', 0), reverse=True)
                 
                 # 找一个未分配且有库存的公牛
@@ -668,7 +733,7 @@ class CycleBasedMatcher:
         # 检查隐性基因
         if self.control_defect_genes:
             gene_status = bull_info.get('gene_status', 'Unknown')
-            if gene_status == 'Risk':
+            if gene_status == '高风险':
                 return False
         
         return True

@@ -151,11 +151,11 @@ class RecommendationGenerator:
         """检查隐性基因情况"""
         try:
             # 这里应该实现实际的隐性基因检查逻辑
-            # 目前返回默认的安全状态
-            return "Safe"
+            # 目前返回默认的无风险状态
+            return "-"
         except Exception as e:
             logger.warning(f"检查隐性基因失败 (母牛{cow_id}, 公牛{bull_id}): {e}")
-            return "Unknown"
+            return "-"
     
     def generate_recommendations(self, progress_callback=None) -> pd.DataFrame:
         """生成选配推荐报告"""

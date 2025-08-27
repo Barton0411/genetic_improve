@@ -184,7 +184,7 @@ class IndividualMatcher:
                 # 检查隐性基因
                 if self.control_defect_genes and col_genes in cow_report.columns:
                     gene_info = cow_report[col_genes].iloc[0]
-                    if str(gene_info).strip() == "NO safe":
+                    if str(gene_info).strip() == "高风险":
                         return False
                 
                 return True

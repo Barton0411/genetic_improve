@@ -275,7 +275,12 @@ class CowKeyTraitsPage(QWidget):
 
         except Exception as e:
             self.progress_dialog.close()
-            QMessageBox.critical(self, "错误", f"处理过程中发生错误：{str(e)}")
+            import traceback
+            error_msg = f"计算过程中发生错误：{str(e)}"
+            if "处理年度数据失败" in str(e):
+                error_msg = "计算过程中发生错误：\n处理年度数据失败\n\n可能原因：\n1. 数据中缺少有效的出生年份信息\n2. 出生年份数据格式不正确\n3. 数据文件损坏或格式异常\n\n建议检查上传的母牛数据文件"
+            QMessageBox.critical(self, "错误", error_msg)
+            print(f"详细错误信息: {traceback.format_exc()}")
         finally:
                 # 添加资源清理代码
                 if hasattr(self, 'progress_dialog'):
@@ -292,9 +297,27 @@ class CowKeyTraitsPage(QWidget):
             # 1. 读取详细数据文件
             df = pd.read_excel(detail_path)
             
+            # 检查birth_year列是否存在
+            if 'birth_year' not in df.columns:
+                print("错误：数据中缺少birth_year列")
+                return False
+            
+            # 清理birth_year数据，移除空值和无效值
+            df = df.dropna(subset=['birth_year'])
+            df['birth_year'] = pd.to_numeric(df['birth_year'], errors='coerce')
+            df = df.dropna(subset=['birth_year'])
+            
+            # 过滤合理的年份范围（1900-当前年份+10）
+            current_year = datetime.datetime.now().year
+            df = df[(df['birth_year'] >= 1900) & (df['birth_year'] <= current_year + 10)]
+            
+            if len(df) == 0:
+                print("错误：没有有效的出生年份数据")
+                return False
+            
             # 2. 获取出生年份范围
-            min_year = df['birth_year'].min()
-            max_year = df['birth_year'].max()
+            min_year = int(df['birth_year'].min())
+            max_year = int(df['birth_year'].max())
             print(f"出生年份范围: {min_year} - {max_year}")
 
             # 3. 准备所有性状的数据
@@ -416,8 +439,10 @@ class CowKeyTraitsPage(QWidget):
             return True
             
         except Exception as e:
+            import traceback
             print(f"处理年度关键性状数据时发生错误: {str(e)}")
-            raise
+            print(f"详细错误信息: {traceback.format_exc()}")
+            return False
 
     def perform_cow_traits_calculation(self, main_window, progress_callback=None, task_info_callback=None):
         """执行关键性状计算的核心逻辑"""
@@ -656,12 +681,37 @@ class CowKeyTraitsPage(QWidget):
             for col in score_columns:
                 df_pedigree[f"{col}_source"] = "P"
                 
+            # 打印基因组数据信息以便调试
+            print(f"基因组数据列名: {df_genomic.columns.tolist()[:30]}...")  # 打印前30个
+            print(f"基因组数据行数: {len(df_genomic)}")
+            
+            # 检查cow_id列是否存在
+            if 'cow_id' not in df_genomic.columns:
+                print("警告：基因组数据中缺少cow_id列")
+                return False
+            
+            # 打印部分cow_id以验证
+            print(f"基因组数据中的前5个cow_id: {df_genomic['cow_id'].head().tolist()}")
+            print(f"系谱数据中的前5个cow_id: {df_pedigree['cow_id'].head().tolist()}")
+            
+            # 检查基因组数据中存在哪些性状列
+            selected_traits = self.get_selected_traits()
+            print(f"需要匹配的性状: {selected_traits}")
+            
+            existing_traits = []
+            for trait in selected_traits:
+                if trait in df_genomic.columns:
+                    existing_traits.append(trait)
+            print(f"基因组数据中存在的性状: {existing_traits}")
+            
             # 4. 用基因组数据更新得分
-            total_traits = len(self.get_selected_traits())
+            total_traits = len(selected_traits)
             total_rows = len(df_pedigree)
+            update_count = 0
+            matched_cows = 0
 
     
-            for trait_idx, trait in enumerate(self.get_selected_traits(), 1):
+            for trait_idx, trait in enumerate(selected_traits, 1):
                 score_col = f"{trait}_score"
                 source_col = f"{trait}_score_source"
 
@@ -674,16 +724,26 @@ class CowKeyTraitsPage(QWidget):
                         progress_callback(progress)
                         
                     cow_id = row['cow_id']
-                    # 查找对应的基因组数据
-                    genomic_row = df_genomic[df_genomic['cow_id'] == cow_id]
+                    # 确保cow_id类型一致（都转为字符串）
+                    genomic_row = df_genomic[df_genomic['cow_id'].astype(str) == str(cow_id)]
                     
-                    if not genomic_row.empty and trait in genomic_row.columns:
-                        # 如果找到基因组数据且该性状有值
-                        if pd.notna(genomic_row[trait].iloc[0]):
-                            # 更新得分和来源标记
-                            df_pedigree.at[idx, score_col] = genomic_row[trait].iloc[0]
-                            df_pedigree.at[idx, source_col] = "G"
-                            print(f"母牛 {cow_id} 的 {trait} 更新为基因组数据")
+                    if not genomic_row.empty and trait_idx == 1:  # 只在第一个性状时计数
+                        matched_cows += 1
+                        
+                    if not genomic_row.empty:
+                        # 直接检查该性状是否在基因组数据中
+                        if trait in genomic_row.columns:
+                            trait_value = genomic_row[trait].iloc[0]
+                            if pd.notna(trait_value):
+                                # 更新得分和来源标记
+                                df_pedigree.at[idx, score_col] = trait_value
+                                df_pedigree.at[idx, source_col] = "G"
+                                update_count += 1
+                                if update_count <= 10:  # 只打印前10个更新
+                                    print(f"母牛 {cow_id} 的 {trait} 更新为基因组数据: {trait_value}")
+            
+            print(f"匹配到的母牛数: {matched_cows}")
+            print(f"总共更新了 {update_count} 个性状值")
             
             # 5. 添加一个总结列，显示有多少个性状使用了基因组数据
             genomic_count = df_pedigree[[col for col in df_pedigree.columns if col.endswith('_source')]].apply(

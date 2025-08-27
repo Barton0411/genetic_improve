@@ -3,6 +3,7 @@
 from pathlib import Path
 import pandas as pd
 import numpy as np
+import datetime
 from typing import Tuple, Optional
 from sqlalchemy import create_engine, text
 from PyQt6.QtWidgets import QMessageBox
@@ -193,9 +194,27 @@ class TraitsCalculation(BaseCowCalculation):
             # 读取详细数据
             df = pd.read_excel(detail_path)
             
+            # 检查birth_year列是否存在
+            if 'birth_year' not in df.columns:
+                print("错误：数据中缺少birth_year列")
+                return False
+            
+            # 清理birth_year数据，移除空值和无效值
+            df = df.dropna(subset=['birth_year'])
+            df['birth_year'] = pd.to_numeric(df['birth_year'], errors='coerce')
+            df = df.dropna(subset=['birth_year'])
+            
+            # 过滤合理的年份范围（1900-当前年份+10）
+            current_year = datetime.datetime.now().year
+            df = df[(df['birth_year'] >= 1900) & (df['birth_year'] <= current_year + 10)]
+            
+            if len(df) == 0:
+                print("错误：没有有效的出生年份数据")
+                return False
+            
             # 获取出生年份范围
-            min_year = df['birth_year'].min()
-            max_year = df['birth_year'].max()
+            min_year = int(df['birth_year'].min())
+            max_year = int(df['birth_year'].max())
             
             # 获取默认值
             default_values = self.get_default_values(selected_traits)
@@ -229,7 +248,9 @@ class TraitsCalculation(BaseCowCalculation):
             return self.save_yearly_results(results, output_path)
             
         except Exception as e:
+            import traceback
             print(f"处理年度数据失败: {e}")
+            print(f"详细错误信息: {traceback.format_exc()}")
             return False
 
     def process_trait_yearly_data(self, valid_years: pd.DataFrame, min_year: int, 
@@ -413,6 +434,19 @@ class TraitsCalculation(BaseCowCalculation):
             # 2. 读取基因组数据
             df_genomic = pd.read_excel(genomic_path)
             
+            # 打印基因组数据的列名以便调试
+            print(f"基因组数据列名: {df_genomic.columns.tolist()[:30]}...")  # 打印前30个
+            print(f"基因组数据行数: {len(df_genomic)}")
+            
+            # 检查cow_id列是否存在
+            if 'cow_id' not in df_genomic.columns:
+                print("警告：基因组数据中缺少cow_id列")
+                return False
+            
+            # 打印部分cow_id以验证
+            print(f"基因组数据中的前5个cow_id: {df_genomic['cow_id'].head().tolist()}")
+            print(f"系谱数据中的前5个cow_id: {df_pedigree['cow_id'].head().tolist()}")
+            
             # 3. 初始化数据来源标记
             score_columns = [col for col in df_pedigree.columns if col.endswith('_score')]
             for col in score_columns:
@@ -420,21 +454,43 @@ class TraitsCalculation(BaseCowCalculation):
             
             # 4. 更新得分和数据来源
             traits = [col[:-6] for col in score_columns]  # 去掉 '_score' 后缀
+            print(f"需要匹配的性状: {traits}")
             
-            for _, row in df_pedigree.iterrows():
+            # 检查基因组数据中存在哪些性状列
+            existing_traits = []
+            for trait in traits:
+                if trait in df_genomic.columns:
+                    existing_traits.append(trait)
+            print(f"基因组数据中存在的性状: {existing_traits}")
+            
+            # 统计更新数量
+            update_count = 0
+            matched_cows = 0
+            
+            for idx, row in df_pedigree.iterrows():
                 cow_id = row['cow_id']
-                genomic_row = df_genomic[df_genomic['cow_id'] == cow_id]
+                # 确保cow_id类型一致（都转为字符串）
+                genomic_row = df_genomic[df_genomic['cow_id'].astype(str) == str(cow_id)]
                 
                 if not genomic_row.empty:
+                    matched_cows += 1
                     # 遍历每个性状
                     for trait in traits:
                         score_col = f'{trait}_score'
                         source_col = f'{trait}_score_source'
                         
-                        # 如果基因组数据中有该性状的值且不为空
-                        if trait in genomic_row.columns and pd.notna(genomic_row[trait].iloc[0]):
-                            df_pedigree.loc[df_pedigree['cow_id'] == cow_id, score_col] = genomic_row[trait].iloc[0]
-                            df_pedigree.loc[df_pedigree['cow_id'] == cow_id, source_col] = "G"
+                        # 直接检查该性状是否在基因组数据中
+                        if trait in genomic_row.columns:
+                            trait_value = genomic_row[trait].iloc[0]
+                            if pd.notna(trait_value):
+                                df_pedigree.loc[idx, score_col] = trait_value
+                                df_pedigree.loc[idx, source_col] = "G"
+                                update_count += 1
+                                if update_count <= 10:  # 只打印前10个更新
+                                    print(f"更新: 母牛 {cow_id} 的 {trait} = {trait_value}")
+            
+            print(f"匹配到的母牛数: {matched_cows}")
+            print(f"总共更新了 {update_count} 个性状值")
             
             # 5. 添加基因组性状计数列
             source_cols = [col for col in df_pedigree.columns if col.endswith('_source')]

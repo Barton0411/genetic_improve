@@ -242,14 +242,14 @@ class SimpleRecommendationGenerator:
                 
                 for gene in defect_genes:
                     if gene in row.index:
-                        status = str(row[gene]).lower()
-                        if 'no safe' in status or 'unsafe' in status or status == 'tc':
-                            return "NO safe"
+                        status = str(row[gene]).strip()
+                        if status == '高风险':
+                            return "高风险"
                             
         except Exception as e:
             logger.debug(f"检查隐性基因失败 ({cow_id}, {bull_id}): {e}")
             
-        return "Safe"
+        return "-"
         
     def _generate_all_recommendations(self) -> pd.DataFrame:
         """生成所有推荐"""
@@ -293,8 +293,8 @@ class SimpleRecommendationGenerator:
                     # 检查隐性基因
                     gene_status = self._check_genetic_defects(cow_id, bull_id)
                     
-                    # 判断是否满足约束
-                    meets_constraints = (inbreeding_coeff <= 0.03125 and gene_status == 'Safe')
+                    # 判断是否满足约束（避开高风险）
+                    meets_constraints = (inbreeding_coeff <= 0.03125 and gene_status != '高风险')
                     
                     bull_scores.append({
                         'bull_id': bull_id,

@@ -199,8 +199,8 @@ class PedigreeDialog(QDialog):
         self.canvas = FigureCanvas(self.figure)
         upper_layout.addWidget(self.canvas)
         
-        # 添加双击事件处理
-        self.canvas.mpl_connect('button_press_event', self.on_canvas_click)
+        # 配置简易系谱图为锁定模式（只允许双击查看大图，禁止其他交互）
+        self._setup_locked_canvas()
         
         splitter.addWidget(upper_widget)
         
@@ -236,8 +236,47 @@ class PedigreeDialog(QDialog):
         close_button.clicked.connect(self.accept)
         layout.addWidget(close_button)
         
-        # 绘制血缘关系图
-        self.draw_pedigree(max_generations=3)  # 默认显示3代
+        # 绘制血缘关系图，禁用交互功能
+        self.draw_pedigree(max_generations=3, enable_interactions=False)  # 默认显示3代，无交互
+    
+    def _setup_locked_canvas(self):
+        """设置简易系谱图为锁定模式"""
+        try:
+            # 只连接双击事件处理器
+            self.canvas.mpl_connect('button_press_event', self._on_locked_canvas_click)
+            
+            # 禁用matplotlib的默认导航工具栏功能
+            if hasattr(self.canvas, 'toolbar') and self.canvas.toolbar:
+                self.canvas.toolbar.setVisible(False)
+            
+            # 设置鼠标样式为指针，提示可以双击
+            self.canvas.setCursor(Qt.CursorShape.PointingHandCursor)
+            
+            # 禁用右键菜单
+            self.canvas.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+            
+            # 添加工具提示
+            self.canvas.setToolTip("双击查看详细的血缘系谱图（可选择2-6代）")
+            
+        except Exception as e:
+            logging.error(f"设置锁定画布失败: {e}")
+    
+    def _on_locked_canvas_click(self, event):
+        """锁定模式下的画布点击事件（只处理双击）"""
+        if event.dblclick:  # 只处理双击事件
+            try:
+                # 创建并显示最大化图像对话框
+                max_dialog = MaximizedPedigreeDialog(self, self.cow_id, self.sire_id, self.bull_id, 
+                                                   self.offspring_details)
+                max_dialog.exec()
+            except Exception as e:
+                logging.error(f"打开血缘关系图详细视图时出错: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
+                QMessageBox.critical(self, "错误", 
+                                   f"无法打开血缘关系图详细视图:\n\n{str(e)}\n\n"
+                                   f"请查看日志文件获取详细信息。")
+        # 忽略其他所有点击事件（单击、拖动等）
     
     def create_inbreeding_details_widget(self, layout, details, title):
         """创建显示近交详情的组件"""
@@ -498,7 +537,7 @@ class PedigreeDialog(QDialog):
             return self.parent_widget.get_project_path()
         return None
         
-    def draw_pedigree(self, max_generations=3):
+    def draw_pedigree(self, max_generations=3, enable_interactions=True):
         """绘制血缘关系图 - 横向展开，父亲在上，母亲在下"""
         # 清空现有的图表
         self.figure.clear()
@@ -860,11 +899,9 @@ class PedigreeDialog(QDialog):
                 cur_ylim = ax.get_ylim()
                 cur_xrange = (cur_xlim[1] - cur_xlim[0]) * 0.5
                 cur_yrange = (cur_ylim[1] - cur_ylim[0]) * 0.5
-                xdata = event.xdata  # 获取鼠标x坐标
-                ydata = event.ydata  # 获取鼠标y坐标
-                
-                if xdata is None or ydata is None:
-                    return
+                # 始终使用当前视图的中心作为缩放中心，不使用鼠标位置
+                center_x = (cur_xlim[0] + cur_xlim[1]) / 2
+                center_y = (cur_ylim[0] + cur_ylim[1]) / 2
                 
                 # 获取滚轮步进值
                 steps = event.step
@@ -877,11 +914,11 @@ class PedigreeDialog(QDialog):
                     else:
                         scale_factor = 1 - steps * 0.05  # 缩小
                 else:
-                    # 传统鼠标滚轮
+                    # 传统鼠标滚轮 - 降低敏感度
                     if event.button == 'up':  # 放大
-                        scale_factor = 0.8
+                        scale_factor = 0.95
                     else:  # 缩小
-                        scale_factor = 1.25
+                        scale_factor = 1.05
                 
                 # 限制缩放范围
                 new_xrange = cur_xrange * scale_factor
@@ -891,15 +928,16 @@ class PedigreeDialog(QDialog):
                 if new_xrange < 0.5 or new_xrange > 50:
                     return
                 
-                # 设置新的缩放范围
-                ax.set_xlim([xdata - new_xrange, xdata + new_xrange])
-                ax.set_ylim([ydata - new_yrange, ydata + new_yrange])
+                # 设置新的缩放范围 - 以视图中心为缩放中心
+                ax.set_xlim([center_x - new_xrange, center_x + new_xrange])
+                ax.set_ylim([center_y - new_yrange, center_y + new_yrange])
                 
                 # 重新绘制图表
                 self.canvas.draw_idle()
             
-            # 添加滚轮事件
-            self.canvas.mpl_connect('scroll_event', lambda event: on_scroll(event))
+            # 只有在启用交互时才添加滚轮事件
+            if enable_interactions:
+                self.canvas.mpl_connect('scroll_event', lambda event: on_scroll(event))
             
             # 添加鼠标平移功能
             self.pan_enabled = False
@@ -937,10 +975,11 @@ class PedigreeDialog(QDialog):
                     self.pan_start_xy = (event.xdata, event.ydata)
                     self.canvas.draw()
             
-            # 添加鼠标事件监听
-            self.canvas.mpl_connect('button_press_event', on_press)
-            self.canvas.mpl_connect('button_release_event', on_release)
-            self.canvas.mpl_connect('motion_notify_event', lambda event: on_motion(self, event))
+            # 只有在启用交互时才添加鼠标事件监听
+            if enable_interactions:
+                self.canvas.mpl_connect('button_press_event', on_press)
+                self.canvas.mpl_connect('button_release_event', on_release)
+                self.canvas.mpl_connect('motion_notify_event', lambda event: on_motion(self, event))
             
             # 创建图例
             legend_elements = [
@@ -1000,21 +1039,6 @@ class PedigreeDialog(QDialog):
             logging.error(f"Canvas draw error in PedigreeDialog: {e}")
             # 不显示对话框，因为这只是预览窗口
 
-    def on_canvas_click(self, event):
-        """画布点击事件处理"""
-        if event.dblclick:  # 检测双击事件
-            try:
-                # 创建并显示最大化图像对话框
-                max_dialog = MaximizedPedigreeDialog(self, self.cow_id, self.sire_id, self.bull_id, 
-                                                   self.offspring_details)
-                max_dialog.exec()
-            except Exception as e:
-                logging.error(f"打开血缘关系图详细视图时出错: {e}")
-                import traceback
-                logging.error(traceback.format_exc())
-                QMessageBox.critical(self, "错误", 
-                                   f"无法打开血缘关系图详细视图:\n\n{str(e)}\n\n"
-                                   f"请查看日志文件获取详细信息。")
 
     def query_naab_numbers(self, pedigree_db):
         """查询所有相关公牛的NAAB号码"""
@@ -1091,7 +1115,7 @@ class MaximizedPedigreeDialog(QDialog):
         self.offspring_details = offspring_details
         
         # 血统图属性
-        self.base_node_height = 7.0  # 基础节点高度，用于计算字体大小
+        self.base_node_height = 10.0  # 基础节点高度，用于计算字体大小
         
         # 缩放监听相关
         self.text_elements = []  # 存储文本元素引用
@@ -1126,7 +1150,7 @@ class MaximizedPedigreeDialog(QDialog):
         
         # 重置按钮
         reset_btn = QPushButton("⟲")
-        reset_btn.setToolTip("重置视图")
+        reset_btn.setToolTip("重置到原始视图")
         reset_btn.setFixedSize(40, 40)
         reset_btn.setStyleSheet("font-size: 18px;")
         reset_btn.clicked.connect(self.zoom_reset)
@@ -1144,10 +1168,20 @@ class MaximizedPedigreeDialog(QDialog):
         self.pan_btn.setCheckable(True)
         self.pan_btn.clicked.connect(self.toggle_pan_mode)
         
+        # 代数选择下拉框
+        generation_label = QLabel("代数:")
+        self.generation_combo = QComboBox()
+        self.generation_combo.addItems(["2代", "3代", "4代", "5代", "6代"])
+        self.generation_combo.setCurrentText("4代")  # 默认4代
+        self.generation_combo.setToolTip("选择显示的代数")
+        self.generation_combo.currentTextChanged.connect(self.on_generation_changed)
+        
         btn_layout.addWidget(zoom_in_btn)
         btn_layout.addWidget(zoom_out_btn)
         btn_layout.addWidget(reset_btn)
         btn_layout.addWidget(self.pan_btn)
+        btn_layout.addWidget(generation_label)
+        btn_layout.addWidget(self.generation_combo)
         btn_layout.addWidget(save_btn)
         btn_layout.addStretch()
         
@@ -1170,8 +1204,257 @@ class MaximizedPedigreeDialog(QDialog):
         # 绘制完整的6代系谱图
         self.draw_pedigree()
         
-        # 连接滚轮事件以支持鼠标滚轮和触控板缩放
-        self.canvas.mpl_connect('scroll_event', self.on_scroll)
+        # 设置增强的鼠标交互
+        self._setup_enhanced_interactions()
+    
+    def _setup_enhanced_interactions(self):
+        """设置增强的鼠标和键盘交互"""
+        try:
+            # 鼠标滚轮缩放（保留原有功能）
+            self.canvas.mpl_connect('scroll_event', self.on_enhanced_scroll)
+            
+            # 右键拖动支持（不需要切换模式）
+            self.canvas.mpl_connect('button_press_event', self.on_enhanced_press)
+            self.canvas.mpl_connect('button_release_event', self.on_enhanced_release) 
+            self.canvas.mpl_connect('motion_notify_event', self.on_enhanced_motion)
+            
+            # 启用键盘焦点
+            self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            
+            # 添加状态栏信息
+            self._setup_status_bar()
+            
+            # 鼠标位置跟踪
+            self.mouse_pos = (0, 0)
+            self.zoom_level = 1.0
+            
+        except Exception as e:
+            logging.error(f"设置增强交互失败: {e}")
+    
+    def _setup_status_bar(self):
+        """设置状态栏"""
+        try:
+            self.status_label = QLabel("就绪 | 鼠标滚轮: 缩放 | 右键拖动: 平移 | 快捷键: +/- 缩放, F 适应, R 重置")
+            self.status_label.setStyleSheet("QLabel { font-size: 11px; color: #666; padding: 5px; }")
+            self.layout().addWidget(self.status_label)
+        except Exception as e:
+            logging.error(f"设置状态栏失败: {e}")
+    
+    def on_enhanced_scroll(self, event):
+        """增强的滚轮事件 - 固定以系谱图中心缩放"""
+        if event.inaxes:
+            try:
+                # 计算缩放倍数 - 降低敏感度
+                scale_factor = 1.05 if event.step > 0 else 0.95
+                
+                # 始终以系谱图内容中心为缩放中心，不使用鼠标位置
+                self._zoom_at_point(None, None, scale_factor)
+                
+                # 更新状态
+                self.zoom_level *= scale_factor
+                self._update_status(f"缩放: {self.zoom_level:.1f}x")
+                
+            except Exception as e:
+                logging.error(f"增强滚轮缩放失败: {e}")
+    
+    def on_enhanced_press(self, event):
+        """增强的鼠标按下事件"""
+        try:
+            if event.button == 3 and event.inaxes:  # 右键开始拖动
+                self.pan_start = (event.xdata, event.ydata)
+                self.canvas.setCursor(Qt.CursorShape.ClosedHandCursor)
+            elif event.button == 1:  # 左键保留原有逻辑
+                if hasattr(self, 'pan_btn') and self.pan_btn.isChecked():
+                    self.on_press(event)
+        except Exception as e:
+            logging.error(f"增强按下事件失败: {e}")
+    
+    def on_enhanced_release(self, event):
+        """增强的鼠标释放事件"""
+        try:
+            if event.button == 3:  # 右键释放
+                self.pan_start = None
+                self.canvas.setCursor(Qt.CursorShape.ArrowCursor)
+            elif event.button == 1:  # 左键保留原有逻辑
+                if hasattr(self, 'pan_btn') and self.pan_btn.isChecked():
+                    self.on_release(event)
+        except Exception as e:
+            logging.error(f"增强释放事件失败: {e}")
+    
+    def on_enhanced_motion(self, event):
+        """增强的鼠标移动事件"""
+        try:
+            # 更新鼠标位置显示
+            if event.inaxes:
+                self.mouse_pos = (event.xdata, event.ydata)
+            
+            # 右键拖动
+            if self.pan_start and event.button == 3 and event.xdata and event.ydata:
+                self._pan_view(self.pan_start[0] - event.xdata, self.pan_start[1] - event.ydata)
+            # 左键拖动（保留原有逻辑）
+            elif hasattr(self, 'pan_btn') and self.pan_btn.isChecked():
+                self.on_motion(event)
+                
+        except Exception as e:
+            logging.error(f"增强移动事件失败: {e}")
+    
+    def _zoom_at_point(self, x, y, scale_factor):
+        """在指定点进行缩放"""
+        try:
+            ax = self.figure.gca()
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            
+            # 计算缩放中心
+            if x is None or y is None:
+                # 如果没有指定点，使用血缘图内容的中心（而不是视图中心）
+                if hasattr(self, 'base_xlim') and hasattr(self, 'base_ylim'):
+                    x = (self.base_xlim[0] + self.base_xlim[1]) / 2
+                    y = (self.base_ylim[0] + self.base_ylim[1]) / 2
+                else:
+                    # 备选方案：使用当前视图中心
+                    x = (xlim[0] + xlim[1]) / 2
+                    y = (ylim[0] + ylim[1]) / 2
+            
+            # 计算新的视图范围
+            x_range = (xlim[1] - xlim[0]) / scale_factor
+            y_range = (ylim[1] - ylim[0]) / scale_factor
+            
+            # 防止过度缩放 - 检查是否超出合理范围
+            if hasattr(self, 'base_xlim') and hasattr(self, 'base_ylim'):
+                base_x_range = self.base_xlim[1] - self.base_xlim[0]
+                base_y_range = self.base_ylim[1] - self.base_ylim[0]
+                
+                # 限制缩放范围：最小为原始范围的10%，最大为原始范围的500%
+                min_x_range = base_x_range * 0.1
+                max_x_range = base_x_range * 5.0
+                min_y_range = base_y_range * 0.1
+                max_y_range = base_y_range * 5.0
+                
+                if x_range < min_x_range or x_range > max_x_range:
+                    return  # 超出范围，不进行缩放
+                if y_range < min_y_range or y_range > max_y_range:
+                    return  # 超出范围，不进行缩放
+            
+            new_xlim = [x - x_range/2, x + x_range/2]
+            new_ylim = [y - y_range/2, y + y_range/2]
+            
+            ax.set_xlim(new_xlim)
+            ax.set_ylim(new_ylim)
+            self.canvas.draw_idle()
+            
+        except Exception as e:
+            logging.error(f"点缩放失败: {e}")
+    
+    def _pan_view(self, dx, dy):
+        """平移视图"""
+        try:
+            ax = self.figure.gca()
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            
+            ax.set_xlim([xlim[0] + dx, xlim[1] + dx])
+            ax.set_ylim([ylim[0] + dy, ylim[1] + dy])
+            self.canvas.draw_idle()
+            
+        except Exception as e:
+            logging.error(f"视图平移失败: {e}")
+    
+    def _update_status(self, message):
+        """更新状态栏信息"""
+        try:
+            if hasattr(self, 'status_label'):
+                base_msg = "鼠标滚轮: 缩放 | 右键拖动: 平移 | 快捷键: +/- 缩放, F 适应, R 重置"
+                self.status_label.setText(f"{message} | {base_msg}")
+        except Exception as e:
+            logging.error(f"更新状态失败: {e}")
+    
+    def keyPressEvent(self, event):
+        """键盘快捷键处理"""
+        try:
+            key = event.key()
+            if key == Qt.Key.Key_Plus or key == Qt.Key.Key_Equal:
+                self._zoom_at_point(None, None, 1.2)
+                self.zoom_level *= 1.2
+                self._update_status(f"缩放: {self.zoom_level:.1f}x")
+            elif key == Qt.Key.Key_Minus:
+                self._zoom_at_point(None, None, 0.8)
+                self.zoom_level *= 0.8
+                self._update_status(f"缩放: {self.zoom_level:.1f}x")
+            elif key == Qt.Key.Key_F:
+                self.fit_to_window()
+                self._update_status("适应窗口")
+            elif key == Qt.Key.Key_R:
+                self.zoom_reset()
+                self.zoom_level = 1.0
+                self._update_status("重置视图")
+            elif key == Qt.Key.Key_0:
+                self.fit_to_window()
+                self._update_status("适应窗口")
+            elif key == Qt.Key.Key_Space:
+                if hasattr(self, 'pan_btn'):
+                    self.pan_btn.setChecked(not self.pan_btn.isChecked())
+                    self.toggle_pan_mode()
+                    mode = "拖动模式" if self.pan_btn.isChecked() else "选择模式"
+                    self._update_status(f"切换到{mode}")
+            else:
+                super().keyPressEvent(event)
+        except Exception as e:
+            logging.error(f"键盘事件处理失败: {e}")
+            super().keyPressEvent(event)
+    
+    def fit_to_window(self):
+        """适应窗口大小"""
+        try:
+            ax = self.figure.gca()
+            ax.autoscale(True)
+            self.canvas.draw_idle()
+            self.zoom_level = 1.0
+        except Exception as e:
+            logging.error(f"适应窗口失败: {e}")
+    
+    def fit_content_to_window(self):
+        """智能适应内容到窗口 - 保持合适的边距"""
+        try:
+            if hasattr(self, 'base_xlim') and hasattr(self, 'base_ylim'):
+                ax = self.figure.gca()
+                
+                # 获取窗口尺寸
+                fig_width, fig_height = self.figure.get_size_inches()
+                fig_ratio = fig_width / fig_height
+                
+                # 获取内容尺寸
+                content_width = self.base_xlim[1] - self.base_xlim[0]
+                content_height = self.base_ylim[1] - self.base_ylim[0]
+                content_ratio = content_width / content_height
+                
+                # 计算最佳缩放比例，保留10%边距
+                if content_ratio > fig_ratio:
+                    # 内容更宽，以宽度为准
+                    scale = fig_width * 0.9 / content_width
+                else:
+                    # 内容更高，以高度为准
+                    scale = fig_height * 0.9 / content_height
+                
+                # 计算新的视图范围
+                new_width = content_width / scale
+                new_height = content_height / scale
+                
+                center_x = (self.base_xlim[0] + self.base_xlim[1]) / 2
+                center_y = (self.base_ylim[0] + self.base_ylim[1]) / 2
+                
+                ax.set_xlim(center_x - new_width/2, center_x + new_width/2)
+                ax.set_ylim(center_y - new_height/2, center_y + new_height/2)
+                
+                self.canvas.draw_idle()
+                self.zoom_level = scale
+                self._update_status(f"适应内容: {scale:.1f}x")
+            else:
+                # 备用方案
+                self.fit_to_window()
+        except Exception as e:
+            logging.error(f"适应内容失败: {e}")
+            self.fit_to_window()
         
     def toggle_pan_mode(self):
         """切换拖动模式"""
@@ -1353,8 +1636,8 @@ class MaximizedPedigreeDialog(QDialog):
         # 更新画布
         self.canvas.draw_idle()
     
-    def draw_pedigree(self):
-        """绘制完整的6代系谱图 - 采用固定画布大小和均匀分布节点"""
+    def draw_pedigree(self, max_generations=4):
+        """绘制完整的系谱图 - 采用固定画布大小和均匀分布节点"""
         # 创建新的图形和画布
         self.figure.clear()
         ax = self.figure.add_subplot(111)
@@ -1392,14 +1675,23 @@ class MaximizedPedigreeDialog(QDialog):
                 color_idx = i % len(color_options)
                 common_ancestor_colors[ancestor] = color_options[color_idx]
             
+            # 根据代数自动调整节点尺寸 - 代数越少，节点越大
+            generation_scale_factor = {
+                2: 1.8,   # 2代显示更大的节点
+                3: 1.4,   # 3代显示较大的节点 
+                4: 1.0,   # 4代使用基础大小
+                5: 0.8,   # 5代显示较小的节点
+                6: 0.6    # 6代显示更小的节点
+            }.get(max_generations, 1.0)
+            
             # 设置节点尺寸和间距
-            self.node_width = 0.5   # 节点宽度减半
-            self.node_height = self.base_node_height  # 使用基础节点高度
+            self.node_width = 0.5 * generation_scale_factor   
+            self.node_height = self.base_node_height * generation_scale_factor  
             min_v_spacing = 1.5  # 最小垂直间距
             h_spacing = 1.0    # 减小水平间距，使各代更紧凑
             
-            # 计算画布总高度 - 根据第6代节点数(64)
-            total_nodes_last_gen = 2 ** 6  # 64个节点
+            # 计算画布总高度 - 根据最大代数的节点数
+            total_nodes_last_gen = 2 ** max_generations
             canvas_height = (self.node_height + min_v_spacing) * total_nodes_last_gen
             
             # 节点集合，格式为：{(代数,位置ID): (x坐标,y坐标,节点ID)}
@@ -1409,7 +1701,7 @@ class MaximizedPedigreeDialog(QDialog):
             edges = []
             
             # 计算各代节点位置的函数
-            def calculate_node_position(gen, pos, max_gen=6):
+            def calculate_node_position(gen, pos, max_gen=max_generations):
                 """计算节点位置
                 Args:
                     gen: 代数 (0-6)
@@ -1448,7 +1740,7 @@ class MaximizedPedigreeDialog(QDialog):
                     pos: 在该代中的位置索引
                     animal_id: 动物ID
                 """
-                if gen >= 6:  # 最多构建到第6代
+                if gen >= max_generations:  # 最多构建到指定代数
                     return
                 
                 # 获取祖先信息
@@ -1537,8 +1829,8 @@ class MaximizedPedigreeDialog(QDialog):
                 naab_text = str(naab) if naab else ""
                 
                 # 设置初始文本大小
-                self.base_naab_size = self.node_height * 0.55  # NAAB文本大小为节点高度的55%
-                self.base_node_text_size = self.node_height * 0.3   # REG文本大小为节点高度的30%
+                self.base_naab_size = self.node_height * 0.8   # NAAB文本大小为节点高度的80%
+                self.base_node_text_size = self.node_height * 0.5   # REG文本大小为节点高度的50%
                 
                 # 计算文本垂直位置
                 reg_y_position = y - self.node_height/2 + self.node_height * 0.175
@@ -1606,9 +1898,9 @@ class MaximizedPedigreeDialog(QDialog):
             title_size = self.node_height * 3
             title_font = get_chinese_font_prop(size=title_size)
             if title_font:
-                title_obj = ax.set_title("血缘关系图 (6代完整视图)", fontproperties=title_font)
+                title_obj = ax.set_title(f"血缘关系图 ({max_generations}代完整视图)", fontproperties=title_font)
             else:
-                title_obj = ax.set_title("血缘关系图 (6代完整视图)", size=title_size)
+                title_obj = ax.set_title(f"血缘关系图 ({max_generations}代完整视图)", size=title_size)
             self.text_elements.append({
                 'text_obj': title_obj,
                 'base_size': title_size,
@@ -1622,7 +1914,7 @@ class MaximizedPedigreeDialog(QDialog):
             y_margin = self.node_height * 2
             
             # 保存初始视图范围
-            self.base_xlim = [-x_margin, 6 * h_spacing + self.node_width + x_margin]
+            self.base_xlim = [-x_margin, max_generations * h_spacing + self.node_width + x_margin]
             self.base_ylim = [-canvas_height/2 - y_margin, canvas_height/2 + y_margin]
             
             # 设置初始视图范围
@@ -1716,8 +2008,8 @@ class MaximizedPedigreeDialog(QDialog):
             text_obj = text_info['text_obj']
             base_size = text_info['base_size']
             
-            # 跳过图例文本 (虽然现在已经不添加图例文本了，但为了安全起见)
-            if text_info.get('type') == 'legend':
+            # 跳过图例文本和标题文本 (保持标题大小固定)
+            if text_info.get('type') in ['legend', 'title']:
                 continue
             
             # 根据缩放比例计算新的文本大小
@@ -1732,6 +2024,26 @@ class MaximizedPedigreeDialog(QDialog):
         # 更新时间戳和状态
         self.last_update_time = int(time.time() * 1000)
         self.update_pending = False
+    
+    def on_generation_changed(self, generation_text):
+        """代数选择改变事件处理"""
+        try:
+            # 提取代数数字 (如 "4代" -> 4)
+            generation_num = int(generation_text[0])
+            
+            # 重新绘制血缘图
+            self.draw_pedigree(max_generations=generation_num)
+            
+            # 更新窗口标题
+            self.setWindowTitle(f"血缘关系图 ({generation_num}代完整视图)")
+            
+            # 更新状态
+            if hasattr(self, '_update_status'):
+                self._update_status(f"切换到{generation_num}代视图")
+                
+        except Exception as e:
+            logging.error(f"代数切换失败: {e}")
+            QMessageBox.warning(self, "警告", f"代数切换失败: {e}")
     
     def on_close(self):
         """关闭对话框"""
@@ -2156,16 +2468,16 @@ class InbreedingPage(QWidget):
             print(f"成功上传{len(missing_bulls)}个缺失公牛记录到云端数据库")
             
             # 提示用户
-            print("警告：在本地数据库中未找到公牛基因信息，所有隐性基因将显示为missing_data")
+            print("警告：在本地数据库中未找到公牛基因信息，涉及这些公牛的配对将显示为'缺少公牛信息'")
             print("请确保本地数据库已更新，或者联系管理员添加这些公牛的基因信息")
-            logging.warning(f"在本地数据库中未找到{len(missing_bulls)}个公牛的基因信息，所有隐性基因将显示为missing_data")
+            logging.warning(f"在本地数据库中未找到{len(missing_bulls)}个公牛的基因信息，涉及这些公牛的配对将显示为'缺少公牛信息'")
             
             # 显示消息框提醒用户
             QMessageBox.warning(
                 self, 
                 "公牛基因信息缺失", 
                 f"在本地数据库中未找到{len(missing_bulls)}个公牛的基因信息，\n"
-                f"这些公牛的隐性基因信息将显示为missing_data。\n\n"
+                f"涉及这些公牛的配对将在隐性基因分析中显示为'缺少公牛信息'。\n\n"
                 f"请确保本地数据库已更新，或者联系管理员添加这些公牛的基因信息。"
             )
             
@@ -2173,33 +2485,54 @@ class InbreedingPage(QWidget):
             logging.error(f"处理缺失公牛记录失败: {e}")
 
     def analyze_gene_safety(self, cow_genes: Dict[str, str], bull_genes: Dict[str, str]) -> Dict[str, str]:
-        """分析基因配对安全性"""
+        """分析基因配对安全性
+        
+        Args:
+            cow_genes: 母牛父亲的基因型数据 (实际上是母牛父亲的基因)
+            bull_genes: 公牛的基因型数据
+        
+        Returns:
+            Dict[str, str]: 基因安全分析结果，包含8种可能状态：
+                - '高风险': 公牛携带 + 母牛父亲携带
+                - '缺少公牛信息': 只有公牛信息缺失
+                - '缺少母牛父亲信息': 只有母牛父亲信息缺失  
+                - '缺少双方信息': 公牛和母牛父亲信息都缺失
+                - '仅公牛携带': 只有公牛携带隐性基因
+                - '仅母牛父亲携带': 只有母牛父亲携带隐性基因
+                - '-': 双方都不携带隐性基因
+                - 'C'/'F': 原始基因型显示
+        """
         result = {}
         for gene in self.defect_genes:
-            cow_gene = cow_genes.get(gene, 'missing data')
-            bull_gene = bull_genes.get(gene, 'missing data')
+            # cow_genes 实际上是母牛父亲的基因型，在调用处已经正确传入
+            mgs_gene = cow_genes.get(gene, 'missing data')  # 母牛父亲基因型
+            bull_gene = bull_genes.get(gene, 'missing data')  # 公牛基因型
             
-            if cow_gene == 'C' and bull_gene == 'C':
-                # 双方都是携带者
-                result[gene] = 'NO safe'
-            elif cow_gene == 'F' and bull_gene == 'F':
-                # 双方都是正常
-                result[gene] = 'safe'
-            elif (cow_gene == 'F' and bull_gene == 'C') or (cow_gene == 'C' and bull_gene == 'F'):
-                # 一方携带一方正常
-                result[gene] = 'safe'
-            elif cow_gene == 'missing data' and bull_gene == 'missing data':
-                # 双方都缺数据
-                result[gene] = 'missing data'
-            elif cow_gene == 'missing data':
-                # 母方缺数据
-                result[gene] = 'missing cow data'
+            # 检查是否找到了母牛父亲数据
+            mgs_found = (mgs_gene != 'missing data')
+            
+            # 详细的隐性基因状态判定（8种情况）
+            if bull_gene == 'missing data' and not mgs_found:
+                # 情况2：公牛和母牛父亲都不在数据库中
+                result[gene] = '缺少双方信息'
             elif bull_gene == 'missing data':
-                # 公方缺数据
-                result[gene] = 'missing bull data'
+                # 情况3：只有公牛不在数据库中
+                result[gene] = '缺少公牛信息'
+            elif not mgs_found:
+                # 情况4：只有母牛的父亲不在数据库中
+                result[gene] = '缺少母牛父亲信息'
+            elif bull_gene == 'C' and mgs_gene == 'C':
+                # 情况1：公牛携带 + 母牛父亲携带 = 高风险
+                result[gene] = '高风险'
+            elif bull_gene == 'C' and mgs_gene == 'F':
+                # 情况4：公牛携带，母牛父亲不携带
+                result[gene] = '仅公牛携带'
+            elif bull_gene == 'F' and mgs_gene == 'C':
+                # 情况5：母牛父亲携带，公牛不携带
+                result[gene] = '仅母牛父亲携带'
             else:
-                # 其他情况
-                result[gene] = 'unknown'
+                # 情况6：其他情况（双方都不携带等）
+                result[gene] = '-'
                 
         return result
 
@@ -2495,7 +2828,7 @@ class InbreedingPage(QWidget):
             
             # 检测隐性基因问题
             for gene in self.defect_genes:
-                if result[gene] == 'NO safe':
+                if result[gene] == '高风险':
                     abnormal_records.append({
                         '母牛号': result['母牛号'],
                         '父号': result['父号'],
@@ -2677,7 +3010,7 @@ class InbreedingPage(QWidget):
             # 输出统计信息
             print("\n====== 近交系数计算统计 ======")
             print(f"总共处理: {total_count} 个配对")
-            print(f"计算了后代近交系数: {offspring_count} 个 ({offspring_count/total_count*100:.1f}%)")
+            print(f"计算了后代近交系数: {offspring_count} 个 ({offspring_count/total_count*100:.1f}%)" if total_count > 0 else f"计算了后代近交系数: {offspring_count} 个 (0.0%)")
             print(f"成功计算: {success_count} 个")
             print(f"零近交系数: {zero_count} 个")
             print(f"高近交系数(>6.25%): {high_inbreeding_count} 个")
@@ -2864,6 +3197,9 @@ class InbreedingPage(QWidget):
             self.abnormal_model.update_data(abnormal_df)
             self.stats_model.update_data(stats_df)
             
+            # 应用默认排序：后代近交系数降序排序
+            self._apply_default_sorting()
+            
             # 完成
             self.progress_dialog.update_progress(100)
             print(f"{analysis_type}分析完成")
@@ -2880,6 +3216,17 @@ class InbreedingPage(QWidget):
             self.progress_dialog.close()
             if self.db_engine:
                 self.db_engine.dispose()
+
+    def _apply_default_sorting(self):
+        """应用默认排序：后代近交系数降序排序"""
+        try:
+            # 检查表格模型是否有需要排序的列
+            if hasattr(self.detail_model, 'sort_column') and self.detail_model.sort_column >= 0:
+                # 使用表格的sortByColumn方法来触发排序
+                self.detail_table.sortByColumn(self.detail_model.sort_column, self.detail_model.sort_order)
+                print(f"应用默认排序: 列{self.detail_model.sort_column}, 顺序{'降序' if self.detail_model.sort_order == Qt.SortOrder.DescendingOrder else '升序'}")
+        except Exception as e:
+            print(f"应用默认排序失败: {e}")
 
     def show_calculation_method_detail(self):
         """显示近交系数计算方法的详细说明"""

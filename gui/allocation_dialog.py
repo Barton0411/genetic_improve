@@ -180,7 +180,12 @@ class AllocationDialog(QDialog):
             self.inventory_table.setItem(i, 1, QTableWidgetItem(row['冻精类型']))
             self.inventory_table.setItem(i, 2, QTableWidgetItem(str(row['当前库存'])))
             
-        self.inventory_table.resizeColumnsToContents()
+        # 设置列宽，确保公牛号显示完整
+        self.inventory_table.setColumnWidth(0, 150)  # 公牛号列
+        self.inventory_table.setColumnWidth(1, 80)   # 类型列
+        self.inventory_table.setColumnWidth(2, 80)   # 库存列
+        # 允许用户调整列宽
+        self.inventory_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         
     def show_groups(self, recommendations_df):
         """显示分组信息"""

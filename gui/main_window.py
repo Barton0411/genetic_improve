@@ -736,6 +736,13 @@ class MainWindow(QMainWindow):
                     self.file_tree.setSortingEnabled(True)
                     self.file_tree.setSelectionMode(QTreeView.SelectionMode.SingleSelection)
                     
+                    # 连接双击事件
+                    self.file_tree.doubleClicked.connect(self.on_file_double_clicked)
+                    
+                    # 设置右键菜单
+                    self.file_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+                    self.file_tree.customContextMenuRequested.connect(self.show_context_menu)
+                    
                     # 设置树形视图的样式
                     self.file_tree.setStyleSheet("""
                         QTreeView {
@@ -797,6 +804,120 @@ class MainWindow(QMainWindow):
                     self.main_layout.addLayout(path_layout)
                     self.main_layout.addWidget(self.file_tree)
                     self.main_layout.addLayout(button_layout)
+                    
+                def on_file_double_clicked(self, index):
+                    """双击文件时打开文件"""
+                    if not index.isValid():
+                        return
+                    file_path = self.file_system_model.filePath(index)
+                    path_obj = Path(file_path)
+                    
+                    if path_obj.is_file():
+                        # 根据操作系统打开文件
+                        import os
+                        import platform
+                        
+                        if platform.system() == 'Windows':
+                            os.startfile(str(path_obj))
+                        elif platform.system() == 'Darwin':  # macOS
+                            os.system(f'open "{str(path_obj)}"')
+                        else:  # Linux
+                            os.system(f'xdg-open "{str(path_obj)}"')
+                    
+                def show_context_menu(self, position):
+                    """显示右键菜单"""
+                    index = self.file_tree.indexAt(position)
+                    if not index.isValid():
+                        return
+                        
+                    file_path = self.file_system_model.filePath(index)
+                    path_obj = Path(file_path)
+                    
+                    # 创建右键菜单
+                    context_menu = QMenu(self)
+                    
+                    # 打开文件/文件夹
+                    open_action = context_menu.addAction("打开")
+                    open_action.triggered.connect(lambda: self.open_file_or_folder(path_obj))
+                    
+                    # 如果是文件，添加特定操作
+                    if path_obj.is_file():
+                        # 用Excel打开（如果是Excel文件）
+                        if path_obj.suffix.lower() in ['.xlsx', '.xls']:
+                            excel_action = context_menu.addAction("用Excel打开")
+                            excel_action.triggered.connect(lambda: self.open_with_excel(path_obj))
+                        
+                        # 复制文件路径
+                        copy_path_action = context_menu.addAction("复制文件路径")
+                        copy_path_action.triggered.connect(lambda: self.copy_to_clipboard(str(path_obj)))
+                    
+                    # 如果是文件夹，添加文件夹特定操作
+                    if path_obj.is_dir():
+                        # 在文件管理器中显示
+                        explorer_action = context_menu.addAction("在文件管理器中显示")
+                        explorer_action.triggered.connect(lambda: self.show_in_explorer(path_obj))
+                        
+                        # 复制文件夹路径
+                        copy_path_action = context_menu.addAction("复制文件夹路径")
+                        copy_path_action.triggered.connect(lambda: self.copy_to_clipboard(str(path_obj)))
+                    
+                    context_menu.addSeparator()
+                    
+                    # 刷新
+                    refresh_action = context_menu.addAction("刷新")
+                    refresh_action.triggered.connect(self.refresh_file_tree)
+                    
+                    # 显示菜单
+                    context_menu.exec(self.file_tree.mapToGlobal(position))
+                    
+                def open_file_or_folder(self, path_obj):
+                    """打开文件或文件夹"""
+                    import os
+                    import platform
+                    
+                    if platform.system() == 'Windows':
+                        os.startfile(str(path_obj))
+                    elif platform.system() == 'Darwin':  # macOS
+                        os.system(f'open "{str(path_obj)}"')
+                    else:  # Linux
+                        os.system(f'xdg-open "{str(path_obj)}"')
+                        
+                def open_with_excel(self, path_obj):
+                    """用Excel打开文件"""
+                    import os
+                    import platform
+                    
+                    if platform.system() == 'Windows':
+                        # Windows下尝试用Excel打开
+                        os.system(f'start excel "{str(path_obj)}"')
+                    elif platform.system() == 'Darwin':  # macOS
+                        # macOS下尝试用Excel打开
+                        os.system(f'open -a "Microsoft Excel" "{str(path_obj)}"')
+                        
+                def show_in_explorer(self, path_obj):
+                    """在文件管理器中显示"""
+                    import os
+                    import platform
+                    
+                    if platform.system() == 'Windows':
+                        os.startfile(str(path_obj))
+                    elif platform.system() == 'Darwin':  # macOS
+                        os.system(f'open "{str(path_obj)}"')
+                    else:  # Linux
+                        os.system(f'xdg-open "{str(path_obj)}"')
+                        
+                def copy_to_clipboard(self, text):
+                    """复制文本到剪贴板"""
+                    clipboard = QApplication.clipboard()
+                    clipboard.setText(text)
+                    
+                def refresh_file_tree(self):
+                    """刷新文件树"""
+                    # 触发文件系统模型的刷新
+                    root_path = self.file_system_model.rootPath()
+                    self.file_system_model.setRootPath("")
+                    self.file_system_model.setRootPath(root_path)
+                    self.file_tree.setRootIndex(self.file_system_model.index(root_path))
             
             # 创建页面实例
             page = ProjectPage(self)
@@ -833,16 +954,6 @@ class MainWindow(QMainWindow):
         file_path = self.file_system_model.filePath(index)
         return Path(file_path)
 
-    def on_file_double_clicked(self, index):
-        """双击文件时打开文件"""
-        if not index.isValid():
-            return
-        file_path = self.file_system_model.filePath(index)
-        if Path(file_path).is_file():
-            QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
-        else:
-            # 如果是文件夹，可根据需要选择性实现进入目录的逻辑
-            pass
 
     def create_new_project(self):
         """创建新项目"""
@@ -2021,8 +2132,18 @@ class MainWindow(QMainWindow):
                         semen_table.setItem(i, 13, count_item)
 
                     # 调整表格设置
-                    semen_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+                    # 设置表头可以调整大小
+                    semen_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+                    # 设置冻精编号列较宽
+                    semen_table.setColumnWidth(0, 150)  # 冻精编号列
+                    # 设置其他列的默认宽度
+                    for col in range(1, 13):  # 性状列
+                        semen_table.setColumnWidth(col, 80)
+                    semen_table.setColumnWidth(13, 60)  # 支数列
+                    # 设置最小列宽
                     semen_table.horizontalHeader().setMinimumSectionSize(50)
+                    # 允许最后一列拉伸以填充剩余空间
+                    semen_table.horizontalHeader().setStretchLastSection(True)
                     header_item = semen_table.horizontalHeaderItem(13)
                     if header_item:
                         header_font = header_item.font()

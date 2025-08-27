@@ -10,6 +10,7 @@ class InbreedingDetailModel(QAbstractTableModel):
         self.display_columns = []
         self.sort_column = None  # 当前排序的列
         self.sort_order = Qt.SortOrder.AscendingOrder  # 排序顺序
+        self._sort_cache = {}  # 排序键缓存
         
         # 定义基因列表
         self.defect_genes = [
@@ -33,13 +34,15 @@ class InbreedingDetailModel(QAbstractTableModel):
             self.column_names[f"{gene}(母)"] = f"{gene}(母)"
             self.column_names[f"{gene}(公)"] = f"{gene}(公)"
         
-        # 定义状态颜色映射
+        # 定义状态颜色映射（8种详细状态）
         self.status_colors = {
-            'NO safe': QBrush(Qt.GlobalColor.red),
-            'safe': QBrush(Qt.GlobalColor.green),
-            'missing cow data': QBrush(Qt.GlobalColor.yellow),
-            'missing bull data': QBrush(Qt.GlobalColor.yellow),
-            'missing data': QBrush(Qt.GlobalColor.gray)
+            '高风险': QBrush(Qt.GlobalColor.red),
+            '缺少公牛信息': QBrush(Qt.GlobalColor.gray),
+            '缺少母牛父亲信息': QBrush(Qt.GlobalColor.gray),
+            '缺少双方信息': QBrush(QColor(128, 128, 128)),  # 深灰色
+            '仅公牛携带': QBrush(QColor(255, 165, 0)),  # 橙色
+            '仅母牛父亲携带': QBrush(QColor(255, 165, 0)),  # 橙色
+            '-': QBrush(Qt.GlobalColor.green)
         }
 
     def rowCount(self, parent=None):
@@ -114,9 +117,20 @@ class InbreedingDetailModel(QAbstractTableModel):
             print("检查后代近交系数格式:")
             unique_values = df['后代近交系数'].unique()
             print(f"唯一值: {unique_values[:10]}")
+            print(f"数据类型: {df['后代近交系数'].dtype}")
+            # 检查前5行的具体值
+            print(f"前5行值: {df['后代近交系数'].head().tolist()}")
+            # 检查是否有百分号
+            has_percent = df['后代近交系数'].astype(str).str.contains('%').any()
+            print(f"是否包含百分号: {has_percent}")
             
-        # 按近交系数排序
-        if '近交系数' in df.columns:
+        # 按近交系数排序 - 优先使用后代近交系数
+        if '后代近交系数' in df.columns:
+            # 将百分比格式的字符串转为数值进行排序
+            df['后代近交系数_value'] = df['后代近交系数'].apply(lambda x: float(x.strip('%')) / 100 if isinstance(x, str) and '%' in x else 0.0)
+            df = df.sort_values(by='后代近交系数_value', ascending=False)  # 降序：从大到小
+            df = df.drop(columns=['后代近交系数_value'])
+        elif '近交系数' in df.columns:
             # 将百分比格式的字符串转为数值进行排序
             df['近交系数_value'] = df['近交系数'].apply(lambda x: float(x.strip('%')) / 100 if isinstance(x, str) and '%' in x else 0.0)
             df = df.sort_values(by='近交系数_value', ascending=False)
@@ -173,10 +187,66 @@ class InbreedingDetailModel(QAbstractTableModel):
         print(f"显示列: {display_columns}")
         self.display_columns = display_columns
         
-        # 更新数据
+        # 更新数据并预计算排序键
         self.beginResetModel()
         self.df = df
+        self._precompute_sort_keys()
+        
+        # 为近交系数相关列设置默认降序排序状态
+        self._set_default_sort_state()
+        
         self.endResetModel()
+
+    def _set_default_sort_state(self):
+        """为近交系数相关列设置默认降序排序状态"""
+        try:
+            # 如果数据包含后代近交系数列，默认按此列降序排序
+            if '后代近交系数' in self.df.columns and not self.df.empty:
+                # 设置默认排序状态：后代近交系数列，降序
+                self.sort_column = self.display_columns.index('后代近交系数') if '后代近交系数' in self.display_columns else -1
+                self.sort_order = Qt.SortOrder.DescendingOrder
+            # 如果只有近交系数列，按此列降序排序
+            elif '近交系数' in self.df.columns and not self.df.empty:
+                self.sort_column = self.display_columns.index('近交系数') if '近交系数' in self.display_columns else -1
+                self.sort_order = Qt.SortOrder.DescendingOrder
+            else:
+                self.sort_column = -1
+                self.sort_order = Qt.SortOrder.AscendingOrder
+        except Exception as e:
+            print(f"设置默认排序状态失败: {e}")
+            self.sort_column = -1
+            self.sort_order = Qt.SortOrder.AscendingOrder
+
+    def _precompute_sort_keys(self):
+        """预计算排序键以提高排序性能"""
+        self._sort_cache.clear()
+        
+        if self.df.empty:
+            return
+            
+        # 为百分比列预计算排序键
+        percentage_columns = ['近交系数', '后代近交系数']
+        for col in percentage_columns:
+            if col in self.df.columns:
+                def parse_percentage(x):
+                    try:
+                        if pd.isna(x) or x == '':
+                            return -1.0
+                        if isinstance(x, str) and '%' in x:
+                            return float(x.rstrip('%'))
+                        return float(x)
+                    except (ValueError, TypeError):
+                        return -1.0
+                
+                sort_values = self.df[col].apply(parse_percentage).values
+                self._sort_cache[col] = sort_values
+                
+                # 调试信息
+                if col == '后代近交系数':
+                    print(f"生成排序缓存 - {col}:")
+                    print(f"  原始前5个值: {self.df[col].head().tolist()}")
+                    print(f"  排序键前5个值: {sort_values[:5]}")
+                    print(f"  最大值: {sort_values.max()}, 最小值: {sort_values.min()}")
 
     def _format_gene_value(self, value):
         """格式化基因值显示"""
@@ -184,50 +254,99 @@ class InbreedingDetailModel(QAbstractTableModel):
             return "携带者(C)"
         elif value == 'F':
             return "正常(F)"
-        elif value == 'NO safe':
-            return "不安全"
-        elif value == 'safe':
-            return "安全"
-        elif value == 'missing data':
-            return "缺数据"
+        elif value == '高风险':
+            return "高风险"
+        elif value == '缺少公牛信息':
+            return "缺少公牛信息"
+        elif value == '缺少母牛父亲信息':
+            return "缺少母牛父亲信息"
+        elif value == '缺少双方信息':
+            return "缺少双方信息"
+        elif value == '仅公牛携带':
+            return "仅公牛携带"
+        elif value == '仅母牛父亲携带':
+            return "仅母牛父亲携带"
+        elif value == '-':
+            return "-"
         return str(value)
             
     def _get_gene_background(self, value):
         """获取基因值对应的背景色"""
         colors = {
-            'NO safe': QBrush(QColor(255, 200, 200)),  # 浅红色
-            'safe': QBrush(QColor(200, 255, 200)),  # 浅绿色
-            'missing data': QBrush(QColor(245, 245, 245)),  # 浅灰色
-            'missing cow data': QBrush(QColor(255, 255, 200)),  # 浅黄色
-            'missing bull data': QBrush(QColor(200, 200, 255))  # 浅蓝色
+            '高风险': QBrush(QColor(255, 200, 200)),  # 浅红色
+            '缺少公牛信息': QBrush(QColor(245, 245, 245)),  # 浅灰色
+            '缺少母牛父亲信息': QBrush(QColor(245, 245, 245)),  # 浅灰色
+            '缺少双方信息': QBrush(QColor(220, 220, 220)),  # 深浅灰色
+            '仅公牛携带': QBrush(QColor(255, 220, 200)),  # 浅橙色
+            '仅母牛父亲携带': QBrush(QColor(255, 220, 200)),  # 浅橙色
+            '-': QBrush(QColor(200, 255, 200))  # 浅绿色
         }
         return colors.get(value)
 
     def sort(self, column: int, order: Qt.SortOrder) -> None:
-        """实现排序功能"""
+        """实现排序功能 - 高性能优化版本"""
         try:
+            if self.df.empty:
+                return
+            
+            # 检查是否需要重新排序
+            if hasattr(self, 'sort_column') and self.sort_column == column and self.sort_order == order:
+                return  # 相同的排序，直接跳过
+                
             self.layoutAboutToBeChanged.emit()
             
             # 获取列名
             if 0 <= column < len(self.display_columns):
                 column_name = self.display_columns[column]
                 
-                # 如果是近交系数或后代近交系数列，需要特殊处理
-                if column_name in ['近交系数', '后代近交系数']:
-                    # 移除百分号并转换为浮点数进行排序
-                    self.df[f'{column_name}_sort'] = self.df[column_name].str.rstrip('%').astype(float)
-                    self.df = self.df.sort_values(
-                        by=f'{column_name}_sort',
-                        ascending=(order == Qt.SortOrder.AscendingOrder)
-                    )
-                    # 删除临时排序列
-                    self.df = self.df.drop(columns=[f'{column_name}_sort'])
+                # 检查该列是否存在于DataFrame中
+                if column_name not in self.df.columns:
+                    print(f"警告: 列 '{column_name}' 不存在于DataFrame中")
+                    self.layoutChanged.emit()
+                    return
+                
+                # 优化：如果是近交系数或后代近交系数列，使用预计算的排序键
+                if column_name in ['近交系数', '后代近交系数'] and column_name in self._sort_cache:
+                    # 使用预计算的排序键，性能更好
+                    try:
+                        import numpy as np
+                        sort_keys = self._sort_cache[column_name]
+                        sorted_indices = np.argsort(sort_keys)
+                        
+                        # 对于近交系数和后代近交系数，默认降序（从大到小）更有意义
+                        if order == Qt.SortOrder.AscendingOrder:
+                            # 如果用户明确要求升序，则保持升序
+                            pass  # sorted_indices 已经是升序
+                        else:
+                            # 默认或明确要求降序，则降序
+                            sorted_indices = sorted_indices[::-1]
+                        
+                        self.df = self.df.iloc[sorted_indices].reset_index(drop=True)
+                        
+                        # 调试信息
+                        print(f"使用缓存排序 '{column_name}': {'升序' if order == Qt.SortOrder.AscendingOrder else '降序'}")
+                        if len(sorted_indices) > 0:
+                            print(f"  排序后前5项: {sort_keys[sorted_indices[:5]]}")
+                            
+                    except Exception as e:
+                        print(f"使用缓存排序失败，回退到普通排序: {e}")
+                        # 回退到标准排序
+                        # 对于近交系数列，默认降序更有意义
+                        default_ascending = False if column_name in ['近交系数', '后代近交系数'] else True
+                        actual_ascending = (order == Qt.SortOrder.AscendingOrder) if order != Qt.SortOrder.DescendingOrder else (not default_ascending)
+                        
+                        self.df = self.df.sort_values(
+                            by=column_name,
+                            ascending=actual_ascending,
+                            na_position='first'
+                        ).reset_index(drop=True)
                 else:
-                    # 其他列正常排序
+                    # 对于其他列，使用标准排序，但确保索引重置
                     self.df = self.df.sort_values(
                         by=column_name,
-                        ascending=(order == Qt.SortOrder.AscendingOrder)
-                    )
+                        ascending=(order == Qt.SortOrder.AscendingOrder),
+                        na_position='first'  # 空值排在前面
+                    ).reset_index(drop=True)
                 
                 # 保存当前排序状态
                 self.sort_column = column
@@ -236,6 +355,9 @@ class InbreedingDetailModel(QAbstractTableModel):
             self.layoutChanged.emit()
         except Exception as e:
             print(f"排序时发生错误: {e}")
+            import traceback
+            traceback.print_exc()
+            self.layoutChanged.emit()
 
 
 class AbnormalDetailModel(QAbstractTableModel):

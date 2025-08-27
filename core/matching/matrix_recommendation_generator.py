@@ -472,16 +472,15 @@ class MatrixRecommendationGenerator:
                 for gene in defect_genes:
                     if gene in row.index:
                         status = str(row[gene]).strip()
-                        # 检查各种风险状态（不区分大小写）
-                        status_lower = status.lower()
-                        if any(risk in status_lower for risk in ['no safe', 'no_safe', 'unsafe', 'risk']) or status_lower == 'tc':
+                        # 新的判定逻辑：只检查 '高风险' 状态
+                        if status == '高风险':
                             logger.debug(f"检测到隐性基因风险: {gene}={row[gene]} for {cow_id} x {bull_id}")
-                            return "Risk"
+                            return "高风险"
                             
         except Exception as e:
             logger.debug(f"检查隐性基因失败 ({cow_id}, {bull_id}): {e}")
             
-        return "Safe"
+        return "-"
         
     def _generate_recommendation_summary(self) -> pd.DataFrame:
         """生成推荐汇总（兼容原有格式）"""
@@ -530,8 +529,8 @@ class MatrixRecommendationGenerator:
                         inbreeding_coeff = self._get_inbreeding_coefficient(cow_id, bull_id)
                         gene_status = self._check_genetic_defects(cow_id, bull_id)
                         
-                        # 只添加满足约束的公牛
-                        if inbreeding_coeff <= 0.03125 and gene_status == 'Safe':
+                        # 只添加满足约束的公牛（避开高风险）
+                        if inbreeding_coeff <= 0.03125 and gene_status != '高风险':
                             bull_scores.append({
                                 'bull_id': bull_id,
                                 'offspring_score': offspring_score,
