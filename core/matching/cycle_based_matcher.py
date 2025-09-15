@@ -169,9 +169,11 @@ class CycleBasedMatcher:
             logger.error(f"可用列: {list(self.recommendations_df.columns)}")
             return pd.DataFrame()
         
-        # 筛选选中分组的母牛
-        selected_cows = self.recommendations_df[
-            self.recommendations_df['group'].isin(selected_groups)
+        # 筛选选中分组的母牛，同时处理 nan 值
+        # 首先过滤掉 group 列中的 nan 值
+        valid_recommendations = self.recommendations_df[self.recommendations_df['group'].notna()].copy()
+        selected_cows = valid_recommendations[
+            valid_recommendations['group'].isin(selected_groups)
         ].copy()
         
         logger.info(f"选中的分组: {selected_groups}")
@@ -211,6 +213,11 @@ class CycleBasedMatcher:
         
         # 识别周期组
         for group in selected_groups:
+            # 跳过 nan 或非字符串类型的分组
+            if pd.isna(group) or not isinstance(group, str):
+                logger.warning(f"跳过无效分组: {group}")
+                continue
+                
             if '周期' in group:
                 group_cows = cows_df[cows_df['group'] == group].copy()
                 if not group_cows.empty:
@@ -225,6 +232,10 @@ class CycleBasedMatcher:
         
         # 添加非周期组（放在最后）
         for group in selected_groups:
+            # 跳过 nan 或非字符串类型的分组
+            if pd.isna(group) or not isinstance(group, str):
+                continue
+                
             if '周期' not in group:
                 group_cows = cows_df[cows_df['group'] == group].copy()
                 if not group_cows.empty:

@@ -480,9 +480,9 @@ class GroupManager:
         mature_df = df[mature_mask].copy()
         # 标记已孕和难孕牛 - 先处理NaN值
         pregnant_mask = mature_df['repro_status'].fillna('').isin(['初检孕', '复检孕'])
-        # 确保DIM有效性
-        valid_dim_mask = mature_df['DIM'].notna()
-        difficult_mask = valid_dim_mask & (mature_df['DIM'] >= 150) & ~pregnant_mask
+        # 难孕牛：有DIM数据且DIM >= 600天且未孕（根据实际数据调整阈值）
+        # DIM为空的牛不算难孕牛，应该归为未孕牛
+        difficult_mask = mature_df['DIM'].notna() & (mature_df['DIM'] >= 600) & ~pregnant_mask
         
         # 分配周期
         mature_df.loc[pregnant_mask, 'group'] = '成母牛已孕牛'
@@ -495,6 +495,68 @@ class GroupManager:
         pregnant_count = pregnant_mask.sum()
         difficult_count = difficult_mask.sum()
         normal_count = normal_mask.sum()
+        
+        # 计算基础未孕牛（所有非已孕的牛）
+        base_unpregnant_mask = ~pregnant_mask
+        base_unpregnant_count = base_unpregnant_mask.sum()
+        
+        # 调试：分析DIM分布
+        print(f"\n=== 成母牛分组逻辑分析 ===")
+        print(f"总成母牛: {len(mature_df)} 头")
+        print(f"已孕牛(初检孕+复检孕): {pregnant_count} 头")
+        print(f"基础未孕牛(除已孕牛外的所有牛): {base_unpregnant_count} 头")
+        
+        if base_unpregnant_count > 0:
+            base_unpregnant_df = mature_df[base_unpregnant_mask]
+            valid_dim_in_unpregnant = base_unpregnant_df['DIM'].notna()
+            invalid_dim_in_unpregnant = base_unpregnant_df['DIM'].isna()
+            
+            print(f"\n=== 基础未孕牛DIM分析 ===")
+            print(f"有DIM数据的基础未孕牛: {valid_dim_in_unpregnant.sum()} 头")
+            print(f"DIM为空的基础未孕牛: {invalid_dim_in_unpregnant.sum()} 头 -> 这些将成为未孕牛")
+            
+            if valid_dim_in_unpregnant.sum() > 0:
+                dim_data = base_unpregnant_df[valid_dim_in_unpregnant]['DIM']
+                print(f"基础未孕牛DIM范围: {dim_data.min():.1f} - {dim_data.max():.1f} 天")
+                dim_ge_150 = (dim_data >= 150).sum()
+                dim_lt_150 = (dim_data < 150).sum()
+                dim_ge_600 = (dim_data >= 600).sum()
+                dim_lt_600 = (dim_data < 600).sum()
+                print(f"基础未孕牛中DIM >= 600的: {dim_ge_600} 头 -> 这些将成为难孕牛")
+                print(f"基础未孕牛中DIM < 600的: {dim_lt_600} 头 -> 这些将成为未孕牛")
+                
+                total_unpregnant_will_be = dim_lt_600 + invalid_dim_in_unpregnant.sum()
+                print(f"预计未孕牛总数: {total_unpregnant_will_be} 头 (DIM<600的 + DIM为空的)")
+                
+                # 显示DIM分布区间
+                if dim_ge_150 > 0:
+                    dim_150_200 = ((dim_data >= 150) & (dim_data < 200)).sum()
+                    dim_200_300 = ((dim_data >= 200) & (dim_data < 300)).sum()
+                    dim_300_400 = ((dim_data >= 300) & (dim_data < 400)).sum()
+                    dim_400_plus = (dim_data >= 400).sum()
+                    
+                    print(f"难孕牛DIM分布详情:")
+                    print(f"  150-200天: {dim_150_200} 头")
+                    print(f"  200-300天: {dim_200_300} 头") 
+                    print(f"  300-400天: {dim_300_400} 头")
+                    print(f"  400天以上: {dim_400_plus} 头")
+        
+        # 详细分析repro_status分布
+        print(f"\n=== 成母牛繁育状态分析 ===")
+        repro_status_counts = mature_df['repro_status'].fillna('空值').value_counts()
+        print("繁育状态分布:")
+        for status, count in repro_status_counts.items():
+            print(f"  {status}: {count} 头")
+        
+        # 分析难孕牛的具体情况
+        difficult_cows = mature_df[difficult_mask]
+        if len(difficult_cows) > 0:
+            print(f"\n=== 难孕牛详细分析 (共{len(difficult_cows)}头) ===")
+            difficult_repro_counts = difficult_cows['repro_status'].fillna('空值').value_counts()
+            print("难孕牛的繁育状态分布:")
+            for status, count in difficult_repro_counts.items():
+                print(f"  {status}: {count} 头")
+            print(f"难孕牛DIM范围: {difficult_cows['DIM'].min():.1f} - {difficult_cows['DIM'].max():.1f} 天")
         
         mature_info = [
             f"成母牛已孕牛: {pregnant_count} 头",
@@ -532,6 +594,24 @@ class GroupManager:
         
         if progress_callback:
             progress_callback.update_info(f"分组策略: 后备牛 {len(heifer_strategies)} 个策略组, 成母牛 {len(mature_strategies)} 个策略组")
+        
+        # 调试：打印成母牛策略详情
+        print(f"\n成母牛策略详情:")
+        for i, strategy_row in enumerate(mature_strategies):
+            print(f"  策略{i+1}: {strategy_row['group']}, 比例: {strategy_row['ratio']}%, 配种方法: {strategy_row['breeding_methods']}")
+        
+        # 调试：检查成母牛未孕牛数量
+        mature_unpregnant_count = len(result_df[result_df['group'] == '成母牛未孕牛'])
+        print(f"\n成母牛未孕牛总数: {mature_unpregnant_count} 头")
+        if mature_unpregnant_count > 0:
+            # 检查是否有ranking数据
+            mature_unpregnant_df = result_df[result_df['group'] == '成母牛未孕牛']
+            has_ranking = 'ranking' in mature_unpregnant_df.columns and not mature_unpregnant_df['ranking'].isna().all()
+            print(f"成母牛未孕牛是否有ranking数据: {has_ranking}")
+            if has_ranking:
+                print(f"ranking范围: {mature_unpregnant_df['ranking'].min()} - {mature_unpregnant_df['ranking'].max()}")
+        else:
+            print("警告：没有成母牛未孕牛！")
         
         # 验证策略比例总和是否合理
         heifer_total = sum(s['ratio'] for s in heifer_strategies)
@@ -691,10 +771,13 @@ class GroupManager:
                 cumulative_ratio = 0
                 
                 # 遍历每个策略组（A/B/C）
+                print(f"  开始应用 {len(mature_strategies)} 个成母牛策略...")
                 for strategy_row in mature_strategies:
                     group = strategy_row['group']
                     ratio = strategy_row['ratio']
                     breeding_methods = strategy_row['breeding_methods']
+                    
+                    print(f"    策略组 {group}: 比例 {ratio}%, 配种方法: {breeding_methods}")
                     
                     # 计算该组应该包含的牛的数量和范围
                     start_idx = int(total_cows * cumulative_ratio / 100)

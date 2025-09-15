@@ -1,0 +1,140 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - app1
+      - app2
+      - app3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # 只部署3个应用实例以节省资源
+  app1:
+    build: 
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "6080:6080"
+    volumes:
+      - ./data:/app/data
+      - ./projects:/app/projects
+    environment:
+      - DISPLAY=:99
+      - INSTANCE_ID=1
+    restart: unless-stopped
+    depends_on:
+      - redis
+    deploy:
+      resources:
+        limits:
+          cpus: '2'          # 限制使用2个CPU核心
+          memory: 4G         # 限制使用4GB内存
+        reservations:
+          cpus: '1'
+          memory: 2G
+    cpuset: "0-1"            # 指定使用CPU 0-1
+
+  app2:
+    build: 
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "6081:6080"
+    volumes:
+      - ./data:/app/data
+      - ./projects:/app/projects
+    environment:
+      - DISPLAY=:99
+      - INSTANCE_ID=2
+    restart: unless-stopped
+    depends_on:
+      - redis
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    cpuset: "2-3"            # 指定使用CPU 2-3
+
+  app3:
+    build: 
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "6082:6080"
+    volumes:
+      - ./data:/app/data
+      - ./projects:/app/projects
+    environment:
+      - DISPLAY=:99
+      - INSTANCE_ID=3
+    restart: unless-stopped
+    depends_on:
+      - redis
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    cpuset: "4-5"            # 指定使用CPU 4-5
+
+  # 轻量级定时任务（仅在非训练时间运行）
+  celery-worker:
+    build: 
+      context: .
+      dockerfile: docker/Dockerfile
+    command: celery -A tasks worker --loglevel=info --concurrency=2
+    volumes:
+      - ./data:/app/data
+      - ./projects:/app/projects
+    environment:
+      - DISPLAY=:99
+    depends_on:
+      - redis
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+    # 只在非训练时间运行（6:00-22:00）
+    labels:
+      - "com.docker.compose.profiles=daytime"
+
+volumes:
+  redis_data:
+
+# 使用方法：
+# 白天运行: docker-compose -f docker-compose.limited.yml --profile daytime up -d
+# 夜间运行: docker-compose -f docker-compose.limited.yml down

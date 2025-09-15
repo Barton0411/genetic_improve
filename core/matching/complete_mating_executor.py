@@ -28,6 +28,12 @@ class CompleteMatingExecutor:
             project_path: 项目路径
         """
         self.project_path = Path(project_path)
+        
+        # 缓存约束数据，避免重复I/O
+        self.cached_inbreeding_df = None
+        self.cached_bull_data = None
+        self.cached_sexed_bulls = None
+        self.cached_regular_bulls = None
         self.group_manager = GroupManager(project_path)
         self.recommendation_generator = MatrixRecommendationGenerator(project_path)
         self.matcher = CycleBasedMatcher()
@@ -243,8 +249,12 @@ class CompleteMatingExecutor:
             self.matcher.inbreeding_threshold = inbreeding_threshold
             self.matcher.control_defect_genes = control_defect_genes
             
-            # 获取所有分组
+            # 获取所有分组并过滤掉 nan 值
             all_groups = recommendations_df['group'].unique().tolist()
+            # 过滤掉 nan 和非字符串类型的分组
+            all_groups = [g for g in all_groups if pd.notna(g) and isinstance(g, str)]
+            
+            logger.info(f"有效分组列表: {all_groups}")
             
             # 执行分配
             allocation_df = self.matcher.perform_allocation(
@@ -304,6 +314,248 @@ class CompleteMatingExecutor:
             
         return result
     
+    def _preload_constraint_data(self):
+        """预加载约束数据，避免重复I/O操作"""
+        try:
+            # 1. 加载近交系数及隐性基因分析结果
+            possible_files = list(self.project_path.glob("**/备选公牛_近交系数及隐性基因分析结果_*.xlsx"))
+            if possible_files:
+                latest_file = max(possible_files, key=lambda x: x.stat().st_mtime)
+                self.cached_inbreeding_df = pd.read_excel(latest_file)
+                logger.info(f"已缓存约束数据文件: {latest_file.name}")
+            else:
+                logger.warning("未找到约束数据文件")
+                self.cached_inbreeding_df = pd.DataFrame()
+            
+            # 2. 加载公牛数据
+            bull_file = self.project_path / "standardized_data" / "processed_bull_data.xlsx"
+            if bull_file.exists():
+                self.cached_bull_data = pd.read_excel(bull_file)
+                # 分别缓存性控和常规公牛
+                self.cached_sexed_bulls = self.cached_bull_data[self.cached_bull_data['classification'] == '性控'].copy()
+                self.cached_regular_bulls = self.cached_bull_data[self.cached_bull_data['classification'] == '常规'].copy()
+                logger.info(f"已缓存公牛数据: 性控{len(self.cached_sexed_bulls)}头，常规{len(self.cached_regular_bulls)}头")
+            else:
+                logger.warning("未找到公牛数据文件")
+                self.cached_bull_data = pd.DataFrame()
+                self.cached_sexed_bulls = pd.DataFrame()
+                self.cached_regular_bulls = pd.DataFrame()
+                
+        except Exception as e:
+            logger.error(f"预加载约束数据失败: {e}")
+            # 初始化空的DataFrame防止后续报错
+            self.cached_inbreeding_df = pd.DataFrame()
+            self.cached_bull_data = pd.DataFrame()
+            self.cached_sexed_bulls = pd.DataFrame()
+            self.cached_regular_bulls = pd.DataFrame()
+
+    def _generate_breeding_notes(self, cow_id: str, rec_info: pd.Series, semen_type: str, alloc_row: pd.Series = None) -> str:
+        """
+        生成选配备注信息
+        
+        Args:
+            cow_id: 母牛号
+            rec_info: 推荐信息行
+            semen_type: 冻精类型 ('性控' 或 '常规')
+            alloc_row: 分配结果行（可选）
+        
+        Returns:
+            备注字符串
+        """
+        # 检查推荐矩阵中的推荐情况
+        rec_missing_positions = []
+        for i in range(1, 4):
+            rec_col = f'推荐{semen_type}冻精{i}选'
+            if rec_col in rec_info.index:
+                if pd.isna(rec_info[rec_col]) or not str(rec_info[rec_col]).strip():
+                    rec_missing_positions.append(i)
+        
+        # 分析约束过滤情况
+        return self._analyze_constraint_filtering(cow_id, semen_type, rec_missing_positions)
+    
+    def _analyze_constraint_filtering(self, cow_id: str, semen_type: str, rec_missing_positions: List[int]) -> str:
+        """
+        分析约束过滤情况，生成相应备注
+        
+        Args:
+            cow_id: 母牛号
+            semen_type: 冻精类型
+            rec_missing_positions: 推荐中缺失的位置
+            
+        Returns:
+            备注字符串
+        """
+        try:
+            # 使用缓存的约束数据
+            if self.cached_inbreeding_df is None or self.cached_inbreeding_df.empty:
+                if len(rec_missing_positions) == 3:
+                    return f"无{semen_type}推荐（缺少约束数据）"
+                elif len(rec_missing_positions) > 0:
+                    return f"缺少{semen_type}推荐（缺少约束数据）"
+                return ""
+            
+            # 获取该母牛的约束数据
+            cow_data = self.cached_inbreeding_df[self.cached_inbreeding_df['母牛号'] == cow_id]
+            if cow_data.empty:
+                if len(rec_missing_positions) == 3:
+                    return f"无{semen_type}推荐（未找到约束数据）"
+                elif len(rec_missing_positions) > 0:
+                    return f"缺少{semen_type}推荐（未找到约束数据）"
+                return ""
+            
+            # 获取对应类型的公牛（使用缓存数据）
+            if semen_type == '性控':
+                type_bulls = self.cached_sexed_bulls
+            else:
+                type_bulls = self.cached_regular_bulls
+                
+            if type_bulls.empty:
+                if len(rec_missing_positions) == 3:
+                    return f"无{semen_type}推荐（无对应公牛）"
+                elif len(rec_missing_positions) > 0:
+                    return f"缺少{semen_type}推荐（无对应公牛）"
+                return ""
+            
+            # 分析每头公牛的约束情况
+            constraint_analysis = self._analyze_bull_constraints(cow_data, type_bulls)
+            
+            # 根据推荐缺失情况生成备注
+            if len(rec_missing_positions) == 3:
+                # 完全没有推荐
+                return self._generate_no_recommendation_note(semen_type, constraint_analysis)
+            elif len(rec_missing_positions) > 0:
+                # 部分推荐缺失
+                return self._generate_partial_recommendation_note(semen_type, rec_missing_positions, constraint_analysis)
+            else:
+                # 有完整推荐，但可能跳过了更优公牛
+                return self._generate_skipped_better_bulls_note(semen_type, constraint_analysis)
+                
+        except Exception as e:
+            logger.warning(f"分析约束过滤时出错: {e}")
+            if len(rec_missing_positions) == 3:
+                return f"无{semen_type}推荐（分析失败）"
+            elif len(rec_missing_positions) > 0:
+                return f"缺少{semen_type}推荐（分析失败）"
+            return ""
+    
+    def _analyze_bull_constraints(self, cow_data: pd.DataFrame, type_bulls: pd.DataFrame) -> Dict[str, Dict]:
+        """
+        分析每头公牛与母牛的约束情况
+        
+        Returns:
+            {bull_id: {'score': float, 'inbreeding': float, 'genes': [list], 'blocked': bool}}
+        """
+        analysis = {}
+        
+        for _, bull in type_bulls.iterrows():
+            bull_id = str(bull['bull_id'])
+            bull_cow_data = cow_data[cow_data['原始备选公牛号'] == bull_id]
+            
+            if not bull_cow_data.empty:
+                row = bull_cow_data.iloc[0]
+                
+                # 获取公牛得分
+                bull_score = bull.get('Index Score', 0) if 'Index Score' in bull else 0
+                
+                # 检查近交系数
+                inbreeding_blocked = False
+                inbreeding_value = 0
+                inbreeding_str = row.get('后代近交系数', '')
+                if pd.notna(inbreeding_str) and str(inbreeding_str).strip():
+                    try:
+                        inbreeding_value = float(str(inbreeding_str).strip('%')) / 100
+                        if inbreeding_value > 0.03125:  # 3.125%
+                            inbreeding_blocked = True
+                    except (ValueError, TypeError):
+                        pass
+                
+                # 检查隐性基因
+                gene_cols = ['HH1', 'HH2', 'HH3', 'HH4', 'HH5', 'HH6', 'BLAD', 'Chondrodysplasia', 
+                            'Citrullinemia', 'DUMPS', 'Factor XI', 'CVM', 'Brachyspina', 'Mulefoot', 
+                            'Cholesterol deficiency', 'MW']
+                
+                high_risk_genes = []
+                gene_blocked = False
+                for gene in gene_cols:
+                    if gene in row.index and pd.notna(row[gene]):
+                        value = str(row[gene]).strip()
+                        if value == '高风险':
+                            high_risk_genes.append(gene)
+                            gene_blocked = True
+                
+                analysis[bull_id] = {
+                    'score': bull_score,
+                    'inbreeding_value': inbreeding_value,
+                    'inbreeding_blocked': inbreeding_blocked,
+                    'high_risk_genes': high_risk_genes,
+                    'gene_blocked': gene_blocked,
+                    'blocked': inbreeding_blocked or gene_blocked
+                }
+        
+        return analysis
+    
+    def _generate_no_recommendation_note(self, semen_type: str, constraint_analysis: Dict) -> str:
+        """生成完全没有推荐的备注"""
+        blocked_details = []
+        
+        for bull_id, data in constraint_analysis.items():
+            if data['blocked']:
+                details = []
+                if data['inbreeding_blocked']:
+                    details.append(f"与{bull_id}公牛近交系数为{data['inbreeding_value']*100:.2f}%，大于3.125%阈值")
+                if data['gene_blocked']:
+                    for gene in data['high_risk_genes']:
+                        details.append(f"与{bull_id}公牛存在{gene}基因纯合高风险")
+                blocked_details.extend(details)
+        
+        if blocked_details:
+            return f"无{semen_type}推荐：{';'.join(blocked_details)}"
+        else:
+            return f"无{semen_type}推荐（其他约束）"
+    
+    def _generate_partial_recommendation_note(self, semen_type: str, missing_positions: List[int], constraint_analysis: Dict) -> str:
+        """生成部分推荐缺失的备注"""
+        if len(missing_positions) == 2:
+            prefix = f"缺少{semen_type}{missing_positions[0]}选、{missing_positions[1]}选"
+        else:
+            prefix = f"缺少{semen_type}{missing_positions[0]}选"
+        
+        # 找出被阻挡的公牛的具体约束信息
+        blocked_details = []
+        for bull_id, data in constraint_analysis.items():
+            if data['blocked']:
+                if data['inbreeding_blocked']:
+                    blocked_details.append(f"与{bull_id}公牛近交系数为{data['inbreeding_value']*100:.2f}%，大于3.125%阈值")
+                if data['gene_blocked']:
+                    for gene in data['high_risk_genes']:
+                        blocked_details.append(f"与{bull_id}公牛存在{gene}基因纯合高风险")
+        
+        if blocked_details:
+            return f"{prefix}：{';'.join(blocked_details)}"
+        else:
+            return f"{prefix}（其他约束）"
+    
+    def _generate_skipped_better_bulls_note(self, semen_type: str, constraint_analysis: Dict) -> str:
+        """生成跳过更优公牛的备注"""
+        # 按得分排序，找出被阻挡的高分公牛
+        all_bulls = [(bull_id, data) for bull_id, data in constraint_analysis.items()]
+        all_bulls.sort(key=lambda x: x[1]['score'], reverse=True)
+        
+        # 找出前5名中被阻挡的公牛（这些是被跳过的优质公牛）
+        skipped_details = []
+        for i, (bull_id, data) in enumerate(all_bulls[:5]):  # 检查前5名
+            if data['blocked']:
+                if data['inbreeding_blocked']:
+                    skipped_details.append(f"与{bull_id}公牛近交系数为{data['inbreeding_value']*100:.2f}%，大于3.125%阈值")
+                if data['gene_blocked']:
+                    for gene in data['high_risk_genes']:
+                        skipped_details.append(f"与{bull_id}公牛存在{gene}基因纯合高风险")
+        
+        if skipped_details:
+            return ';'.join(skipped_details)
+        
+        return ""  # 没有发现被跳过的优质公牛
+    
     def _generate_final_report(self, 
                               allocation_df: pd.DataFrame,
                               recommendations_df: pd.DataFrame,
@@ -317,6 +569,9 @@ class CompleteMatingExecutor:
         logger.info(f"  allocation_df 行数: {len(allocation_df)}")
         logger.info(f"  recommendations_df 行数: {len(recommendations_df)}")
         logger.info(f"  grouped_cows 行数: {len(grouped_cows)}")
+        
+        # 预加载约束数据，避免重复I/O
+        self._preload_constraint_data()
         
         # 创建报告DataFrame
         report_rows = []
@@ -345,15 +600,26 @@ class CompleteMatingExecutor:
             rec_info = rec_matches.iloc[0]
             
             # 构建报告行
+            # 安全获取分组值，处理 nan 情况
+            group_value = cow_info.get('group', '')
+            if pd.isna(group_value) or not isinstance(group_value, str):
+                group_value = '未分组'
+                
+            # 生成备注信息
+            sexed_note = self._generate_breeding_notes(cow_id, rec_info, '性控', alloc_row)
+            regular_note = self._generate_breeding_notes(cow_id, rec_info, '常规', alloc_row)
+            
             report_row = {
                 '母牛号': cow_id,
-                '分组': cow_info.get('group', ''),
+                '分组': group_value,
                 '1选性控': alloc_row.get('1选性控', ''),
                 '2选性控': alloc_row.get('2选性控', ''),
                 '3选性控': alloc_row.get('3选性控', ''),
+                '性控备注': sexed_note,
                 '1选常规': alloc_row.get('1选常规', ''),
                 '2选常规': alloc_row.get('2选常规', ''),
                 '3选常规': alloc_row.get('3选常规', ''),
+                '常规备注': regular_note,
                 '胎次': cow_info.get('lac', ''),
                 '本胎次奶厅高峰产量': cow_info.get('peak_milk', ''),
                 '305奶量': cow_info.get('milk_305', ''),
@@ -386,7 +652,9 @@ class CompleteMatingExecutor:
         
         # 统计肉牛标记数量
         if len(report_rows) > 0:
-            beef_count = len([r for r in report_rows if '（肉牛）' in r.get('分组', '')])
+            # 安全检查分组值，处理 nan 和非字符串类型
+            beef_count = len([r for r in report_rows 
+                            if isinstance(r.get('分组'), str) and '（肉牛）' in r.get('分组', '')])
             if beef_count > 0:
                 logger.info(f"  带肉牛标记的母牛数: {beef_count}")
             
@@ -405,7 +673,8 @@ class CompleteMatingExecutor:
             '后备牛第4周期+性控', '后备牛第4周期+性控（肉牛）', '后备牛第4周期+非性控', '后备牛第4周期+非性控（肉牛）',
             '成母牛未孕牛+性控', '成母牛未孕牛+性控（肉牛）', '成母牛未孕牛+非性控', '成母牛未孕牛+非性控（肉牛）',
             '后备牛难孕牛+非性控', '后备牛难孕牛+非性控（肉牛）', '成母牛难孕牛+非性控', '成母牛难孕牛+非性控（肉牛）',
-            '后备牛已孕牛+非性控', '后备牛已孕牛+非性控（肉牛）', '成母牛已孕牛+非性控', '成母牛已孕牛+非性控（肉牛）'
+            '后备牛已孕牛+非性控', '后备牛已孕牛+非性控（肉牛）', '成母牛已孕牛+非性控', '成母牛已孕牛+非性控（肉牛）',
+            '未分组'  # 添加未分组到最后
         ]
         
         # 创建分组排序映射
