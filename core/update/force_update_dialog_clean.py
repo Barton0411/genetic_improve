@@ -611,21 +611,30 @@ class ForceUpdateDialog(QDialog):
     def _start_download(self, package_url: str):
         """开始下载更新包"""
         
-        # 设置保存路径
-        temp_dir = Path(self.app_info['user_data_dir']) / 'temp'
-        temp_dir.mkdir(parents=True, exist_ok=True)
+        # 设置保存路径 - 使用用户下载文件夹，更容易找到
+        import os
+        downloads_dir = Path(os.path.expanduser("~/Downloads"))
         version = self.version_info.get('data', {}).get('version', 'unknown')
         
         # 根据平台设置正确的文件扩展名
         if self.app_info['platform'] == 'windows':
-            save_path = temp_dir / f"GeneticImprove_v{version}_win.exe"
+            save_path = downloads_dir / f"伊利奶牛选配_v{version}_win.exe"
         elif self.app_info['platform'] == 'darwin':
-            save_path = temp_dir / f"GeneticImprove_v{version}_mac.dmg"
+            save_path = downloads_dir / f"伊利奶牛选配_v{version}_mac.dmg"
         else:
-            save_path = temp_dir / f"update_package_{version}.tar.gz"
+            save_path = downloads_dir / f"伊利奶牛选配_v{version}.tar.gz"
+        
+        # 如果文件已存在，添加时间戳以避免覆盖
+        if save_path.exists():
+            import time
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            stem = save_path.stem
+            suffix = save_path.suffix
+            save_path = save_path.parent / f"{stem}_{timestamp}{suffix}"
         
         # 存储下载路径供后续使用
         self.downloaded_file_path = save_path
+        logger.info(f"文件将保存到: {save_path}")
         
         # 创建下载线程
         self.download_thread = DownloadThread(package_url, str(save_path))
@@ -644,7 +653,25 @@ class ForceUpdateDialog(QDialog):
         """下载完成处理"""
         
         if success:
-            self.status_label.setText("下载完成，正在准备更新...")
+            self.status_label.setText("下载完成！文件已保存到Downloads文件夹")
+            
+            # 显示重要提示
+            from PyQt6.QtWidgets import QMessageBox
+            msg = QMessageBox(self)
+            msg.setWindowTitle("⚠️ 重要提示")
+            msg.setText(f"""新版本已下载完成！
+
+文件位置：Downloads文件夹
+文件名：{self.downloaded_file_path.name if hasattr(self, 'downloaded_file_path') else '伊利奶牛选配.dmg'}
+
+如果自动安装失败，请：
+1. 打开Downloads文件夹找到下载的DMG文件
+2. 双击DMG文件打开
+3. 将应用拖拽到Applications文件夹替换旧版本
+
+⚠️ 必须安装新版本才能继续使用应用！""")
+            msg.setIcon(QMessageBox.Icon.Warning)
+            msg.exec()
             
             # 延迟一秒然后开始实际更新
             QTimer.singleShot(1000, self._execute_update)
@@ -918,12 +945,15 @@ class ForceUpdateDialog(QDialog):
     
     def _show_manual_install_guide(self, app_source: str, target_app: str):
         """显示手动安装指导"""
-        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtWidgets import QMessageBox, QPushButton
         import subprocess
         import os
         
         app_name = os.path.basename(target_app)
         mount_point = os.path.dirname(app_source)
+        
+        # 获取下载的DMG文件路径
+        dmg_file_path = str(self.downloaded_file_path) if hasattr(self, 'downloaded_file_path') else "未知"
         
         guide_message = f"""📦 手动安装新版本
 
@@ -933,6 +963,9 @@ class ForceUpdateDialog(QDialog):
 2️⃣ 如提示替换现有应用，点击"替换"
 3️⃣ macOS会自动处理版本替换
 4️⃣ 安装完成后可删除此DMG文件
+
+下载文件位置：
+{dmg_file_path}
 
 完成后从Applications文件夹启动新版本"""
         
@@ -967,7 +1000,27 @@ class ForceUpdateDialog(QDialog):
             }
         """)
         
+        # 添加自定义按钮
+        open_downloads_btn = msg_box.addButton("打开下载文件夹", QMessageBox.ButtonRole.ActionRole)
+        msg_box.addButton(QMessageBox.StandardButton.Ok)
+        
         msg_box.exec()
+        
+        # 如果用户点击了"打开下载文件夹"按钮
+        if msg_box.clickedButton() == open_downloads_btn:
+            # 打开下载文件所在的文件夹并选中文件
+            if hasattr(self, 'downloaded_file_path') and self.downloaded_file_path.exists():
+                try:
+                    # macOS: 使用open命令并选中文件
+                    subprocess.run(['open', '-R', str(self.downloaded_file_path)], check=False)
+                    logger.info(f"已打开并选中下载文件: {self.downloaded_file_path}")
+                except:
+                    # 备选：只打开文件夹
+                    try:
+                        subprocess.run(['open', str(self.downloaded_file_path.parent)], check=False)
+                        logger.info(f"已打开下载文件夹: {self.downloaded_file_path.parent}")
+                    except:
+                        pass
         
         # 打开Finder到挂载点
         try:
