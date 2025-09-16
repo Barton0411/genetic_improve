@@ -736,25 +736,39 @@ class ForceUpdateDialog(QDialog):
                     logger.debug(f"跳过挂载点 {volume}: {e}")
                     continue
             
-            # 如果在新挂载点中没找到，回退到检查所有挂载点（但加强验证）
+            # 如果在新挂载点中没找到，回退到检查已知的DMG挂载点名称
             if not app_source:
-                logger.info("在新挂载点中未找到，检查所有挂载点...")
-                for volume in volumes_after:
-                    volume_path = f"/Volumes/{volume}"
-                    try:
-                        if os.path.isdir(volume_path):
-                            contents = os.listdir(volume_path)
-                            app_files = [f for f in contents if f.endswith('.app')]
-                            if app_files:
-                                candidate_app = app_files[0]
-                                if self._is_valid_target_app(candidate_app, volume_path):
-                                    app_source = os.path.join(volume_path, candidate_app)
-                                    app_name = candidate_app
-                                    mount_point = volume_path
-                                    logger.info(f"在现有挂载点找到目标应用: {app_name}")
-                                    break
-                    except Exception as e:
-                        continue
+                logger.info("在新挂载点中未找到，检查已知的DMG挂载点...")
+                # 已知的可能挂载点名称
+                known_mount_names = [
+                    "伊利奶牛选配",
+                    "伊利奶牛选配 1", 
+                    "伊利奶牛选配 2",
+                    "伊利奶牛选配 3",
+                    "Genetic Improve",
+                    "GeneticImprove",
+                    "伊利选配",
+                    "奶牛育种智选报告专家"
+                ]
+                
+                for mount_name in known_mount_names:
+                    if mount_name in volumes_after:
+                        volume_path = f"/Volumes/{mount_name}"
+                        try:
+                            if os.path.isdir(volume_path):
+                                contents = os.listdir(volume_path)
+                                app_files = [f for f in contents if f.endswith('.app')]
+                                if app_files:
+                                    candidate_app = app_files[0]
+                                    if self._is_valid_target_app(candidate_app, volume_path):
+                                        app_source = os.path.join(volume_path, candidate_app)
+                                        app_name = candidate_app
+                                        mount_point = volume_path
+                                        logger.info(f"在已知挂载点找到目标应用: {app_name} 在 {mount_name}")
+                                        break
+                        except Exception as e:
+                            logger.debug(f"检查挂载点 {mount_name} 失败: {e}")
+                            continue
             
             if not app_source or not app_name:
                 raise Exception(f"在所有挂载点中未找到.app文件。可用挂载点: {list(volumes_after)}")
@@ -764,23 +778,37 @@ class ForceUpdateDialog(QDialog):
             # 目标路径
             target_app = f"/Applications/{app_name}"
             
-            # 安全检查：如果目标应用存在，确认它也是我们的应用
-            if os.path.exists(target_app):
-                if self._is_valid_target_app(app_name, '/Applications'):
-                    logger.info(f"确认替换现有应用: {target_app}")
-                    # 使用GUI方式获取管理员权限
-                    success = self._remove_app_with_permission(target_app)
-                    if not success:
-                        raise Exception("删除现有应用失败，需要管理员权限")
-                else:
-                    raise Exception(f"安全检查失败：目标位置的应用不是预期的应用: {target_app}")
-            else:
-                logger.info(f"目标位置无现有应用，将安装新应用: {target_app}")
-            
-            # 复制新应用
-            success = self._copy_app_with_permission(app_source, target_app)
-            if not success:
-                raise Exception("复制应用到Applications失败，需要管理员权限")
+            # 简单策略：尝试基本安装，失败就提示用户手动操作
+            try:
+                import shutil
+                
+                # 如果目标应用存在，简单尝试删除
+                if os.path.exists(target_app):
+                    if self._is_valid_target_app(app_name, '/Applications'):
+                        logger.info(f"目标应用已存在，尝试删除: {target_app}")
+                        try:
+                            shutil.rmtree(target_app)
+                            logger.info("成功删除现有应用")
+                        except Exception as e:
+                            logger.info(f"删除现有应用失败: {e}")
+                            # 删除失败，但继续尝试安装（可能会覆盖）
+                    else:
+                        raise Exception(f"安全检查失败：目标位置的应用不是预期的应用: {target_app}")
+                
+                # 尝试简单复制
+                try:
+                    shutil.copytree(app_source, target_app)
+                    logger.info(f"成功安装应用到: {target_app}")
+                except Exception as e:
+                    logger.warning(f"自动安装失败: {e}")
+                    # 安装失败，显示手动安装指导
+                    self._show_manual_install_guide(app_source, target_app)
+                    return
+                    
+            except Exception as e:
+                logger.error(f"安装过程出错: {e}")
+                self._show_manual_install_guide(app_source, target_app)
+                return
             
             # 自动处理macOS安全验证问题
             self.status_label.setText("正在处理安全验证...")
@@ -845,34 +873,14 @@ class ForceUpdateDialog(QDialog):
         from pathlib import Path
         
         try:
-            # 方法1: 直接移除隔离属性（不需要sudo）
+            # 只尝试简单的隔离属性移除，不使用任何可能需要权限的命令
             subprocess.run(['xattr', '-r', '-d', 'com.apple.quarantine', app_path], 
-                         check=False, capture_output=True)
-            
-            # 方法2: 使用绕过脚本（如果存在）
-            script_path = Path(__file__).parent.parent.parent / 'scripts' / 'bypass_gatekeeper.sh'
-            if script_path.exists():
-                subprocess.run(['bash', str(script_path), app_path], 
-                             check=False, capture_output=True)
-            
-            # 方法3: 手动标记为安全
-            try:
-                subprocess.run(['xattr', '-w', 'com.apple.security.cs.allow-jit', '1', app_path],
-                             check=False, capture_output=True)
-            except:
-                pass
-            
-            # 方法4: 使用开发者工具命令（如果可用）
-            try:
-                subprocess.run(['codesign', '--force', '--deep', '--sign', '-', app_path],
-                             check=False, capture_output=True)
-            except:
-                pass
-            
-            logger.info(f"已处理应用安全验证: {app_path}")
+                         check=False, capture_output=True, timeout=5)
+            logger.info(f"已尝试移除应用隔离属性: {app_path}")
             
         except Exception as e:
-            logger.warning(f"处理安全验证时出错: {e}")
+            logger.info(f"无法自动处理安全验证，用户需要手动允许应用运行: {e}")
+            # 完全不执行任何其他操作
     
     def _is_valid_target_app(self, app_name: str, volume_path: str) -> bool:
         """验证是否是我们要更新的目标应用"""
@@ -924,72 +932,101 @@ class ForceUpdateDialog(QDialog):
     def _remove_app_with_permission(self, app_path: str) -> bool:
         """使用GUI方式安全删除应用"""
         import subprocess
+        import shutil
+        import os
+        from PyQt6.QtCore import QTimer
         
+        # 首先尝试使用Python shutil直接删除（不阻塞GUI）
         try:
-            # 方法1: 使用osascript调用Finder删除（用户友好）
-            applescript = f'''
-            tell application "Finder"
-                try
-                    delete POSIX file "{app_path}"
-                    return true
-                on error
-                    return false
-                end try
-            end tell
-            '''
-            
-            result = subprocess.run(['osascript', '-e', applescript], 
-                                  capture_output=True, text=True, timeout=10)
-            
-            if result.returncode == 0 and 'true' in result.stdout:
-                logger.info("通过Finder成功删除应用")
-                return True
-                
-        except Exception as e:
-            logger.warning(f"Finder删除失败: {e}")
-        
-        try:
-            # 方法2: 使用AppleScript弹出权限对话框
-            applescript = f'''
-            do shell script "rm -rf '{app_path}'" with administrator privileges
-            '''
-            
-            result = subprocess.run(['osascript', '-e', applescript], 
-                                  capture_output=True, text=True, timeout=30)
-            
-            if result.returncode == 0:
-                logger.info("通过AppleScript管理员权限成功删除应用")
-                return True
-                
-        except Exception as e:
-            logger.warning(f"AppleScript权限删除失败: {e}")
-        
-        try:
-            # 方法3: 使用Python的shutil.rmtree（可能不需要权限）
-            import shutil
-            import os
-            
             if os.path.exists(app_path):
                 shutil.rmtree(app_path)
                 logger.info("通过Python shutil成功删除应用")
                 return True
-                
-        except PermissionError as e:
-            logger.warning(f"权限不足，无法删除: {e}")
+        except PermissionError:
+            logger.info("Python删除权限不足，需要使用系统权限")
         except Exception as e:
             logger.warning(f"Python删除失败: {e}")
         
+        # 完全跳过管理员权限要求，直接返回False让系统尝试其他安装方式
+        logger.info("跳过管理员权限删除，将使用智能安装策略")
         return False
     
-    def _copy_app_with_permission(self, source_path: str, target_path: str) -> bool:
-        """使用GUI方式安全复制应用"""
+    def _show_manual_install_guide(self, app_source: str, target_app: str):
+        """显示手动安装指导"""
+        from PyQt6.QtWidgets import QMessageBox
         import subprocess
+        import os
+        
+        app_name = os.path.basename(target_app)
+        mount_point = os.path.dirname(app_source)
+        
+        guide_message = f"""📦 需要手动完成安装
+
+自动安装遇到权限问题，请按以下步骤手动完成：
+
+1️⃣ 在Finder中打开 "{mount_point}"
+2️⃣ 将 "{app_name}" 拖拽到 "Applications" 文件夹  
+3️⃣ 如提示替换现有应用，点击"替换"
+4️⃣ 如需要输入密码，请输入管理员密码
+
+完成后点击"确定"重启应用"""
+        
+        # 创建自定义消息框，确保在暗色模式下可见
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("手动安装指导")
+        msg_box.setText(guide_message)
+        msg_box.setIcon(QMessageBox.Icon.Information)
+        
+        # 设置样式确保在暗色模式下可见
+        msg_box.setStyleSheet("""
+            QMessageBox {
+                background-color: palette(window);
+                color: palette(window-text);
+            }
+            QMessageBox QLabel {
+                color: palette(window-text);
+                font-size: 14px;
+                padding: 10px;
+            }
+            QMessageBox QPushButton {
+                background-color: palette(button);
+                color: palette(button-text);
+                border: 1px solid palette(mid);
+                border-radius: 4px;
+                padding: 8px 16px;
+                min-width: 80px;
+            }
+            QMessageBox QPushButton:hover {
+                background-color: palette(highlight);
+                color: palette(highlighted-text);
+            }
+        """)
+        
+        msg_box.exec()
+        
+        # 打开Finder到挂载点
+        try:
+            subprocess.run(['open', mount_point], check=False)
+            logger.info(f"已在Finder中打开: {mount_point}")
+        except:
+            pass
+        
+        # 打开Applications文件夹
+        try:
+            subprocess.run(['open', '/Applications'], check=False)
+            logger.info("已打开Applications文件夹")
+        except:
+            pass
+        
+        # 等待用户完成手动安装后重启
+        self._restart_application(target_app)
+    
+    def _copy_app_with_permission(self, source_path: str, target_path: str) -> bool:
+        """简单复制应用，失败就返回False"""
+        import shutil
+        import os
         
         try:
-            # 方法1: 使用Python shutil复制（可能不需要权限）
-            import shutil
-            import os
-            
             # 确保目标目录存在
             target_dir = os.path.dirname(target_path)
             if not os.path.exists(target_dir):
@@ -1001,33 +1038,12 @@ class ForceUpdateDialog(QDialog):
             
             # 复制应用
             shutil.copytree(source_path, target_path)
-            logger.info("通过Python shutil成功复制应用")
+            logger.info("成功复制应用")
             return True
                 
-        except PermissionError as e:
-            logger.warning(f"权限不足，无法复制: {e}")
         except Exception as e:
-            logger.warning(f"Python复制失败: {e}")
-        
-        try:
-            # 方法2: 使用AppleScript获取管理员权限复制
-            applescript = f'''
-            do shell script "cp -R '{source_path}' '{target_path}'" with administrator privileges
-            '''
-            
-            result = subprocess.run(['osascript', '-e', applescript], 
-                                  capture_output=True, text=True, timeout=60)
-            
-            if result.returncode == 0:
-                logger.info("通过AppleScript管理员权限成功复制应用")
-                return True
-                
-        except Exception as e:
-            logger.warning(f"AppleScript权限复制失败: {e}")
-        
-        # 所有方法都失败了
-        logger.error("所有复制方法都失败，需要用户手动复制应用")
-        return False
+            logger.warning(f"复制应用失败: {e}")
+            return False
     
     def _show_security_guide(self):
         """显示安全验证指导"""
