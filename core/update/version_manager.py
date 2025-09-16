@@ -237,11 +237,13 @@ class VersionManager:
             from .force_update_dialog_clean import ForceUpdateDialog
             dialog = ForceUpdateDialog(version_info, app_info)
             
-            # 显示对话框（用户无法关闭，必须更新）
+            # 显示对话框（用户可以选择关闭并退出程序）
             result = dialog.exec()
             
-            # 强制更新对话框会直接处理更新并退出程序
-            # 如果代码执行到这里，说明出现了错误
+            # 强制更新对话框的处理结果：
+            # - 如果用户完成更新，对话框会处理重启
+            # - 如果用户关闭对话框，程序会通过QApplication.quit()退出
+            # 如果代码执行到这里，说明对话框正常关闭，不需要退出
             return False
             
         except Exception as e:

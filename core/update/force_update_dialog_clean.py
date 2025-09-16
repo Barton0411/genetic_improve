@@ -1103,23 +1103,26 @@ class ForceUpdateDialog(QDialog):
         # 弹出确认对话框
         reply = QMessageBox.question(
             self, 
-            "确认关闭", 
-            "关闭更新窗口将跳过此次更新。\n\n"
-            "注意：强制更新包含重要的安全修复和功能改进。\n"
-            "跳过更新可能影响系统稳定性和安全性。\n\n"
-            "确定要关闭更新窗口吗？",
+            "确认退出程序", 
+            "关闭更新窗口将退出整个程序。\n\n"
+            "注意：由于存在强制更新，不更新将无法使用程序。\n"
+            "您需要完成更新才能继续使用系统。\n\n"
+            "确定要退出程序吗？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            # 用户确认关闭，停止下载线程（如果正在运行）
+            # 用户确认退出，停止下载线程（如果正在运行）
             if self.download_thread and self.download_thread.isRunning():
                 self.download_thread.quit()
                 self.download_thread.wait()
             
-            logger.info("用户选择跳过强制更新")
-            event.accept()  # 允许关闭
+            logger.info("用户选择退出程序而不是进行强制更新")
+            
+            # 退出整个应用程序
+            event.accept()  # 允许关闭对话框
+            QApplication.instance().quit()  # 退出整个程序
         else:
             event.ignore()  # 取消关闭
     
