@@ -1,0 +1,260 @@
+name: Build Cross-Platform Releases
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # 当推送版本标签时触发
+  workflow_dispatch:  # 允许手动触发
+    inputs:
+      version:
+        description: 'Version to build (e.g., 1.0.4)'
+        required: true
+        default: '1.0.4'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~\AppData\Local\pip\Cache
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Build Windows executable
+      run: |
+        python -m PyInstaller GeneticImprove_win.spec --clean --noconfirm
+    
+    - name: Create Windows installer
+      run: |
+        # 获取版本号
+        $VERSION = python -c "from version import get_version; print(get_version())"
+        echo "Building version: $VERSION"
+        
+        # 创建安装包目录
+        $INSTALLER_DIR = "installer_temp"
+        New-Item -ItemType Directory -Force -Path $INSTALLER_DIR
+        
+        # 复制应用文件
+        Copy-Item -Recurse -Force "dist\GeneticImprove" "$INSTALLER_DIR\GeneticImprove"
+        
+        # 创建启动脚本
+        @"
+        @echo off
+        cd /d "%~dp0GeneticImprove"
+        start "" "GeneticImprove.exe"
+        "@ | Out-File -FilePath "$INSTALLER_DIR\启动 Genetic Improve.bat" -Encoding ascii
+        
+        # 创建卸载脚本
+        @"
+        @echo off
+        echo 正在卸载 Genetic Improve...
+        cd /d "%~dp0"
+        rmdir /s /q GeneticImprove
+        del "启动 Genetic Improve.bat"
+        del "%~f0"
+        echo 卸载完成！
+        pause
+        "@ | Out-File -FilePath "$INSTALLER_DIR\卸载.bat" -Encoding ascii
+        
+        # 创建README
+        @"
+        Genetic Improve - 牛只遗传改良系统 v$VERSION
+        
+        安装说明：
+        1. 将整个文件夹复制到您想要安装的位置
+        2. 双击"启动 Genetic Improve.bat"运行程序
+        3. 如需卸载，双击"卸载.bat"
+        
+        系统要求：
+        - Windows 10 或更高版本
+        - 至少 2GB 可用内存
+        - 至少 1GB 可用磁盘空间
+        
+        技术支持：请联系开发团队
+        "@ | Out-File -FilePath "$INSTALLER_DIR\README.txt" -Encoding utf8
+        
+        # 压缩成ZIP文件
+        $ZIP_NAME = "GeneticImprove_v$VERSION" + "_win.zip"
+        Compress-Archive -Path "$INSTALLER_DIR\*" -DestinationPath $ZIP_NAME -Force
+        
+        echo "Windows package created: $ZIP_NAME"
+        
+        # 显示文件大小
+        $size = (Get-Item $ZIP_NAME).Length / 1MB
+        echo "Package size: $([math]::Round($size, 2)) MB"
+    
+    - name: Upload Windows artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: windows-release
+        path: GeneticImprove_v*_win.zip
+        retention-days: 30
+
+  build-macos:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/Library/Caches/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Build macOS application
+      run: |
+        python -m PyInstaller GeneticImprove.spec --clean --noconfirm
+    
+    - name: Create macOS DMG
+      run: |
+        # 获取版本号
+        VERSION=$(python -c "from version import get_version; print(get_version())")
+        echo "Building version: $VERSION"
+        
+        DMG_NAME="GeneticImprove_v${VERSION}_mac"
+        DMG_PATH="$DMG_NAME.dmg"
+        
+        # 删除旧的 DMG
+        rm -f "$DMG_PATH"
+        
+        # 创建临时目录用于 DMG 内容
+        DMG_DIR="dmg_temp"
+        rm -rf "$DMG_DIR"
+        mkdir -p "$DMG_DIR"
+        
+        # 复制应用到临时目录
+        cp -R "dist/GeneticImprove.app" "$DMG_DIR/"
+        
+        # 创建应用程序文件夹的符号链接
+        ln -s /Applications "$DMG_DIR/Applications"
+        
+        # 使用 hdiutil 创建 DMG
+        hdiutil create -volname "Genetic Improve" \
+            -srcfolder "$DMG_DIR" \
+            -ov -format UDZO \
+            "$DMG_PATH"
+        
+        # 清理临时目录
+        rm -rf "$DMG_DIR"
+        
+        echo "macOS DMG created: $DMG_PATH"
+        
+        # 显示文件大小
+        size=$(du -sh "$DMG_PATH" | cut -f1)
+        echo "DMG size: $size"
+    
+    - name: Upload macOS artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: macos-release
+        path: GeneticImprove_v*_mac.dmg
+        retention-days: 30
+
+  create-release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+    
+    - name: Get version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+    
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Genetic Improve v${{ steps.get_version.outputs.VERSION }}
+        body: |
+          ## Genetic Improve v${{ steps.get_version.outputs.VERSION }}
+          
+          ### 🚀 新功能和改进
+          - 优化个体选配报告生成性能，添加约束数据缓存机制
+          - 实现选配备注系统，详细说明约束过滤情况
+          - 新增近交系数和隐性基因约束分析功能
+          - 修复备注格式，去除冗余前缀文字
+          - 大幅提升报告生成速度，减少文件I/O操作
+          
+          ### 📦 安装包
+          - **Windows**: GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.zip
+          - **macOS**: GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_mac.dmg
+          
+          ### 📋 系统要求
+          - **Windows**: Windows 10 或更高版本
+          - **macOS**: macOS 10.15 (Catalina) 或更高版本
+          - 至少 2GB 可用内存
+          - 至少 1GB 可用磁盘空间
+          
+          ### 🔧 安装说明
+          **Windows**:
+          1. 下载并解压 ZIP 文件
+          2. 双击"启动 Genetic Improve.bat"运行程序
+          
+          **macOS**:
+          1. 下载并打开 DMG 文件
+          2. 将 Genetic Improve.app 拖拽到应用程序文件夹
+          3. 从启动台或应用程序文件夹启动
+        draft: false
+        prerelease: false
+    
+    - name: Upload Windows Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./windows-release/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.zip
+        asset_name: GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.zip
+        asset_content_type: application/zip
+    
+    - name: Upload macOS Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./macos-release/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_mac.dmg
+        asset_name: GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_mac.dmg
+        asset_content_type: application/octet-stream
