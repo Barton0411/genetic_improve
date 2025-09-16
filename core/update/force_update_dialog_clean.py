@@ -965,16 +965,19 @@ class ForceUpdateDialog(QDialog):
             logger.warning(f"AppleScript权限删除失败: {e}")
         
         try:
-            # 方法3: 尝试不需要权限的删除（如果应用权限允许）
-            result = subprocess.run(['rm', '-rf', app_path], 
-                                  capture_output=True, text=True, timeout=10)
+            # 方法3: 使用Python的shutil.rmtree（可能不需要权限）
+            import shutil
+            import os
             
-            if result.returncode == 0:
-                logger.info("直接删除成功")
+            if os.path.exists(app_path):
+                shutil.rmtree(app_path)
+                logger.info("通过Python shutil成功删除应用")
                 return True
                 
+        except PermissionError as e:
+            logger.warning(f"权限不足，无法删除: {e}")
         except Exception as e:
-            logger.warning(f"直接删除失败: {e}")
+            logger.warning(f"Python删除失败: {e}")
         
         return False
     
@@ -983,16 +986,28 @@ class ForceUpdateDialog(QDialog):
         import subprocess
         
         try:
-            # 方法1: 直接复制（无需权限的情况）
-            result = subprocess.run(['cp', '-R', source_path, target_path], 
-                                  capture_output=True, text=True, timeout=30)
+            # 方法1: 使用Python shutil复制（可能不需要权限）
+            import shutil
+            import os
             
-            if result.returncode == 0:
-                logger.info("直接复制成功")
-                return True
+            # 确保目标目录存在
+            target_dir = os.path.dirname(target_path)
+            if not os.path.exists(target_dir):
+                os.makedirs(target_dir, exist_ok=True)
+            
+            # 如果目标已存在，先删除
+            if os.path.exists(target_path):
+                shutil.rmtree(target_path)
+            
+            # 复制应用
+            shutil.copytree(source_path, target_path)
+            logger.info("通过Python shutil成功复制应用")
+            return True
                 
+        except PermissionError as e:
+            logger.warning(f"权限不足，无法复制: {e}")
         except Exception as e:
-            logger.warning(f"直接复制失败: {e}")
+            logger.warning(f"Python复制失败: {e}")
         
         try:
             # 方法2: 使用AppleScript获取管理员权限复制
@@ -1010,16 +1025,8 @@ class ForceUpdateDialog(QDialog):
         except Exception as e:
             logger.warning(f"AppleScript权限复制失败: {e}")
         
-        try:
-            # 方法3: 使用Finder复制（用户友好）
-            import shutil
-            shutil.copytree(source_path, target_path)
-            logger.info("通过Python shutil成功复制应用")
-            return True
-            
-        except Exception as e:
-            logger.warning(f"Python复制失败: {e}")
-        
+        # 所有方法都失败了
+        logger.error("所有复制方法都失败，需要用户手动复制应用")
         return False
     
     def _show_security_guide(self):
