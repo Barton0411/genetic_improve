@@ -50,9 +50,6 @@ joblib>=1.3.0
 # 日期时间处理 - 配种记录分析
 python-dateutil>=2.8.0
 
-# 系统平台检测 - 跨平台兼容性
-platform-detect>=1.0.0; sys_platform != "win32"
-
 # Windows特定依赖
 pywin32>=306; sys_platform == "win32"
 
