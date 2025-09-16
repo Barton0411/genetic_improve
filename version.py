@@ -12,11 +12,11 @@ VERSION_HISTORY = [
         "date": "2025-09-16",
         "author": "Development Team",
         "changes": [
-            "🚀 测试GitHub Actions自动构建流程",
-            "✅ 验证强制更新系统完整功能",
-            "🔧 OSS自动扫描API集成测试",
-            "📦 自动生成changelog并上传到OSS",
-            "🎯 端到端自动化部署流程验证"
+            "测试GitHub Actions自动构建流程",
+            "验证强制更新系统完整功能",
+            "OSS自动扫描API集成测试",
+            "自动生成changelog并上传到OSS",
+            "端到端自动化部署流程验证"
         ]
     },
     {

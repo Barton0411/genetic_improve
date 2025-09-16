@@ -33,10 +33,7 @@ def generate_changelog_content(version_info):
     content_lines = []
     
     for change in changes:
-        # 确保每行都有emoji或者标记
-        if not any(emoji in change for emoji in ['🔥', '⚡', '🛡️', '🎨', '📦', '🔒', '🚀', '💻', '🐛', '✨']):
-            change = f"✨ {change}"
-        
+        # 保留原始内容，让文件保存时处理编码
         content_lines.append(change)
     
     return '\n'.join(content_lines)
@@ -123,7 +120,11 @@ def main():
     
     print(f"Changes ({len(version_info.get('changes', []))} items):")
     for i, change in enumerate(version_info.get('changes', []), 1):
-        print(f"   {i}. {change}")
+        # 安全打印，移除或替换非ASCII字符
+        safe_change = change.encode('ascii', 'ignore').decode('ascii').strip()
+        if not safe_change:  # 如果移除后为空，使用占位符
+            safe_change = "[Contains non-ASCII characters]"
+        print(f"   {i}. {safe_change}")
     
     # 保存changelog文件
     changelog_file = save_changelog_file(current_version, content)
