@@ -9,7 +9,7 @@ from PyQt6.QtCore import (
     Qt, QDir, QUrl, pyqtSignal, QThread, QTimer
 )
 from PyQt6.QtGui import (
-    QFileSystemModel, QDesktopServices, QBrush, QPalette, QPixmap, QColor, QFont
+    QFileSystemModel, QDesktopServices, QBrush, QPalette, QPixmap, QColor, QFont, QIcon
 )
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
@@ -342,6 +342,11 @@ class MainWindow(QMainWindow):
             logging.info(f"MainWindow.__init__ started with username: {username}")
             super().__init__()
             logging.info("QMainWindow initialized")
+            
+            # 设置窗口图标
+            icon_path = Path(__file__).parent.parent / "icon.ico"
+            if icon_path.exists():
+                self.setWindowIcon(QIcon(str(icon_path)))
             
             self.settings = Settings()
             self.username = username

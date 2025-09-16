@@ -141,7 +141,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # 可以添加 .ico 图标文件
+    icon='icon.ico',  # 添加图标文件
 )
 
 coll = COLLECT(

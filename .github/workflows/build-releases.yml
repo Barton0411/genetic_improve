@@ -59,7 +59,7 @@ jobs:
         
         # 创建Inno Setup脚本
         @"
-        #define MyAppName "奶牛育种智选报告专家"
+        #define MyAppName "伊利奶牛选配"
         #define MyAppVersion "$VERSION"
         #define MyAppPublisher "Genetic Improve Team"
         #define MyAppURL "https://github.com/Barton0411/genetic_improve"
@@ -79,7 +79,7 @@ jobs:
         ArchitecturesInstallIn64BitMode=x64compatible
         DisableProgramGroupPage=yes
         OutputBaseFilename=GeneticImprove_v{#MyAppVersion}_win
-        ; SetupIconFile=_internal\icon.ico
+        SetupIconFile=icon.ico
         SolidCompression=yes
         WizardStyle=modern
         OutputDir=installer_output
@@ -196,10 +196,47 @@ jobs:
           
           # 创建ICNS文件
           if iconutil -c icns icon_temp.iconset -o "icon.icns"; then
-            echo "Successfully created icon.icns"
+            echo "✅ Successfully created icon.icns"
+            
+            # 验证ICNS文件
+            if [ -f "icon.icns" ]; then
+              echo "ICNS file size: $(ls -lh icon.icns | awk '{print $5}')"
+              # 检查ICNS文件内容
+              file "icon.icns"
+            fi
           else
-            echo "Failed to create ICNS file, will proceed without icon"
-            rm -f "icon.icns"
+            echo "❌ Failed to create ICNS file"
+            
+            # 尝试备用方法：使用简单的PNG转ICNS
+            if [ -f "icon.ico" ]; then
+              echo "🔄 Trying alternative method: PNG to ICNS"
+              
+              # 转换ICO为PNG
+              sips -s format png "icon.ico" --out "temp_icon.png" || true
+              
+              if [ -f "temp_icon.png" ]; then
+                # 创建简单的iconset
+                mkdir -p simple.iconset
+                sips -z 512 512 "temp_icon.png" --out "simple.iconset/icon_512x512.png" || true
+                sips -z 256 256 "temp_icon.png" --out "simple.iconset/icon_256x256.png" || true
+                sips -z 128 128 "temp_icon.png" --out "simple.iconset/icon_128x128.png" || true
+                sips -z 64 64 "temp_icon.png" --out "simple.iconset/icon_64x64.png" || true
+                sips -z 32 32 "temp_icon.png" --out "simple.iconset/icon_32x32.png" || true
+                sips -z 16 16 "temp_icon.png" --out "simple.iconset/icon_16x16.png" || true
+                
+                # 再次尝试创建ICNS
+                iconutil -c icns simple.iconset -o "icon.icns" || true
+                
+                # 清理
+                rm -rf simple.iconset temp_icon.png
+              fi
+            fi
+            
+            # 如果仍然失败，删除无效文件
+            if [ ! -f "icon.icns" ] || [ ! -s "icon.icns" ]; then
+              rm -f "icon.icns"
+              echo "⚠️ Will proceed without icon"
+            fi
           fi
           
           # 清理临时文件
@@ -225,8 +262,25 @@ jobs:
         
         # 如果有ICNS文件，确保正确设置
         if [ -f "icon.icns" ]; then
+          # 确保Resources目录存在
+          mkdir -p "dist/GeneticImprove.app/Contents/Resources/"
+          
+          # 复制图标文件
           cp "icon.icns" "dist/GeneticImprove.app/Contents/Resources/" || true
+          
+          # 设置Info.plist中的图标引用（尝试多种格式）
           /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile icon.icns" "dist/GeneticImprove.app/Contents/Info.plist" || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIconName icon" "dist/GeneticImprove.app/Contents/Info.plist" || true
+          
+          # 验证图标文件是否正确复制
+          if [ -f "dist/GeneticImprove.app/Contents/Resources/icon.icns" ]; then
+            echo "✅ 图标文件已成功复制到应用程序包中"
+            ls -la "dist/GeneticImprove.app/Contents/Resources/icon.icns"
+          else
+            echo "❌ 图标文件复制失败"
+          fi
+        else
+          echo "⚠️ 没有找到icon.icns文件"
         fi
         
         # 修复权限
