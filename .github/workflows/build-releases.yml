@@ -11,6 +11,11 @@ on:
         required: true
         default: '1.0.4'
 
+# 添加权限设置
+permissions:
+  contents: write  # 允许创建Release和上传文件
+  actions: read    # 允许读取Actions状态
+
 jobs:
   build-windows:
     runs-on: windows-latest
