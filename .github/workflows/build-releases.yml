@@ -219,27 +219,27 @@ jobs:
     
     - name: Fix app permissions, icon and security
       run: |
-        # 设置应用名称为中文
-        /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 奶牛育种智选报告专家" "dist/GeneticImprove.app/Contents/Info.plist" || true
-        /usr/libexec/PlistBuddy -c "Set :CFBundleName 奶牛育种智选报告专家" "dist/GeneticImprove.app/Contents/Info.plist" || true
+        # 设置应用名称为伊利选配
+        /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 伊利选配" "dist/伊利选配.app/Contents/Info.plist" || true
+        /usr/libexec/PlistBuddy -c "Set :CFBundleName 伊利选配" "dist/伊利选配.app/Contents/Info.plist" || true
         
         # 如果有ICNS文件，确保正确设置
         if [ -f "icon.icns" ]; then
-          cp "icon.icns" "dist/GeneticImprove.app/Contents/Resources/" || true
-          /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile icon.icns" "dist/GeneticImprove.app/Contents/Info.plist" || true
+          cp "icon.icns" "dist/伊利选配.app/Contents/Resources/" || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile icon.icns" "dist/伊利选配.app/Contents/Info.plist" || true
         fi
         
         # 修复权限
-        chmod -R 755 "dist/GeneticImprove.app"
-        find "dist/GeneticImprove.app" -name "*.dylib" -exec chmod 755 {} \;
-        find "dist/GeneticImprove.app" -name "*.so" -exec chmod 755 {} \;
+        chmod -R 755 "dist/伊利选配.app"
+        find "dist/伊利选配.app" -name "*.dylib" -exec chmod 755 {} \;
+        find "dist/伊利选配.app" -name "*.so" -exec chmod 755 {} \;
         
         # 清除扩展属性（避免"已损坏"警告）
-        xattr -cr "dist/GeneticImprove.app"
+        xattr -cr "dist/伊利选配.app"
         
         # 创建安装说明文件
         cat > "安装说明.txt" << 'EOF'
-        奶牛育种智选报告专家 安装说明
+        伊利选配 安装说明
         
         如果遇到"Apple无法验证此应用"的提示：
         
@@ -261,8 +261,8 @@ jobs:
         VERSION=$(python -c "from version import get_version; print(get_version())")
         echo "Building version: $VERSION"
         
-        APP_NAME="GeneticImprove"
-        DMG_NAME="${APP_NAME}_v${VERSION}_mac"
+        APP_NAME="伊利选配"
+        DMG_NAME="YiLiBreeding_v${VERSION}_mac"
         DMG_PATH="${DMG_NAME}.dmg"
         
         # 创建DMG背景图片目录（如果需要）
@@ -270,17 +270,17 @@ jobs:
         
         # 创建一个简单的背景图片说明文件
         cat > dmg_resources/README.txt << EOF
-        奶牛育种智选报告专家 v$VERSION
+        伊利选配 v$VERSION
         
         安装说明：
-        1. 将 Genetic Improve 拖拽到 Applications 文件夹
+        1. 将 伊利选配 拖拽到 Applications 文件夹
         2. 从启动台或应用程序文件夹启动应用
         3. 首次运行可能需要右键点击选择"打开"
         EOF
         
         # 使用create-dmg创建美观的DMG
         create-dmg \
-          --volname "奶牛育种智选报告专家" \
+          --volname "伊利选配" \
           --window-pos 200 120 \
           --window-size 600 300 \
           --icon-size 100 \
@@ -300,10 +300,10 @@ jobs:
             rm -rf "$DMG_DIR"
             mkdir -p "$DMG_DIR"
             
-            cp -R "dist/GeneticImprove.app" "$DMG_DIR/"
+            cp -R "dist/伊利选配.app" "$DMG_DIR/"
             ln -s /Applications "$DMG_DIR/Applications"
             
-            hdiutil create -volname "奶牛育种智选报告专家" \
+            hdiutil create -volname "伊利选配" \
                 -srcfolder "$DMG_DIR" \
                 -ov -format UDZO \
                 "$DMG_PATH"
@@ -327,7 +327,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: macos-release
-        path: GeneticImprove_v*_mac.dmg
+        path: YiLiBreeding_v*_mac.dmg
         retention-days: 30
 
   create-release:
@@ -350,9 +350,9 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ github.ref }}
-        name: Genetic Improve v${{ steps.get_version.outputs.VERSION }}
+        name: 伊利选配 v${{ steps.get_version.outputs.VERSION }}
         body: |
-          ## 奶牛育种智选报告专家 v${{ steps.get_version.outputs.VERSION }}
+          ## 伊利选配 v${{ steps.get_version.outputs.VERSION }}
           
           ### 🚀 新功能和改进
           - 优化个体选配报告生成性能，添加约束数据缓存机制
@@ -360,6 +360,7 @@ jobs:
           - 新增近交系数和隐性基因约束分析功能
           - 修复备注格式，去除冗余前缀文字
           - 大幅提升报告生成速度，减少文件I/O操作
+          - 修复Mac应用图标显示和Windows构建完整性问题
           
           ### 📦 下载选项
           
@@ -368,7 +369,7 @@ jobs:
           - **便携版**: `GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.zip` - 解压即用，无需安装
           
           #### macOS版本
-          - **DMG安装包**: `GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_mac.dmg`
+          - **DMG安装包**: `YiLiBreeding_v${{ steps.get_version.outputs.VERSION }}_mac.dmg`
           
           ### 📋 系统要求
           - **Windows**: Windows 10 或更高版本（64位）
@@ -390,11 +391,11 @@ jobs:
           
           **macOS**:
           1. 下载并打开 DMG 文件
-          2. 将 Genetic Improve.app 拖拽到应用程序文件夹
+          2. 将 伊利选配.app 拖拽到应用程序文件夹
           3. 从启动台或应用程序文件夹启动
         files: |
           ./windows-installer/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.exe
           ./windows-portable/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.zip
-          ./macos-release/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_mac.dmg
+          ./macos-release/YiLiBreeding_v${{ steps.get_version.outputs.VERSION }}_mac.dmg
         draft: false
         prerelease: false
