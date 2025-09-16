@@ -103,15 +103,19 @@ class VersionManager:
                     logger.info(f"API返回的最新版本: {latest_version}")
                     logger.info(f"完整API响应: {version_info}")
                     
-                    if latest_version and self._compare_versions(latest_version, self.current_version) > 0:
-                        logger.info(f"发现新版本 {latest_version}，服务器: {server_url}")
-                        
-                        # 检查是否强制更新
-                        force_update = self._is_force_update_required(version_info)
-                        
-                        return True, version_info, force_update
+                    if latest_version:
+                        if latest_version != self.current_version:
+                            # 版本不一致，强制更新到服务器版本
+                            logger.info(f"版本不一致！当前版本: {self.current_version}, 服务器版本: {latest_version}")
+                            logger.info(f"需要强制更新到 {latest_version}，服务器: {server_url}")
+                            # 版本不一致总是强制更新
+                            return True, version_info, True
+                        else:
+                            # 版本相同
+                            logger.info(f"当前已是最新版本 {self.current_version}，服务器: {server_url}")
+                            return False, None, False
                     else:
-                        logger.info(f"当前已是最新版本，服务器: {server_url}")
+                        logger.warning(f"服务器 {server_url} 未返回版本信息")
                         return False, None, False
                 else:
                     logger.warning(f"服务器 {server_url} 返回错误: HTTP {response.status_code}")
