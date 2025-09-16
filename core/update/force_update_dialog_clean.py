@@ -778,52 +778,17 @@ class ForceUpdateDialog(QDialog):
             # 目标路径
             target_app = f"/Applications/{app_name}"
             
-            # 简单策略：尝试基本安装，失败就提示用户手动操作
-            try:
-                import shutil
-                
-                # 如果目标应用存在，简单尝试删除
-                if os.path.exists(target_app):
-                    if self._is_valid_target_app(app_name, '/Applications'):
-                        logger.info(f"目标应用已存在，尝试删除: {target_app}")
-                        try:
-                            shutil.rmtree(target_app)
-                            logger.info("成功删除现有应用")
-                        except Exception as e:
-                            logger.info(f"删除现有应用失败: {e}")
-                            # 删除失败，但继续尝试安装（可能会覆盖）
-                    else:
-                        raise Exception(f"安全检查失败：目标位置的应用不是预期的应用: {target_app}")
-                
-                # 尝试简单复制
-                try:
-                    shutil.copytree(app_source, target_app)
-                    logger.info(f"成功安装应用到: {target_app}")
-                except Exception as e:
-                    logger.warning(f"自动安装失败: {e}")
-                    # 安装失败，显示手动安装指导
-                    self._show_manual_install_guide(app_source, target_app)
-                    return
-                    
-            except Exception as e:
-                logger.error(f"安装过程出错: {e}")
-                self._show_manual_install_guide(app_source, target_app)
-                return
+            # macOS最佳实践：直接显示手动安装指导，不进行自动安装
+            logger.info("macOS平台采用手动安装方式，避免权限和应用包问题")
+            self._show_manual_install_guide(app_source, target_app)
+            return
             
-            # 自动处理macOS安全验证问题
-            self.status_label.setText("正在处理安全验证...")
-            self._handle_macos_security(target_app)
+            # 用户手动安装后，DMG保持挂载状态以便用户操作
+            # 不自动卸载DMG，让用户完成安装后自行处理
+            self.status_label.setText("请按照指导完成手动安装")
             
-            # 卸载DMG
-            subprocess.run(['hdiutil', 'detach', mount_point, '-quiet'], check=False)
-            
-            self.status_label.setText("安装完成，即将重启应用...")
-            
-            # 显示安全验证指导
+            # 显示安全验证指导（如果用户需要）
             self._show_security_guide()
-            
-            # 延迟2秒后重启应用
-            QTimer.singleShot(2000, lambda: self._restart_application(target_app))
             
         except subprocess.CalledProcessError as e:
             self._show_error(f"安装失败: {e}")
@@ -960,16 +925,16 @@ class ForceUpdateDialog(QDialog):
         app_name = os.path.basename(target_app)
         mount_point = os.path.dirname(app_source)
         
-        guide_message = f"""📦 需要手动完成安装
+        guide_message = f"""📦 手动安装新版本
 
-自动安装遇到权限问题，请按以下步骤手动完成：
+新版本已下载完成，请手动安装：
 
-1️⃣ 在Finder中打开 "{mount_point}"
-2️⃣ 将 "{app_name}" 拖拽到 "Applications" 文件夹  
-3️⃣ 如提示替换现有应用，点击"替换"
-4️⃣ 如需要输入密码，请输入管理员密码
+1️⃣ 将 "{app_name}" 拖拽到 "Applications" 文件夹
+2️⃣ 如提示替换现有应用，点击"替换"
+3️⃣ macOS会自动处理版本替换
+4️⃣ 安装完成后可删除此DMG文件
 
-完成后点击"确定"重启应用"""
+完成后从Applications文件夹启动新版本"""
         
         # 创建自定义消息框，确保在暗色模式下可见
         msg_box = QMessageBox(self)
@@ -1018,8 +983,8 @@ class ForceUpdateDialog(QDialog):
         except:
             pass
         
-        # 等待用户完成手动安装后重启
-        self._restart_application(target_app)
+        # 不自动重启，让用户手动启动新版本
+        logger.info("用户需要手动安装完成后启动新版本")
     
     def _copy_app_with_permission(self, source_path: str, target_path: str) -> bool:
         """简单复制应用，失败就返回False"""
@@ -1050,15 +1015,13 @@ class ForceUpdateDialog(QDialog):
         from PyQt6.QtWidgets import QMessageBox
         
         guide_message = """🔒 安全提示
-        
-如果系统提示"无法验证开发者"，请按以下步骤操作：
 
-1️⃣ 点击"取消"关闭警告对话框
-2️⃣ 打开"系统偏好设置" → "安全性与隐私"
-3️⃣ 在"通用"选项卡中，点击"仍要打开"
-4️⃣ 或者右键点击应用 → 选择"打开"
+如果系统提示"无法验证开发者"：
 
-应用会自动重启，如遇问题请联系技术支持。"""
+1️⃣ 右键点击应用 → 选择"打开"
+2️⃣ 或在"系统偏好设置" → "安全性与隐私" → "通用"中点击"仍要打开"
+
+这是正常的macOS安全机制，应用本身是安全的。"""
         
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("安装完成")
