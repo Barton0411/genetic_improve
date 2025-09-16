@@ -117,13 +117,13 @@ icon_path = 'icon.icns' if os.path.exists('icon.icns') else None
 
 app = BUNDLE(
     coll,
-    name='伊利选配.app',
+    name='GeneticImprove.app',
     icon=icon_path,
     bundle_identifier='com.yili.breeding.app',
     version='1.0.5',
     info_plist={
-        'CFBundleName': '伊利选配',
-        'CFBundleDisplayName': '伊利选配',
+        'CFBundleName': '伊利奶牛选配',
+        'CFBundleDisplayName': '伊利奶牛选配',
         'CFBundleVersion': '1.0.5',
         'CFBundleShortVersionString': '1.0.5',
         'CFBundleIdentifier': 'com.yili.breeding.app',
