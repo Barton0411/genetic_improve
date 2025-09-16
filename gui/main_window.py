@@ -427,7 +427,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(delay, self.check_and_update_database_on_startup)
 
     def setup_ui(self):
-        self.setWindowTitle(f"奶牛育种智选报告专家 v{self.version}")
+        self.setWindowTitle(f"伊利奶牛选配 v{self.version}")
         self.setGeometry(100, 100, 1600, 900)
 
         central_widget = QWidget()
@@ -3087,7 +3087,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(about_dialog)
         
         # 软件标题
-        title_label = QLabel("奶牛育种智选报告专家")
+        title_label = QLabel("伊利奶牛选配")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_label.setStyleSheet("""
             QLabel {
@@ -3168,7 +3168,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(history_browser)
         
         # 版权信息
-        copyright_label = QLabel("© 2025 奶牛育种智选报告专家开发团队")
+        copyright_label = QLabel("© 2025 伊利奶牛选配开发团队")
         copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         copyright_label.setStyleSheet("""
             QLabel {

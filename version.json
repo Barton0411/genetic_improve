@@ -1,0 +1,23 @@
+{
+"version": "1.0.4",
+"release_date": "2025-09-16",
+"changes": [
+    "修复Mac应用图标显示问题",
+    "优化Windows构建完整性",
+    "更新应用名称为伊利奶牛选配"
+],
+"downloads": {
+    "windows_installer": {
+    "url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.0.4/GeneticImprove_v1.0.4_win.exe",
+    "size": "160.6MB"
+    },
+    "windows_portable": {
+    "url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.0.4/GeneticImprove_v1.0.4_win.zip",
+    "size": "226.67MB"
+    },
+    "macos": {
+    "url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.0.4/GeneticImprove_v1.0.4_mac.dmg",
+    "size": "275.26MB"
+    }
+}
+}

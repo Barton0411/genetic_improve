@@ -43,6 +43,14 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
     
+    - name: Generate changelog
+      run: |
+        python auto_generate_changelog.py
+        echo "Generated changelog file:"
+        if (Test-Path "CHANGELOG_v*") { 
+          Get-Item "CHANGELOG_v*" | ForEach { Write-Host $_.Name }
+        }
+    
     - name: Build Windows executable (OneDir)
       run: |
         python -m PyInstaller GeneticImprove_win.spec --clean --noconfirm
@@ -144,6 +152,13 @@ jobs:
         name: windows-portable
         path: GeneticImprove_v*_win.zip
         retention-days: 30
+    
+    - name: Upload changelog artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: changelog-file
+        path: CHANGELOG_v*.txt
+        retention-days: 30
 
   build-macos:
     runs-on: macos-latest
@@ -172,6 +187,12 @@ jobs:
         pip install pyinstaller
         # 安装创建DMG的工具
         brew install create-dmg
+    
+    - name: Generate changelog
+      run: |
+        python3 auto_generate_changelog.py
+        echo "Generated changelog file:"
+        ls -la CHANGELOG_v* || echo "No changelog files found"
     
     - name: Convert ICO to ICNS and build macOS application
       run: |
@@ -384,8 +405,64 @@ jobs:
         path: GeneticImprove_v*_mac.dmg
         retention-days: 30
 
+  upload-to-oss:
+    needs: [build-windows, build-macos] 
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download changelog artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: changelog-file
+        path: ./changelog
+    
+    - name: Get version
+      id: get_version
+      run: |
+        if [ "${{ github.event_name }}" == "push" ] && [[ "${{ github.ref }}" =~ refs/tags/.* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+        else
+          VERSION="${{ github.event.inputs.version }}"
+        fi
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "Detected version: $VERSION"
+    
+    - name: Setup OSS CLI
+      run: |
+        # 下载并安装阿里云OSS CLI工具
+        wget -q https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64 -O ossutil
+        chmod +x ossutil
+        
+        # 配置OSS CLI（使用GitHub Secrets中的密钥）
+        ./ossutil config -e oss-cn-beijing.aliyuncs.com -i "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" -k "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
+    
+    - name: Upload changelog to OSS
+      run: |
+        VERSION="${{ steps.get_version.outputs.VERSION }}"
+        
+        # 检查changelog文件是否存在
+        if [ -f "changelog/CHANGELOG_v${VERSION}.txt" ]; then
+          echo "📤 上传 CHANGELOG_v${VERSION}.txt 到 OSS..."
+          
+          # 上传到OSS releases目录
+          ./ossutil cp "changelog/CHANGELOG_v${VERSION}.txt" "oss://genetic-improve/releases/v${VERSION}/CHANGELOG.txt" --force
+          
+          # 验证上传
+          ./ossutil stat "oss://genetic-improve/releases/v${VERSION}/CHANGELOG.txt"
+          
+          echo "✅ Changelog 上传完成！"
+          echo "OSS URL: https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v${VERSION}/CHANGELOG.txt"
+        else
+          echo "❌ 未找到 changelog 文件: changelog/CHANGELOG_v${VERSION}.txt"
+          ls -la changelog/
+          exit 1
+        fi
+
   create-release:
-    needs: [build-windows, build-macos]
+    needs: [build-windows, build-macos, upload-to-oss]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     
@@ -400,21 +477,55 @@ jobs:
       id: get_version
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
     
+    - name: Download changelog artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: changelog-file
+        path: ./changelog
+    
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        VERSION="${{ steps.get_version.outputs.VERSION }}"
+        CHANGELOG_FILE="changelog/CHANGELOG_v${VERSION}.txt"
+        
+        if [ -f "$CHANGELOG_FILE" ]; then
+          echo "Found changelog file, reading content..."
+          
+          # 读取changelog内容并格式化为GitHub Release格式
+          echo "RELEASE_BODY<<EOF" >> $GITHUB_OUTPUT
+          echo "## 伊利奶牛选配 v${VERSION}" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### 🚀 更新内容" >> $GITHUB_OUTPUT
+          
+          # 处理changelog文件内容，每行前面添加-
+          while IFS= read -r line; do
+            if [ -n "$line" ]; then
+              echo "- $line" >> $GITHUB_OUTPUT
+            fi
+          done < "$CHANGELOG_FILE"
+        else
+          echo "No changelog found, using default content..."
+          echo "RELEASE_BODY<<EOF" >> $GITHUB_OUTPUT
+          echo "## 伊利奶牛选配 v${VERSION}" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### 🚀 新功能和改进" >> $GITHUB_OUTPUT
+          echo "- 完善版本自动更新系统，支持GUI对话框选择下载" >> $GITHUB_OUTPUT
+          echo "- 修复版本检查服务器连接逻辑，增加备用服务器支持" >> $GITHUB_OUTPUT
+          echo "- 优化下载URL获取机制，直接从版本信息API响应中提取" >> $GITHUB_OUTPUT
+          echo "- 更新PyQt6更新对话框，替换原有tkinter实现避免崩溃" >> $GITHUB_OUTPUT
+          echo "- 更新全面的系统文档和部署指南" >> $GITHUB_OUTPUT
+          echo "- 优化requirements.txt依赖版本和兼容性" >> $GITHUB_OUTPUT
+        fi
+        echo "EOF" >> $GITHUB_OUTPUT
+    
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ github.ref }}
         name: 伊利奶牛选配 v${{ steps.get_version.outputs.VERSION }}
         body: |
-          ## 伊利奶牛选配 v${{ steps.get_version.outputs.VERSION }}
-          
-          ### 🚀 新功能和改进
-          - 完善版本自动更新系统，支持GUI对话框选择下载
-          - 修复版本检查服务器连接逻辑，增加备用服务器支持  
-          - 优化下载URL获取机制，直接从版本信息API响应中提取
-          - 更新PyQt6更新对话框，替换原有tkinter实现避免崩溃
-          - 更新全面的系统文档和部署指南
-          - 优化requirements.txt依赖版本和兼容性
+          ${{ steps.release_notes.outputs.RELEASE_BODY }}
           
           ### 📦 下载选项
           

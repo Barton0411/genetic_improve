@@ -15,7 +15,7 @@ from core.data.update_manager import (
 class LoginDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("奶牛育种智选报告专家 - 登录")
+        self.setWindowTitle("伊利奶牛选配 - 登录")
         self.setFixedSize(350, 200)
         
         # 设置窗口标志，移除WindowStaysOnTopHint避免Windows上的层级问题

@@ -71,16 +71,16 @@ class VersionManager:
                 "file_extension": ".tar.gz"
             }
     
-    def check_for_updates(self) -> Tuple[bool, Optional[Dict]]:
+    def check_for_updates(self) -> Tuple[bool, Optional[Dict], bool]:
         """
         检查是否有新版本（支持备用服务器重试）
         
         Returns:
-            (是否有更新, 版本信息字典)
+            (是否有更新, 版本信息字典, 是否强制更新)
         """
         if requests is None:
             logger.error("requests模块未安装，无法检查版本更新")
-            return False, None
+            return False, None, False
             
         # 尝试主服务器和备用服务器
         servers_to_try = [self.server_url] + [s for s in self.backup_servers if s != self.server_url]
@@ -100,10 +100,14 @@ class VersionManager:
                     
                     if latest_version and self._compare_versions(latest_version, self.current_version) > 0:
                         logger.info(f"发现新版本 {latest_version}，服务器: {server_url}")
-                        return True, version_info
+                        
+                        # 检查是否强制更新
+                        force_update = self._is_force_update_required(version_info)
+                        
+                        return True, version_info, force_update
                     else:
                         logger.info(f"当前已是最新版本，服务器: {server_url}")
-                        return False, None
+                        return False, None, False
                 else:
                     logger.warning(f"服务器 {server_url} 返回错误: HTTP {response.status_code}")
                     continue
@@ -113,7 +117,30 @@ class VersionManager:
                 continue
         
         logger.error("所有服务器都无法访问")
-        return False, None
+        return False, None, False
+    
+    def _is_force_update_required(self, version_info: Dict) -> bool:
+        """判断是否需要强制更新"""
+        
+        data = version_info.get('data', {})
+        
+        # 1. 检查force_update标志
+        if data.get('force_update', False):
+            return True
+        
+        # 2. 检查最低支持版本
+        min_supported_version = data.get('min_supported_version')
+        if min_supported_version:
+            if self._compare_versions(self.current_version, min_supported_version) < 0:
+                logger.info(f"当前版本 {self.current_version} 低于最低支持版本 {min_supported_version}，强制更新")
+                return True
+        
+        # 3. 检查安全更新标志
+        if data.get('security_update', False):
+            logger.info("检测到安全更新，强制更新")
+            return True
+        
+        return False
     
     def _compare_versions(self, version1: str, version2: str) -> int:
         """
@@ -173,6 +200,109 @@ class VersionManager:
             import traceback
             logger.error(f"对话框错误详情: {traceback.format_exc()}")
             return False, None
+    
+    def handle_force_update(self, version_info: Dict) -> bool:
+        """
+        处理强制更新
+        
+        Args:
+            version_info: 版本信息
+            
+        Returns:
+            是否需要退出程序
+        """
+        try:
+            if not QT_AVAILABLE:
+                logger.error("PyQt6不可用，无法显示强制更新对话框")
+                # 如果GUI不可用，直接开始命令行更新
+                return self._handle_force_update_cli(version_info)
+            
+            # 获取当前应用信息
+            from .smart_updater import detect_current_installation
+            app_info = detect_current_installation()
+            
+            # 创建强制更新对话框
+            from .force_update_dialog_clean import ForceUpdateDialog
+            dialog = ForceUpdateDialog(version_info, app_info)
+            
+            # 显示对话框（用户无法关闭，必须更新）
+            result = dialog.exec()
+            
+            # 强制更新对话框会直接处理更新并退出程序
+            # 如果代码执行到这里，说明出现了错误
+            return False
+            
+        except Exception as e:
+            logger.error(f"处理强制更新失败: {e}")
+            import traceback
+            logger.error(f"强制更新错误详情: {traceback.format_exc()}")
+            # 如果GUI更新失败，尝试命令行更新
+            return self._handle_force_update_cli(version_info)
+    
+    def _handle_force_update_cli(self, version_info: Dict) -> bool:
+        """
+        命令行模式的强制更新
+        
+        Args:
+            version_info: 版本信息
+            
+        Returns:
+            是否需要退出程序  
+        """
+        try:
+            logger.info("GUI不可用，使用命令行模式进行强制更新")
+            
+            # 获取当前应用信息
+            from .smart_updater import SmartUpdater, detect_current_installation
+            
+            app_info = detect_current_installation()
+            updater = SmartUpdater()
+            
+            # 准备更新信息
+            update_info = {
+                'version': version_info.get('data', {}).get('version') or version_info.get('version'),
+                'package_url': self._get_cli_package_url(version_info, app_info),
+                'package_size': version_info.get('data', {}).get('package_size', 0),
+                'md5': version_info.get('data', {}).get('md5', ''),
+                'force_update': True
+            }
+            
+            print(f"\\n🔄 检测到强制更新: {update_info['version']}")
+            print("📋 更新内容:")
+            
+            changes = version_info.get('data', {}).get('changes', [])
+            if isinstance(changes, list):
+                for i, change in enumerate(changes, 1):
+                    print(f"   {i}. {change}")
+            
+            print("\\n⚠️  为确保系统安全，必须立即更新。正在开始更新过程...")
+            
+            # 执行强制更新
+            success = updater.prepare_forced_update(update_info)
+            
+            if success:
+                print("✅ 更新程序已启动，应用即将重启...")
+                return True  # 需要退出程序
+            else:
+                print("❌ 更新失败，请联系技术支持")
+                return False
+                
+        except Exception as e:
+            logger.error(f"命令行强制更新失败: {e}")
+            return False
+    
+    def _get_cli_package_url(self, version_info: Dict, app_info: Dict) -> str:
+        """获取命令行模式的包下载URL"""
+        
+        data = version_info.get('data', {})
+        platform = app_info.get('platform', 'unknown')
+        
+        if platform == 'windows':
+            return data.get('win_download_url', '')
+        elif platform == 'darwin':
+            return data.get('mac_download_url', '')
+        else:
+            return data.get('linux_download_url', '')
     
     def get_download_url_from_version_info(self, version_info: Dict, platform: str) -> Optional[str]:
         """
@@ -348,45 +478,49 @@ def check_and_handle_updates(server_url: str = "https://api.genepop.com") -> boo
         manager = VersionManager(server_url)
         
         # 检查更新
-        has_update, version_info = manager.check_for_updates()
+        has_update, version_info, is_force_update = manager.check_for_updates()
         
         if not has_update:
             logger.info("当前已是最新版本")
             return False
         
         latest_version_for_log = version_info.get('data', {}).get('version') or version_info.get('version', '未知')
-        logger.info(f"发现新版本: {latest_version_for_log}")
+        logger.info(f"发现新版本: {latest_version_for_log}，强制更新: {is_force_update}")
         
-        # 显示更新对话框
-        should_update, selected_platform = manager.show_update_dialog(version_info)
-        
-        if not should_update:
-            logger.info("用户选择跳过更新")
+        if is_force_update:
+            # 强制更新 - 显示强制更新对话框
+            return manager.handle_force_update(version_info)
+        else:
+            # 可选更新 - 显示原有的更新对话框
+            should_update, selected_platform = manager.show_update_dialog(version_info)
+            
+            if not should_update:
+                logger.info("用户选择跳过更新")
+                return False
+            
+            # 获取版本号（处理不同的API响应格式）
+            latest_version = version_info.get('data', {}).get('version') or version_info.get('version')
+            if not latest_version:
+                logger.error("无法获取版本号信息")
+                return False
+            
+            # 获取下载链接
+            download_url = manager.get_download_url_from_version_info(version_info, selected_platform)
+            
+            if not download_url:
+                logger.error("获取下载链接失败，请稍后再试")
+                return False
+            
+            # 下载并安装
+            success = manager.download_and_install(download_url, latest_version)
+            
+            if success:
+                # 记录日志
+                logger.info("下载已开始，建议现在退出程序以便安装新版本")
+                # 默认不退出程序，让用户自己决定
+                return False
+            
             return False
-        
-        # 获取版本号（处理不同的API响应格式）
-        latest_version = version_info.get('data', {}).get('version') or version_info.get('version')
-        if not latest_version:
-            logger.error("无法获取版本号信息")
-            return False
-        
-        # 获取下载链接
-        download_url = manager.get_download_url_from_version_info(version_info, selected_platform)
-        
-        if not download_url:
-            logger.error("获取下载链接失败，请稍后再试")
-            return False
-        
-        # 下载并安装
-        success = manager.download_and_install(download_url, latest_version)
-        
-        if success:
-            # 记录日志
-            logger.info("下载已开始，建议现在退出程序以便安装新版本")
-            # 默认不退出程序，让用户自己决定
-            return False
-        
-        return False
         
     except Exception as e:
         logger.error(f"更新检查失败: {e}")

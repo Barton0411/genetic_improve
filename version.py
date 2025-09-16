@@ -3,10 +3,37 @@
 """
 
 # 版本号格式: 主版本号.次版本号.修订号
-VERSION = "1.0.5"
+VERSION = "1.0.5.1"
 
 # 版本历史
 VERSION_HISTORY = [
+    {
+        "version": "1.0.5.1",
+        "date": "2025-09-16",
+        "author": "Development Team",
+        "changes": [
+            "🚀 测试GitHub Actions自动构建流程",
+            "✅ 验证强制更新系统完整功能",
+            "🔧 OSS自动扫描API集成测试",
+            "📦 自动生成changelog并上传到OSS",
+            "🎯 端到端自动化部署流程验证"
+        ]
+    },
+    {
+        "version": "1.0.6",
+        "date": "2025-09-16",
+        "author": "Development Team", 
+        "changes": [
+            "🔥 实现强制更新系统，确保关键更新必须安装",
+            "⚡ 新增应用内智能更新功能，无需手动下载安装包",
+            "🛡️ 增强更新安全性，支持完整文件替换和回滚机制",
+            "🎨 全新设计的更新对话框，支持深色/浅色模式自动适配",
+            "📦 智能路径检测，支持任意安装位置的程序更新",
+            "🔒 保护用户数据，更新过程中项目文件和配置安全不受影响",
+            "🚀 三阶段更新流程：准备→执行→验证，确保更新可靠性",
+            "💻 跨平台兼容，完美支持Windows、macOS和Linux系统"
+        ]
+    },
     {
         "version": "1.0.5",
         "date": "2025-09-16",
@@ -110,7 +137,11 @@ def get_version():
 
 # 获取版本信息
 def get_version_info():
-    """获取完整版本信息"""
+    """获取当前版本的完整信息"""
+    for v in VERSION_HISTORY:
+        if v["version"] == VERSION:
+            return v
+    # 如果没找到，返回第一个（最新的）
     if VERSION_HISTORY:
         return VERSION_HISTORY[0]
     return None
