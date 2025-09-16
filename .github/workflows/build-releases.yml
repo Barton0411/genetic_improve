@@ -43,73 +43,105 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
     
-    - name: Build Windows executable
+    - name: Build Windows executable (OneDir)
       run: |
         python -m PyInstaller GeneticImprove_win.spec --clean --noconfirm
     
-    - name: Create Windows installer
+    - name: Install Inno Setup
+      run: |
+        choco install innosetup -y
+    
+    - name: Create Inno Setup script
       run: |
         # 获取版本号
         $VERSION = python -c "from version import get_version; print(get_version())"
         echo "Building version: $VERSION"
         
-        # 创建安装包目录
-        $INSTALLER_DIR = "installer_temp"
-        New-Item -ItemType Directory -Force -Path $INSTALLER_DIR
-        
-        # 复制应用文件
-        Copy-Item -Recurse -Force "dist\GeneticImprove" "$INSTALLER_DIR\GeneticImprove"
-        
-        # 创建启动脚本
+        # 创建Inno Setup脚本
         @"
-        @echo off
-        cd /d "%~dp0GeneticImprove"
-        start "" "GeneticImprove.exe"
-        "@ | Out-File -FilePath "$INSTALLER_DIR\启动 Genetic Improve.bat" -Encoding ascii
+        #define MyAppName "奶牛育种智选报告专家"
+        #define MyAppVersion "$VERSION"
+        #define MyAppPublisher "Genetic Improve Team"
+        #define MyAppURL "https://github.com/Barton0411/genetic_improve"
+        #define MyAppExeName "GeneticImprove.exe"
         
-        # 创建卸载脚本
-        @"
-        @echo off
-        echo 正在卸载 Genetic Improve...
-        cd /d "%~dp0"
-        rmdir /s /q GeneticImprove
-        del "启动 Genetic Improve.bat"
-        del "%~f0"
-        echo 卸载完成！
-        pause
-        "@ | Out-File -FilePath "$INSTALLER_DIR\卸载.bat" -Encoding ascii
+        [Setup]
+        AppId={{7133EFA4-A392-4138-BA22-2BEB199B5056}
+        AppName={#MyAppName}
+        AppVersion={#MyAppVersion}
+        AppPublisher={#MyAppPublisher}
+        AppPublisherURL={#MyAppURL}
+        AppSupportURL={#MyAppURL}
+        AppUpdatesURL={#MyAppURL}
+        DefaultDirName={autopf}\{#MyAppName}
+        UninstallDisplayIcon={app}\{#MyAppExeName}
+        ArchitecturesAllowed=x64compatible
+        ArchitecturesInstallIn64BitMode=x64compatible
+        DisableProgramGroupPage=yes
+        OutputBaseFilename=GeneticImprove_v{#MyAppVersion}_win_setup
+        SetupIconFile=_internal\icon.ico
+        SolidCompression=yes
+        WizardStyle=modern
+        OutputDir=installer_output
+        Compression=lzma2
+        CompressionThreads=auto
         
-        # 创建README
-        @"
-        Genetic Improve - 牛只遗传改良系统 v$VERSION
+        [Languages]
+        Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
         
-        安装说明：
-        1. 将整个文件夹复制到您想要安装的位置
-        2. 双击"启动 Genetic Improve.bat"运行程序
-        3. 如需卸载，双击"卸载.bat"
+        [Tasks]
+        Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
         
-        系统要求：
-        - Windows 10 或更高版本
-        - 至少 2GB 可用内存
-        - 至少 1GB 可用磁盘空间
+        [Files]
+        Source: "dist\GeneticImprove\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
         
-        技术支持：请联系开发团队
-        "@ | Out-File -FilePath "$INSTALLER_DIR\README.txt" -Encoding utf8
+        [Icons]
+        Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\_internal\icon.ico"
+        Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\_internal\icon.ico"; Tasks: desktopicon
         
-        # 压缩成ZIP文件
+        [Run]
+        Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+        "@ | Out-File -FilePath setup.iss -Encoding UTF8
+        
+        echo "Inno Setup script created"
+    
+    - name: Build installer with Inno Setup
+      run: |
+        # 创建输出目录
+        New-Item -ItemType Directory -Force -Path installer_output
+        
+        # 编译安装包
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup.iss
+        
+        # 显示生成的文件
+        Get-ChildItem installer_output
+    
+    - name: Create portable ZIP package
+      run: |
+        # 获取版本号
+        $VERSION = python -c "from version import get_version; print(get_version())"
+        
+        # 创建便携版ZIP
         $ZIP_NAME = "GeneticImprove_v$VERSION" + "_win.zip"
-        Compress-Archive -Path "$INSTALLER_DIR\*" -DestinationPath $ZIP_NAME -Force
+        Compress-Archive -Path "dist\GeneticImprove\*" -DestinationPath $ZIP_NAME -Force
         
-        echo "Windows package created: $ZIP_NAME"
+        echo "Portable package created: $ZIP_NAME"
         
         # 显示文件大小
         $size = (Get-Item $ZIP_NAME).Length / 1MB
         echo "Package size: $([math]::Round($size, 2)) MB"
     
-    - name: Upload Windows artifact
+    - name: Upload Windows installer
       uses: actions/upload-artifact@v4
       with:
-        name: windows-release
+        name: windows-installer
+        path: installer_output/*.exe
+        retention-days: 30
+    
+    - name: Upload Windows portable
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-portable
         path: GeneticImprove_v*_win.zip
         retention-days: 30
 
@@ -138,48 +170,98 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pyinstaller
+        # 安装创建DMG的工具
+        brew install create-dmg
     
     - name: Build macOS application
       run: |
         python -m PyInstaller GeneticImprove.spec --clean --noconfirm
     
-    - name: Create macOS DMG
+    - name: Add icon and fix permissions
+      run: |
+        # 确保应用图标正确设置
+        if [ -f "_internal/icon.icns" ]; then
+          cp "_internal/icon.icns" "dist/GeneticImprove.app/Contents/Resources/icon.icns"
+          # 更新Info.plist中的图标引用
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile icon.icns" "dist/GeneticImprove.app/Contents/Info.plist"
+        fi
+        
+        # 设置应用名称为中文
+        /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 奶牛育种智选报告专家" "dist/GeneticImprove.app/Contents/Info.plist"
+        /usr/libexec/PlistBuddy -c "Set :CFBundleName 奶牛育种智选报告专家" "dist/GeneticImprove.app/Contents/Info.plist"
+        
+        # 修复权限
+        chmod -R 755 "dist/GeneticImprove.app"
+        
+        # 清除扩展属性（避免"已损坏"警告）
+        xattr -cr "dist/GeneticImprove.app"
+    
+    - name: Create beautiful DMG with background
       run: |
         # 获取版本号
         VERSION=$(python -c "from version import get_version; print(get_version())")
         echo "Building version: $VERSION"
         
-        DMG_NAME="GeneticImprove_v${VERSION}_mac"
-        DMG_PATH="$DMG_NAME.dmg"
+        APP_NAME="GeneticImprove"
+        DMG_NAME="${APP_NAME}_v${VERSION}_mac"
+        DMG_PATH="${DMG_NAME}.dmg"
         
-        # 删除旧的 DMG
-        rm -f "$DMG_PATH"
+        # 创建DMG背景图片目录（如果需要）
+        mkdir -p dmg_resources
         
-        # 创建临时目录用于 DMG 内容
-        DMG_DIR="dmg_temp"
-        rm -rf "$DMG_DIR"
-        mkdir -p "$DMG_DIR"
+        # 创建一个简单的背景图片说明文件
+        cat > dmg_resources/README.txt << EOF
+        奶牛育种智选报告专家 v$VERSION
         
-        # 复制应用到临时目录
-        cp -R "dist/GeneticImprove.app" "$DMG_DIR/"
+        安装说明：
+        1. 将 Genetic Improve 拖拽到 Applications 文件夹
+        2. 从启动台或应用程序文件夹启动应用
+        3. 首次运行可能需要右键点击选择"打开"
+        EOF
         
-        # 创建应用程序文件夹的符号链接
-        ln -s /Applications "$DMG_DIR/Applications"
-        
-        # 使用 hdiutil 创建 DMG
-        hdiutil create -volname "Genetic Improve" \
-            -srcfolder "$DMG_DIR" \
-            -ov -format UDZO \
-            "$DMG_PATH"
-        
-        # 清理临时目录
-        rm -rf "$DMG_DIR"
+        # 使用create-dmg创建美观的DMG
+        create-dmg \
+          --volname "奶牛育种智选报告专家" \
+          --window-pos 200 120 \
+          --window-size 600 450 \
+          --icon-size 100 \
+          --icon "${APP_NAME}.app" 150 225 \
+          --hide-extension "${APP_NAME}.app" \
+          --app-drop-link 450 225 \
+          --text-size 14 \
+          --format UDZO \
+          --hdiutil-quiet \
+          "$DMG_PATH" \
+          "dist/" || {
+            # 如果create-dmg失败，使用简单方法
+            echo "create-dmg failed, using simple method"
+            
+            DMG_DIR="dmg_temp"
+            rm -rf "$DMG_DIR"
+            mkdir -p "$DMG_DIR"
+            
+            cp -R "dist/GeneticImprove.app" "$DMG_DIR/"
+            ln -s /Applications "$DMG_DIR/Applications"
+            
+            hdiutil create -volname "奶牛育种智选报告专家" \
+                -srcfolder "$DMG_DIR" \
+                -ov -format UDZO \
+                "$DMG_PATH"
+            
+            rm -rf "$DMG_DIR"
+        }
         
         echo "macOS DMG created: $DMG_PATH"
         
         # 显示文件大小
         size=$(du -sh "$DMG_PATH" | cut -f1)
         echo "DMG size: $size"
+    
+    - name: Sign DMG (optional)
+      run: |
+        # 如果有开发者证书，可以签名
+        # codesign --force --deep --sign "Developer ID Application: Your Name" *.dmg
+        echo "Skipping code signing (no certificate configured)"
     
     - name: Upload macOS artifact
       uses: actions/upload-artifact@v4
@@ -210,7 +292,7 @@ jobs:
         tag_name: ${{ github.ref }}
         name: Genetic Improve v${{ steps.get_version.outputs.VERSION }}
         body: |
-          ## Genetic Improve v${{ steps.get_version.outputs.VERSION }}
+          ## 奶牛育种智选报告专家 v${{ steps.get_version.outputs.VERSION }}
           
           ### 🚀 新功能和改进
           - 优化个体选配报告生成性能，添加约束数据缓存机制
@@ -219,27 +301,40 @@ jobs:
           - 修复备注格式，去除冗余前缀文字
           - 大幅提升报告生成速度，减少文件I/O操作
           
-          ### 📦 安装包
-          - **Windows**: GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.zip
-          - **macOS**: GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_mac.dmg
+          ### 📦 下载选项
+          
+          #### Windows版本
+          - **安装版**: `GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win_setup.exe` - 推荐，包含自动安装程序
+          - **便携版**: `GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.zip` - 解压即用，无需安装
+          
+          #### macOS版本
+          - **DMG安装包**: `GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_mac.dmg`
           
           ### 📋 系统要求
-          - **Windows**: Windows 10 或更高版本
+          - **Windows**: Windows 10 或更高版本（64位）
           - **macOS**: macOS 10.15 (Catalina) 或更高版本
           - 至少 2GB 可用内存
           - 至少 1GB 可用磁盘空间
           
           ### 🔧 安装说明
-          **Windows**:
+          
+          **Windows安装版**:
+          1. 下载 `_setup.exe` 文件
+          2. 双击运行安装程序
+          3. 按照向导完成安装
+          4. 桌面快捷方式自动创建
+          
+          **Windows便携版**:
           1. 下载并解压 ZIP 文件
-          2. 双击"启动 Genetic Improve.bat"运行程序
+          2. 运行文件夹中的 `GeneticImprove.exe`
           
           **macOS**:
           1. 下载并打开 DMG 文件
           2. 将 Genetic Improve.app 拖拽到应用程序文件夹
           3. 从启动台或应用程序文件夹启动
         files: |
-          ./windows-release/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.zip
+          ./windows-installer/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win_setup.exe
+          ./windows-portable/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.zip
           ./macos-release/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_mac.dmg
         draft: false
         prerelease: false

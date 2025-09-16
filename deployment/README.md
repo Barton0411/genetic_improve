@@ -14,12 +14,16 @@
 ## 云服务资源
 
 ### 阿里云ECS服务器
-- **实例ID**: `i-2ze0wkrma5my2k7a7zba`
+- **实例ID**: `i-2ze0wkrma5my2k7a7zba` (iZa5my2k7a7zbaZ)
 - **规格**: ecs.e-c1m1.large (2核2GB)
 - **公网IP**: `39.96.189.27`
 - **内网IP**: `172.23.188.168`
 - **有效期**: 2025-09-16 ~ 2025-12-16 (3个月试用)
-- **系统**: 待选择 (推荐Ubuntu 20.04 LTS)
+- **系统**: Ubuntu 24.04 64位 ✅
+- **地域**: 华北2(北京) G
+- **SSH密钥**: genetic_improvement.pem
+- **状态**: 运行中 ✅
+- **环境配置**: ✅ 已完成基础软件安装和防火墙配置
 
 ### 阿里云OSS对象存储
 - **套餐**: 标准-本地冗余存储 100GB (¥118.99/年)
@@ -67,9 +71,46 @@
 - `POST /api/reports/submit` - 提交选配报告
 - `GET /api/reports/status/{id}` - 查询推送状态
 
+## API服务详情
+
+### 访问地址
+- **基础URL**: `http://39.96.189.27:8080`
+- **版本检查**: `http://39.96.189.27:8080/api/version/latest`
+- **健康检查**: `http://39.96.189.27:8080/api/health`
+- **服务状态**: 系统服务运行中（systemd管理）
+
+### 服务管理命令
+```bash
+# 查看服务状态
+sudo systemctl status genetic-api
+
+# 启动服务
+sudo systemctl start genetic-api
+
+# 停止服务
+sudo systemctl stop genetic-api
+
+# 重启服务
+sudo systemctl restart genetic-api
+
+# 查看日志
+sudo journalctl -u genetic-api -f
+
+# 查看最近50条日志
+sudo journalctl -u genetic-api -n 50
+```
+
+### API应用文件
+- **工作目录**: `/home/ecs-user/genetic_api/`
+- **主程序**: `main.py`
+- **配置文件**: `config.py`
+- **虚拟环境**: `venv/`
+- **Python版本**: 3.12.3
+- **框架**: FastAPI + Uvicorn
+
 ## 数据库表设计
 
-### 版本管理表
+### 版本管理表 ✅
 ```sql
 CREATE TABLE app_versions (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -83,7 +124,7 @@ CREATE TABLE app_versions (
 );
 ```
 
-### 报告推送记录表
+### 报告推送记录表 ✅
 ```sql
 CREATE TABLE report_push_logs (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -98,17 +139,30 @@ CREATE TABLE report_push_logs (
 
 ## 部署步骤
 
-### 1. 服务器环境配置
-1. 选择Ubuntu 20.04 LTS系统
-2. 配置安全组开放端口：22, 80, 443, 8080
-3. 安装Python 3.8+, pip, nginx
-4. 配置防火墙和SSL证书
+### 1. 服务器环境配置 ✅
+1. ✅ 已选择Ubuntu 24.04 64位系统
+2. ✅ 已配置安全组开放端口：22, 80, 443, 8080
+3. ✅ 已安装Python 3.12.3, nginx, git, curl, wget
+4. ✅ 已配置防火墙规则
+5. 配置SSL证书和域名解析
 
-### 2. API应用部署
-1. 部署Flask/FastAPI应用
-2. 配置数据库连接
-3. 配置OSS访问密钥
-4. 设置进程守护(systemd)
+### SSH连接信息
+```bash
+# SSH连接命令
+ssh -i ~/Downloads/genetic_improvement.pem ecs-user@39.96.189.27
+
+# 已安装软件版本
+- Python: 3.12.3
+- Nginx: 1.24.0
+- 防火墙: 已启用，开放端口 22,80,443,8080
+```
+
+### 2. API应用部署 ✅
+1. ✅ 已部署FastAPI应用
+2. ✅ 已配置数据库连接
+3. ✅ 已设置systemd系统服务
+4. ✅ 已配置开机自启动
+5. 待配置OSS访问密钥
 
 ### 3. 域名和SSL
 1. 注册域名 (推荐.com域名)
@@ -150,8 +204,15 @@ git push origin "v1.0.5"
 4. 运行`./trigger_build.sh {new_version}`触发构建
 5. 下载构建好的安装包
 6. 上传安装包到OSS对应目录
-7. 在PolarDB中插入新版本记录
-8. 测试版本更新功能
+7. 在PolarDB中插入新版本记录：
+   ```sql
+   INSERT INTO app_versions (version, release_date, is_latest, changes, mac_download_url, win_download_url)
+   VALUES ('1.0.5', NOW(), TRUE, '更新说明', 'OSS_URL/mac.dmg', 'OSS_URL/win.zip');
+   
+   -- 将旧版本标记为非最新
+   UPDATE app_versions SET is_latest = FALSE WHERE version != '1.0.5';
+   ```
+8. 测试版本更新功能：访问 http://39.96.189.27:8080/api/version/latest
 
 ## 成本估算
 

@@ -97,7 +97,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon='_internal/icon.icns',
 )
 
 coll = COLLECT(
@@ -114,22 +114,25 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='GeneticImprove.app',
-    icon=None,
+    icon='_internal/icon.icns',
     bundle_identifier='com.geneticimprove.app',
     version='1.0.4',
     info_plist={
-        'CFBundleName': 'Genetic Improve',
-        'CFBundleDisplayName': 'Genetic Improve - 牛只遗传改良系统',
+        'CFBundleName': '奶牛育种智选报告专家',
+        'CFBundleDisplayName': '奶牛育种智选报告专家',
         'CFBundleVersion': '1.0.4',
         'CFBundleShortVersionString': '1.0.4',
         'CFBundleIdentifier': 'com.geneticimprove.app',
         'CFBundleInfoDictionaryVersion': '6.0',
         'CFBundlePackageType': 'APPL',
         'CFBundleSignature': '????',
+        'CFBundleIconFile': 'icon.icns',
         'NSHighResolutionCapable': True,
         'NSSupportsAutomaticGraphicsSwitching': True,
         'NSRequiresAquaSystemAppearance': False,
         'LSMinimumSystemVersion': '10.15.0',  # macOS Catalina 或更高版本
         'NSHumanReadableCopyright': 'Copyright © 2025 Genetic Improve Team. All rights reserved.',
+        'CFBundleDocumentTypes': [],
+        'LSApplicationCategoryType': 'public.app-category.productivity',
     },
 )
