@@ -21,7 +21,7 @@ wheels/
 *.egg
 
 # PyInstaller
-*.spec
+# *.spec  # 注释掉，我们需要spec文件用于构建
 *.manifest
 
 # Logs
