@@ -17,7 +17,7 @@ def get_version_info():
         version_info = get_version_info()
         return current_version, version_info
     except ImportError as e:
-        print(f"❌ 无法导入版本信息: {e}")
+        print(f"[ERROR] Cannot import version info: {e}")
         return None, None
 
 def generate_changelog_content(version_info):
@@ -58,17 +58,17 @@ def save_changelog_file(version, content, output_dir=None):
         with open(changelog_file, 'w', encoding='utf-8') as f:
             f.write(content)
         
-        print(f"✅ changelog文件已生成: {changelog_file}")
+        print(f"[SUCCESS] Changelog generated: {changelog_file}")
         return changelog_file
     except Exception as e:
-        print(f"❌ 保存changelog失败: {e}")
+        print(f"[ERROR] Failed to save changelog: {e}")
         return None
 
 def upload_to_oss(changelog_file, version):
     """上传changelog到OSS（模拟实现）"""
-    print(f"📤 模拟上传到OSS...")
-    print(f"   源文件: {changelog_file}")
-    print(f"   目标路径: releases/v{version}/CHANGELOG.txt")
+    print(f"[INFO] Simulating OSS upload...")
+    print(f"   Source: {changelog_file}")
+    print(f"   Target: releases/v{version}/CHANGELOG.txt")
     print(f"   OSS URL: https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v{version}/CHANGELOG.txt")
     
     # 实际实现中，这里会使用OSS SDK上传文件
@@ -82,46 +82,46 @@ def upload_to_oss(changelog_file, version):
 def generate_build_script(version):
     """生成构建脚本中的changelog生成命令"""
     script_content = f'''
-# 自动生成changelog（添加到构建脚本中）
-echo "🔄 自动生成版本 {version} 的changelog..."
+# Auto-generate changelog (add to build script)
+echo "[BUILD] Generating changelog for version {version}..."
 python3 auto_generate_changelog.py
 
-# 上传到OSS（需要配置OSS CLI）
-echo "📤 上传changelog到OSS..."
+# Upload to OSS (requires OSS CLI configuration)
+echo "[BUILD] Uploading changelog to OSS..."
 # ossutil cp CHANGELOG_v{version}.txt oss://genetic-improve/releases/v{version}/CHANGELOG.txt
 
-echo "✅ changelog生成和上传完成"
+echo "[BUILD] Changelog generation and upload completed"
 '''
     
     with open('build_with_changelog.sh', 'w') as f:
         f.write(script_content)
     
-    print(f"📜 构建脚本已生成: build_with_changelog.sh")
+    print(f"[INFO] Build script generated: build_with_changelog.sh")
 
 def main():
     """主函数"""
-    print("🔄 自动生成changelog.txt")
+    print("[AUTO-CHANGELOG] Starting changelog generation...")
     print("=" * 50)
     
     # 获取版本信息
     current_version, version_info = get_version_info()
     
     if not current_version or not version_info:
-        print("❌ 无法获取版本信息")
+        print("[ERROR] Cannot get version info")
         sys.exit(1)
     
-    print(f"📱 当前版本: {current_version}")
-    print(f"📅 发布日期: {version_info.get('date', '未知')}")
-    print(f"👤 发布者: {version_info.get('author', '未知')}")
+    print(f"Current version: {current_version}")
+    print(f"Release date: {version_info.get('date', 'unknown')}")
+    print(f"Author: {version_info.get('author', 'unknown')}")
     
     # 生成changelog内容
     content = generate_changelog_content(version_info)
     
     if not content:
-        print("❌ 没有找到更新内容")
+        print("[ERROR] No changes found")
         sys.exit(1)
     
-    print(f"📝 更新内容 ({len(version_info.get('changes', []))} 项):")
+    print(f"Changes ({len(version_info.get('changes', []))} items):")
     for i, change in enumerate(version_info.get('changes', []), 1):
         print(f"   {i}. {change}")
     
@@ -133,23 +133,23 @@ def main():
     
     # 模拟上传到OSS
     if upload_to_oss(changelog_file, current_version):
-        print("✅ OSS上传模拟成功")
+        print("[SUCCESS] OSS upload simulation completed")
     
     # 生成构建脚本示例
     generate_build_script(current_version)
     
     print()
-    print("🎯 下一步操作:")
-    print("1. 将生成的CHANGELOG.txt文件上传到OSS")
-    print(f"   目标路径: releases/v{current_version}/CHANGELOG.txt") 
-    print("2. 或者集成到GitHub Actions自动化流程")
-    print("3. 或者添加到现有的构建脚本中")
+    print("[INFO] Next steps:")
+    print("1. Upload CHANGELOG.txt to OSS")
+    print(f"   Target path: releases/v{current_version}/CHANGELOG.txt") 
+    print("2. Or integrate with GitHub Actions")
+    print("3. Or add to existing build script")
     
     print()
-    print("🚀 集成方式:")
-    print("• 在package_app.py中添加changelog生成步骤")
-    print("• 在GitHub Actions中调用此脚本")
-    print("• 在发布脚本中自动执行")
+    print("[INFO] Integration methods:")
+    print("- Add changelog generation to package_app.py")
+    print("- Call this script in GitHub Actions")
+    print("- Execute automatically in release script")
 
 if __name__ == "__main__":
     main()
