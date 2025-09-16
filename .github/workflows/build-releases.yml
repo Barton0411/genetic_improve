@@ -78,7 +78,7 @@ jobs:
         ArchitecturesAllowed=x64compatible
         ArchitecturesInstallIn64BitMode=x64compatible
         DisableProgramGroupPage=yes
-        OutputBaseFilename=GeneticImprove_v{#MyAppVersion}_win_setup
+        OutputBaseFilename=GeneticImprove_v{#MyAppVersion}_win
         ; SetupIconFile=_internal\icon.ico
         SolidCompression=yes
         WizardStyle=modern
@@ -348,7 +348,7 @@ EOF
           ### 📦 下载选项
           
           #### Windows版本
-          - **安装版**: `GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win_setup.exe` - 推荐，包含自动安装程序
+          - **安装版**: `GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.exe` - 推荐，包含自动安装程序
           - **便携版**: `GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.zip` - 解压即用，无需安装
           
           #### macOS版本
@@ -377,7 +377,7 @@ EOF
           2. 将 Genetic Improve.app 拖拽到应用程序文件夹
           3. 从启动台或应用程序文件夹启动
         files: |
-          ./windows-installer/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win_setup.exe
+          ./windows-installer/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.exe
           ./windows-portable/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.zip
           ./macos-release/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_mac.dmg
         draft: false
