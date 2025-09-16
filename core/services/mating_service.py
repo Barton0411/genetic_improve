@@ -71,7 +71,7 @@ class MatingService:
             return False
     
     def generate_recommendations(self, 
-                               inbreeding_threshold: float = 3.125,
+                               inbreeding_threshold: float = 6.25,
                                control_defect_genes: bool = True,
                                progress_callback: Optional[callable] = None) -> pd.DataFrame:
         """
@@ -201,7 +201,7 @@ class MatingService:
             return pd.DataFrame()
     
     def execute_complete_mating(self,
-                              inbreeding_threshold: float = 3.125,
+                              inbreeding_threshold: float = 6.25,
                               control_defect_genes: bool = True,
                               heifer_age_days: int = 420,
                               cycle_days: int = 21,

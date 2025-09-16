@@ -64,7 +64,7 @@ class PairingScore:
     inbreeding_coeff: float
     gene_status: GeneStatus
     
-    def meets_constraints(self, inbreeding_threshold: float = 3.125, 
+    def meets_constraints(self, inbreeding_threshold: float = 6.25, 
                          control_defect_genes: bool = True) -> bool:
         """检查是否满足约束条件"""
         if self.inbreeding_coeff > inbreeding_threshold:
@@ -77,7 +77,7 @@ class PairingScore:
 @dataclass
 class MatingConstraints:
     """选配约束条件"""
-    inbreeding_threshold: float = 3.125  # 近交系数阈值(%)
+    inbreeding_threshold: float = 6.25  # 近交系数阈值(%)
     control_defect_genes: bool = True    # 是否控制隐性基因
     min_offspring_score: Optional[float] = None  # 最小后代得分
 

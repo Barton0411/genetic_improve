@@ -24,7 +24,7 @@ class CycleBasedMatcher:
         self.bull_inventory = {}  # 公牛库存 {bull_id: remaining_count}
         self.bull_scores = {}  # 公牛得分 {bull_id: score}
         self.allocation_results = []  # 分配结果
-        self.inbreeding_threshold = 3.125  # 默认近交系数阈值
+        self.inbreeding_threshold = 6.25  # 默认近交系数阈值
         self.control_defect_genes = True  # 默认控制隐性基因
         
     def load_data(self, recommendations_df: pd.DataFrame, bull_data_path: Path) -> bool:

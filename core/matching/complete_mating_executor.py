@@ -40,7 +40,7 @@ class CompleteMatingExecutor:
         
     def execute(self, 
                 bull_inventory: Dict[str, int],
-                inbreeding_threshold: float = 3.125,
+                inbreeding_threshold: float = 6.25,
                 control_defect_genes: bool = True,
                 heifer_age_days: int = 420,
                 cycle_days: int = 21,

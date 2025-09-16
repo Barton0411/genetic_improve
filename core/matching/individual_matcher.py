@@ -25,7 +25,7 @@ class IndividualMatcher:
         self.selection_report = None
         self.semen_counts = {}
         self.semen_ratios = {}
-        self.inbreeding_threshold = 0.03125  # 默认3.125%
+        self.inbreeding_threshold = 0.0625  # 默认6.25%
         self.control_defect_genes = True
         
     def load_data(self, project_path: Path):
@@ -65,7 +65,7 @@ class IndividualMatcher:
             return False
     
     def set_parameters(self, semen_counts: Dict[str, int], 
-                      inbreeding_threshold: float = 0.03125,
+                      inbreeding_threshold: float = 0.0625,
                       control_defect_genes: bool = True):
         """设置选配参数"""
         self.semen_counts = semen_counts

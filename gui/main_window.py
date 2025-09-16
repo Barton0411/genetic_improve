@@ -1666,6 +1666,7 @@ class MainWindow(QMainWindow):
         inbreeding_label = QLabel("近交系数阈值:")
         self.inbreeding_combo = QComboBox()
         self.inbreeding_combo.addItems(["≤3.125%", "≤6.25%", "≤12.5%", "无视近交"])
+        self.inbreeding_combo.setCurrentIndex(1)  # 默认选择6.25%
         inbreeding_layout.addWidget(inbreeding_label)
         inbreeding_layout.addWidget(self.inbreeding_combo)
         inbreeding_layout.addStretch()
