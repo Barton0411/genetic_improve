@@ -130,7 +130,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='GeneticImprove',
+    name='伊利奶牛选配',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -152,5 +152,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='GeneticImprove',
+    name='伊利奶牛选配',
 )

@@ -98,6 +98,11 @@ class VersionManager:
                     version_info = response.json()
                     latest_version = version_info.get('data', {}).get('version') or version_info.get('version')
                     
+                    # 打印详细的版本信息用于调试
+                    logger.info(f"当前应用版本: {self.current_version}")
+                    logger.info(f"API返回的最新版本: {latest_version}")
+                    logger.info(f"完整API响应: {version_info}")
+                    
                     if latest_version and self._compare_versions(latest_version, self.current_version) > 0:
                         logger.info(f"发现新版本 {latest_version}，服务器: {server_url}")
                         

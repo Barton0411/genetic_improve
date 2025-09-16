@@ -32,17 +32,58 @@ class DownloadThread(QThread):
         try:
             self.progress.emit(0, "开始下载更新包...")
             
-            # 模拟下载过程（实际项目中会进行真实下载）
-            for i in range(0, 101, 10):
-                self.progress.emit(i, f"正在下载... {i}%")
-                self.msleep(200)  # 模拟下载时间
+            import requests
+            import os
             
-            self.progress.emit(100, "下载完成，准备更新...")
-            self.finished.emit(True, "下载成功")
+            # 检查URL是否有效
+            if not self.url:
+                self.finished.emit(False, "下载地址无效")
+                return
             
+            # 发送HTTP请求开始下载
+            response = requests.get(self.url, stream=True, timeout=30)
+            response.raise_for_status()
+            
+            # 获取文件总大小
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded_size = 0
+            
+            # 确保目录存在
+            os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
+            
+            # 开始下载
+            with open(self.save_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        
+                        # 计算下载进度
+                        if total_size > 0:
+                            progress = int((downloaded_size / total_size) * 100)
+                            size_mb = downloaded_size / (1024 * 1024)
+                            total_mb = total_size / (1024 * 1024)
+                            self.progress.emit(progress, f"正在下载... {progress}% ({size_mb:.1f}/{total_mb:.1f} MB)")
+                        else:
+                            size_mb = downloaded_size / (1024 * 1024)
+                            self.progress.emit(50, f"正在下载... {size_mb:.1f} MB")
+            
+            # 验证下载的文件
+            if os.path.exists(self.save_path) and os.path.getsize(self.save_path) > 0:
+                self.progress.emit(100, "下载完成，准备更新...")
+                self.finished.emit(True, "下载成功")
+            else:
+                self.finished.emit(False, "下载文件验证失败")
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"网络错误: {e}")
+            self.finished.emit(False, f"网络错误: {str(e)}")
+        except OSError as e:
+            logger.error(f"文件操作错误: {e}")
+            self.finished.emit(False, f"文件操作错误: {str(e)}")
         except Exception as e:
             logger.error(f"下载失败: {e}")
-            self.finished.emit(False, str(e))
+            self.finished.emit(False, f"下载失败: {str(e)}")
 
 class ForceUpdateDialog(QDialog):
     """强制更新对话框"""
@@ -574,7 +615,17 @@ class ForceUpdateDialog(QDialog):
         temp_dir = Path(self.app_info['user_data_dir']) / 'temp'
         temp_dir.mkdir(parents=True, exist_ok=True)
         version = self.version_info.get('data', {}).get('version', 'unknown')
-        save_path = temp_dir / f"update_package_{version}.zip"
+        
+        # 根据平台设置正确的文件扩展名
+        if self.app_info['platform'] == 'windows':
+            save_path = temp_dir / f"GeneticImprove_v{version}_win.exe"
+        elif self.app_info['platform'] == 'darwin':
+            save_path = temp_dir / f"GeneticImprove_v{version}_mac.dmg"
+        else:
+            save_path = temp_dir / f"update_package_{version}.tar.gz"
+        
+        # 存储下载路径供后续使用
+        self.downloaded_file_path = save_path
         
         # 创建下载线程
         self.download_thread = DownloadThread(package_url, str(save_path))
@@ -605,27 +656,399 @@ class ForceUpdateDialog(QDialog):
         """执行实际更新"""
         
         try:
-            self.status_label.setText("正在启动更新程序，即将重启应用...")
+            if not hasattr(self, 'downloaded_file_path') or not self.downloaded_file_path.exists():
+                self._show_error("下载文件不存在")
+                return
+                
+            platform = self.app_info['platform']
             
-            print("🔄 模拟更新流程:")
-            print("   1. 启动独立更新器")
-            print("   2. 备份当前版本")
-            print("   3. 替换程序文件")
-            print("   4. 重启新版本")
-            print("✅ 强制更新测试成功！")
-            
-            # 在实际环境中，这里会调用智能更新器
-            # 延迟2秒后退出（模拟）
-            QTimer.singleShot(2000, self._finish_test)
+            if platform == 'darwin':  # macOS
+                self._install_macos_dmg()
+            elif platform == 'windows':  # Windows
+                self._install_windows_exe()
+            else:
+                self._show_error("不支持的操作系统")
                 
         except Exception as e:
             logger.error(f"执行更新失败: {e}", exc_info=True)
             self._show_error(f"执行更新失败: {e}")
     
-    def _finish_test(self):
-        """完成测试"""
-        self.status_label.setText("✅ 测试成功！更新流程完整")
-        self.accept()  # 关闭对话框
+    def _install_macos_dmg(self):
+        """安装macOS DMG包"""
+        import subprocess
+        import os
+        
+        try:
+            self.status_label.setText("正在挂载DMG文件...")
+            
+            # 记录挂载前的volumes
+            volumes_before = set(os.listdir('/Volumes/')) if os.path.exists('/Volumes/') else set()
+            
+            # 挂载DMG
+            mount_cmd = ['hdiutil', 'attach', str(self.downloaded_file_path), '-nobrowse']
+            mount_result = subprocess.run(mount_cmd, capture_output=True, text=True)
+            
+            if mount_result.returncode != 0:
+                raise Exception(f"无法挂载DMG: {mount_result.stderr}")
+            
+            # 查找挂载点 - 改进解析逻辑
+            mount_point = None
+            logger.info(f"hdiutil输出:\n{mount_result.stdout}")
+            
+            # 等待挂载完成
+            import time
+            time.sleep(2)
+            
+            # 通用方法：扫描所有挂载点，找到包含.app的那个
+            app_source = None
+            app_name = None
+            
+            # 检查所有当前的挂载点
+            volumes_after = set(os.listdir('/Volumes/')) if os.path.exists('/Volumes/') else set()
+            logger.info(f"当前所有挂载点: {volumes_after}")
+            
+            # 安全地查找新挂载的包含目标应用的挂载点
+            new_volumes = volumes_after - volumes_before
+            logger.info(f"新挂载的卷: {new_volumes}")
+            
+            # 只检查新挂载的卷，避免误操作已有的应用
+            for volume in new_volumes:
+                volume_path = f"/Volumes/{volume}"
+                try:
+                    if os.path.isdir(volume_path):
+                        contents = os.listdir(volume_path)
+                        logger.info(f"检查新挂载点 {volume}: {contents}")
+                        
+                        # 查找.app文件
+                        app_files = [f for f in contents if f.endswith('.app')]
+                        if app_files:
+                            # 验证是否是我们期望的应用
+                            candidate_app = app_files[0]
+                            if self._is_valid_target_app(candidate_app, volume_path):
+                                app_source = os.path.join(volume_path, candidate_app)
+                                app_name = candidate_app
+                                mount_point = volume_path
+                                logger.info(f"确认目标应用: {app_name} 在 {mount_point}")
+                                break
+                            else:
+                                logger.warning(f"跳过非目标应用: {candidate_app}")
+                except Exception as e:
+                    logger.debug(f"跳过挂载点 {volume}: {e}")
+                    continue
+            
+            # 如果在新挂载点中没找到，回退到检查所有挂载点（但加强验证）
+            if not app_source:
+                logger.info("在新挂载点中未找到，检查所有挂载点...")
+                for volume in volumes_after:
+                    volume_path = f"/Volumes/{volume}"
+                    try:
+                        if os.path.isdir(volume_path):
+                            contents = os.listdir(volume_path)
+                            app_files = [f for f in contents if f.endswith('.app')]
+                            if app_files:
+                                candidate_app = app_files[0]
+                                if self._is_valid_target_app(candidate_app, volume_path):
+                                    app_source = os.path.join(volume_path, candidate_app)
+                                    app_name = candidate_app
+                                    mount_point = volume_path
+                                    logger.info(f"在现有挂载点找到目标应用: {app_name}")
+                                    break
+                    except Exception as e:
+                        continue
+            
+            if not app_source or not app_name:
+                raise Exception(f"在所有挂载点中未找到.app文件。可用挂载点: {list(volumes_after)}")
+            
+            self.status_label.setText(f"正在复制应用程序 {app_name}...")
+            
+            # 目标路径
+            target_app = f"/Applications/{app_name}"
+            
+            # 安全检查：如果目标应用存在，确认它也是我们的应用
+            if os.path.exists(target_app):
+                if self._is_valid_target_app(app_name, '/Applications'):
+                    logger.info(f"确认替换现有应用: {target_app}")
+                    # 使用GUI方式获取管理员权限
+                    success = self._remove_app_with_permission(target_app)
+                    if not success:
+                        raise Exception("删除现有应用失败，需要管理员权限")
+                else:
+                    raise Exception(f"安全检查失败：目标位置的应用不是预期的应用: {target_app}")
+            else:
+                logger.info(f"目标位置无现有应用，将安装新应用: {target_app}")
+            
+            # 复制新应用
+            success = self._copy_app_with_permission(app_source, target_app)
+            if not success:
+                raise Exception("复制应用到Applications失败，需要管理员权限")
+            
+            # 自动处理macOS安全验证问题
+            self.status_label.setText("正在处理安全验证...")
+            self._handle_macos_security(target_app)
+            
+            # 卸载DMG
+            subprocess.run(['hdiutil', 'detach', mount_point, '-quiet'], check=False)
+            
+            self.status_label.setText("安装完成，即将重启应用...")
+            
+            # 显示安全验证指导
+            self._show_security_guide()
+            
+            # 延迟2秒后重启应用
+            QTimer.singleShot(2000, lambda: self._restart_application(target_app))
+            
+        except subprocess.CalledProcessError as e:
+            self._show_error(f"安装失败: {e}")
+        except Exception as e:
+            self._show_error(f"安装出错: {e}")
+    
+    def _install_windows_exe(self):
+        """安装Windows EXE包"""
+        import subprocess
+        
+        try:
+            self.status_label.setText("正在启动安装程序...")
+            
+            # 启动安装程序（静默模式）
+            install_cmd = [str(self.downloaded_file_path), '/S']  # /S 为静默安装参数
+            
+            subprocess.Popen(install_cmd)
+            
+            self.status_label.setText("安装程序已启动，应用即将退出...")
+            
+            # 延迟3秒后退出，让安装程序接管
+            QTimer.singleShot(3000, self._exit_for_update)
+            
+        except Exception as e:
+            self._show_error(f"启动安装程序失败: {e}")
+    
+    def _restart_application(self, app_path: str):
+        """重启应用程序"""
+        import subprocess
+        import sys
+        
+        try:
+            # 启动新版本应用
+            subprocess.Popen(['open', app_path])
+            
+            # 退出当前应用
+            sys.exit(0)
+            
+        except Exception as e:
+            logger.error(f"重启应用失败: {e}")
+            sys.exit(0)
+    
+    def _handle_macos_security(self, app_path: str):
+        """处理macOS安全验证问题"""
+        import subprocess
+        import os
+        from pathlib import Path
+        
+        try:
+            # 方法1: 直接移除隔离属性（不需要sudo）
+            subprocess.run(['xattr', '-r', '-d', 'com.apple.quarantine', app_path], 
+                         check=False, capture_output=True)
+            
+            # 方法2: 使用绕过脚本（如果存在）
+            script_path = Path(__file__).parent.parent.parent / 'scripts' / 'bypass_gatekeeper.sh'
+            if script_path.exists():
+                subprocess.run(['bash', str(script_path), app_path], 
+                             check=False, capture_output=True)
+            
+            # 方法3: 手动标记为安全
+            try:
+                subprocess.run(['xattr', '-w', 'com.apple.security.cs.allow-jit', '1', app_path],
+                             check=False, capture_output=True)
+            except:
+                pass
+            
+            # 方法4: 使用开发者工具命令（如果可用）
+            try:
+                subprocess.run(['codesign', '--force', '--deep', '--sign', '-', app_path],
+                             check=False, capture_output=True)
+            except:
+                pass
+            
+            logger.info(f"已处理应用安全验证: {app_path}")
+            
+        except Exception as e:
+            logger.warning(f"处理安全验证时出错: {e}")
+    
+    def _is_valid_target_app(self, app_name: str, volume_path: str) -> bool:
+        """验证是否是我们要更新的目标应用"""
+        import os
+        
+        try:
+            # 1. 检查应用名称是否包含关键词
+            app_keywords = ['genetic', 'improve', '遗传', '改良', '选配', '奶牛', '伊利']
+            app_name_lower = app_name.lower()
+            name_match = any(keyword in app_name_lower for keyword in app_keywords)
+            
+            # 2. 检查应用包内的Info.plist
+            app_path = os.path.join(volume_path, app_name)
+            info_plist_path = os.path.join(app_path, 'Contents', 'Info.plist')
+            
+            bundle_match = False
+            if os.path.exists(info_plist_path):
+                try:
+                    with open(info_plist_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        plist_content = f.read()
+                        # 检查Bundle ID或应用名称
+                        bundle_keywords = ['genetic', 'improve', 'cattle', 'breeding', '遗传改良']
+                        bundle_match = any(keyword in plist_content.lower() for keyword in bundle_keywords)
+                except:
+                    pass
+            
+            # 3. 检查应用大小（应该是一个合理的大小）
+            size_match = False
+            try:
+                # 计算应用包大小
+                import subprocess
+                result = subprocess.run(['du', '-s', app_path], capture_output=True, text=True)
+                if result.returncode == 0:
+                    size_kb = int(result.stdout.split()[0])
+                    # 期望应用大小在10MB-1GB之间
+                    size_match = 10000 < size_kb < 1000000
+            except:
+                pass
+            
+            logger.info(f"应用验证 {app_name}: 名称匹配={name_match}, Bundle匹配={bundle_match}, 大小合理={size_match}")
+            
+            # 至少要满足两个条件
+            return sum([name_match, bundle_match, size_match]) >= 2
+            
+        except Exception as e:
+            logger.error(f"验证应用时出错: {e}")
+            return False
+    
+    def _remove_app_with_permission(self, app_path: str) -> bool:
+        """使用GUI方式安全删除应用"""
+        import subprocess
+        
+        try:
+            # 方法1: 使用osascript调用Finder删除（用户友好）
+            applescript = f'''
+            tell application "Finder"
+                try
+                    delete POSIX file "{app_path}"
+                    return true
+                on error
+                    return false
+                end try
+            end tell
+            '''
+            
+            result = subprocess.run(['osascript', '-e', applescript], 
+                                  capture_output=True, text=True, timeout=10)
+            
+            if result.returncode == 0 and 'true' in result.stdout:
+                logger.info("通过Finder成功删除应用")
+                return True
+                
+        except Exception as e:
+            logger.warning(f"Finder删除失败: {e}")
+        
+        try:
+            # 方法2: 使用AppleScript弹出权限对话框
+            applescript = f'''
+            do shell script "rm -rf '{app_path}'" with administrator privileges
+            '''
+            
+            result = subprocess.run(['osascript', '-e', applescript], 
+                                  capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                logger.info("通过AppleScript管理员权限成功删除应用")
+                return True
+                
+        except Exception as e:
+            logger.warning(f"AppleScript权限删除失败: {e}")
+        
+        try:
+            # 方法3: 尝试不需要权限的删除（如果应用权限允许）
+            result = subprocess.run(['rm', '-rf', app_path], 
+                                  capture_output=True, text=True, timeout=10)
+            
+            if result.returncode == 0:
+                logger.info("直接删除成功")
+                return True
+                
+        except Exception as e:
+            logger.warning(f"直接删除失败: {e}")
+        
+        return False
+    
+    def _copy_app_with_permission(self, source_path: str, target_path: str) -> bool:
+        """使用GUI方式安全复制应用"""
+        import subprocess
+        
+        try:
+            # 方法1: 直接复制（无需权限的情况）
+            result = subprocess.run(['cp', '-R', source_path, target_path], 
+                                  capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                logger.info("直接复制成功")
+                return True
+                
+        except Exception as e:
+            logger.warning(f"直接复制失败: {e}")
+        
+        try:
+            # 方法2: 使用AppleScript获取管理员权限复制
+            applescript = f'''
+            do shell script "cp -R '{source_path}' '{target_path}'" with administrator privileges
+            '''
+            
+            result = subprocess.run(['osascript', '-e', applescript], 
+                                  capture_output=True, text=True, timeout=60)
+            
+            if result.returncode == 0:
+                logger.info("通过AppleScript管理员权限成功复制应用")
+                return True
+                
+        except Exception as e:
+            logger.warning(f"AppleScript权限复制失败: {e}")
+        
+        try:
+            # 方法3: 使用Finder复制（用户友好）
+            import shutil
+            shutil.copytree(source_path, target_path)
+            logger.info("通过Python shutil成功复制应用")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Python复制失败: {e}")
+        
+        return False
+    
+    def _show_security_guide(self):
+        """显示安全验证指导"""
+        from PyQt6.QtWidgets import QMessageBox
+        
+        guide_message = """🔒 安全提示
+        
+如果系统提示"无法验证开发者"，请按以下步骤操作：
+
+1️⃣ 点击"取消"关闭警告对话框
+2️⃣ 打开"系统偏好设置" → "安全性与隐私"
+3️⃣ 在"通用"选项卡中，点击"仍要打开"
+4️⃣ 或者右键点击应用 → 选择"打开"
+
+应用会自动重启，如遇问题请联系技术支持。"""
+        
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("安装完成")
+        msg_box.setText(guide_message)
+        msg_box.setIcon(QMessageBox.Icon.Information)
+        msg_box.exec()
+    
+    def _exit_for_update(self):
+        """为更新而退出程序"""
+        import sys
+        logger.info("为更新退出应用程序")
+        sys.exit(0)
+    
     
     def _show_error(self, message: str):
         """显示错误信息"""

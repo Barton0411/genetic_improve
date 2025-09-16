@@ -1580,8 +1580,13 @@ class MainWindow(QMainWindow):
         self.db_update_worker.error.connect(self.db_update_thread.quit)
         self.db_update_worker.error.connect(self.db_update_worker.deleteLater)
 
-        # 启动线程
-        self.db_update_thread.start()
+        # 延迟启动数据库检查线程，等待版本检查完成
+        def start_db_check():
+            logging.info("第二步：开始检查数据库更新...")
+            self.db_update_thread.start()
+        
+        # 延迟1秒启动，确保版本检查先执行
+        QTimer.singleShot(1000, start_db_check)
 
     def on_db_update_finished(self):
         """处理数据库更新完成的信号"""
@@ -1591,6 +1596,7 @@ class MainWindow(QMainWindow):
                 self.progress_dialog = None
         except:
             pass
+        logging.info("数据库检查和更新完成")
         QMessageBox.information(self, "更新完成", "本地数据库已成功检查和更新。")
 
     def on_db_update_error(self, error_message: str):

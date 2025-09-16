@@ -86,7 +86,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='GeneticImprove',
+    name='伊利奶牛选配',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -108,7 +108,7 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='GeneticImprove',
+    name='伊利奶牛选配',
 )
 
 # 检查图标文件是否存在
@@ -117,15 +117,15 @@ icon_path = 'icon.icns' if os.path.exists('icon.icns') else None
 
 app = BUNDLE(
     coll,
-    name='GeneticImprove.app',
+    name='伊利奶牛选配.app',
     icon=icon_path,
     bundle_identifier='com.yili.breeding.app',
-    version='1.0.5',
+    version='1.0.9.9',
     info_plist={
         'CFBundleName': '伊利奶牛选配',
         'CFBundleDisplayName': '伊利奶牛选配',
-        'CFBundleVersion': '1.0.5',
-        'CFBundleShortVersionString': '1.0.5',
+        'CFBundleVersion': '1.0.9.9',
+        'CFBundleShortVersionString': '1.0.9.9',
         'CFBundleIdentifier': 'com.yili.breeding.app',
         'CFBundleInfoDictionaryVersion': '6.0',
         'CFBundlePackageType': 'APPL',

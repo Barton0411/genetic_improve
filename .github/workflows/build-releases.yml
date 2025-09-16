@@ -71,7 +71,7 @@ jobs:
         #define MyAppVersion "$VERSION"
         #define MyAppPublisher "Genetic Improve Team"
         #define MyAppURL "https://github.com/Barton0411/genetic_improve"
-        #define MyAppExeName "GeneticImprove.exe"
+        #define MyAppExeName "伊利奶牛选配.exe"
         
         [Setup]
         AppId={{7133EFA4-A392-4138-BA22-2BEB199B5056}
@@ -86,7 +86,7 @@ jobs:
         ArchitecturesAllowed=x64compatible
         ArchitecturesInstallIn64BitMode=x64compatible
         DisableProgramGroupPage=yes
-        OutputBaseFilename=GeneticImprove_v{#MyAppVersion}_win
+        OutputBaseFilename=伊利奶牛选配_v{#MyAppVersion}_win
         SetupIconFile=icon.ico
         SolidCompression=yes
         WizardStyle=modern
@@ -101,7 +101,7 @@ jobs:
         Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
         
         [Files]
-        Source: "dist\GeneticImprove\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+        Source: "dist\伊利奶牛选配\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
         
         [Icons]
         Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
@@ -130,8 +130,8 @@ jobs:
         $VERSION = python -c "from version import get_version; print(get_version())"
         
         # 创建便携版ZIP
-        $ZIP_NAME = "GeneticImprove_v$VERSION" + "_win.zip"
-        Compress-Archive -Path "dist\GeneticImprove\*" -DestinationPath $ZIP_NAME -Force
+        $ZIP_NAME = "伊利奶牛选配_v$VERSION" + "_win.zip"
+        Compress-Archive -Path "dist\伊利奶牛选配\*" -DestinationPath $ZIP_NAME -Force
         
         echo "Portable package created: $ZIP_NAME"
         
@@ -150,7 +150,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: windows-portable
-        path: GeneticImprove_v*_win.zip
+        path: 伊利奶牛选配_v*_win.zip
         retention-days: 30
     
     - name: Upload changelog artifact
@@ -278,25 +278,25 @@ jobs:
     - name: Fix app permissions, icon and security
       run: |
         # 设置应用显示名称为伊利奶牛选配
-        /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 伊利奶牛选配" "dist/GeneticImprove.app/Contents/Info.plist" || true
-        /usr/libexec/PlistBuddy -c "Set :CFBundleName 伊利奶牛选配" "dist/GeneticImprove.app/Contents/Info.plist" || true
+        /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 伊利奶牛选配" "dist/伊利奶牛选配.app/Contents/Info.plist" || true
+        /usr/libexec/PlistBuddy -c "Set :CFBundleName 伊利奶牛选配" "dist/伊利奶牛选配.app/Contents/Info.plist" || true
         
         # 如果有ICNS文件，确保正确设置
         if [ -f "icon.icns" ]; then
           # 确保Resources目录存在
-          mkdir -p "dist/GeneticImprove.app/Contents/Resources/"
+          mkdir -p "dist/伊利奶牛选配.app/Contents/Resources/"
           
           # 复制图标文件
-          cp "icon.icns" "dist/GeneticImprove.app/Contents/Resources/" || true
+          cp "icon.icns" "dist/伊利奶牛选配.app/Contents/Resources/" || true
           
           # 设置Info.plist中的图标引用（尝试多种格式）
-          /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile icon.icns" "dist/GeneticImprove.app/Contents/Info.plist" || true
-          /usr/libexec/PlistBuddy -c "Set :CFBundleIconName icon" "dist/GeneticImprove.app/Contents/Info.plist" || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile icon.icns" "dist/伊利奶牛选配.app/Contents/Info.plist" || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIconName icon" "dist/伊利奶牛选配.app/Contents/Info.plist" || true
           
           # 验证图标文件是否正确复制
-          if [ -f "dist/GeneticImprove.app/Contents/Resources/icon.icns" ]; then
+          if [ -f "dist/伊利奶牛选配.app/Contents/Resources/icon.icns" ]; then
             echo "✅ 图标文件已成功复制到应用程序包中"
-            ls -la "dist/GeneticImprove.app/Contents/Resources/icon.icns"
+            ls -la "dist/伊利奶牛选配.app/Contents/Resources/icon.icns"
           else
             echo "❌ 图标文件复制失败"
           fi
@@ -305,12 +305,12 @@ jobs:
         fi
         
         # 修复权限
-        chmod -R 755 "dist/GeneticImprove.app"
-        find "dist/GeneticImprove.app" -name "*.dylib" -exec chmod 755 {} \;
-        find "dist/GeneticImprove.app" -name "*.so" -exec chmod 755 {} \;
+        chmod -R 755 "dist/伊利奶牛选配.app"
+        find "dist/伊利奶牛选配.app" -name "*.dylib" -exec chmod 755 {} \;
+        find "dist/伊利奶牛选配.app" -name "*.so" -exec chmod 755 {} \;
         
         # 清除扩展属性（避免"已损坏"警告）
-        xattr -cr "dist/GeneticImprove.app"
+        xattr -cr "dist/伊利奶牛选配.app"
         
         # 创建安装说明文件
         cat > "安装说明.txt" << 'EOF'
@@ -336,8 +336,8 @@ jobs:
         VERSION=$(python -c "from version import get_version; print(get_version())")
         echo "Building version: $VERSION"
         
-        APP_NAME="GeneticImprove"
-        DMG_NAME="GeneticImprove_v${VERSION}_mac"
+        APP_NAME="伊利奶牛选配"
+        DMG_NAME="伊利奶牛选配_v${VERSION}_mac"
         DMG_PATH="${DMG_NAME}.dmg"
         
         # 创建DMG背景图片目录（如果需要）
@@ -375,7 +375,7 @@ jobs:
             rm -rf "$DMG_DIR"
             mkdir -p "$DMG_DIR"
             
-            cp -R "dist/GeneticImprove.app" "$DMG_DIR/"
+            cp -R "dist/伊利奶牛选配.app" "$DMG_DIR/"
             ln -s /Applications "$DMG_DIR/Applications"
             
             hdiutil create -volname "伊利奶牛选配" \
@@ -402,7 +402,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: macos-release
-        path: GeneticImprove_v*_mac.dmg
+        path: 伊利奶牛选配_v*_mac.dmg
         retention-days: 30
 
   # OSS上传步骤暂时禁用，需要先配置GitHub Secrets
@@ -536,11 +536,11 @@ jobs:
           ### 📦 下载选项
           
           #### Windows版本
-          - **安装版**: `GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.exe` - 推荐，包含自动安装程序
-          - **便携版**: `GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.zip` - 解压即用，无需安装
+          - **安装版**: `伊利奶牛选配_v${{ steps.get_version.outputs.VERSION }}_win.exe` - 推荐，包含自动安装程序
+          - **便携版**: `伊利奶牛选配_v${{ steps.get_version.outputs.VERSION }}_win.zip` - 解压即用，无需安装
           
           #### macOS版本
-          - **DMG安装包**: `GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_mac.dmg`
+          - **DMG安装包**: `伊利奶牛选配_v${{ steps.get_version.outputs.VERSION }}_mac.dmg`
           
           ### 📋 系统要求
           - **Windows**: Windows 10 或更高版本（64位）
@@ -558,15 +558,15 @@ jobs:
           
           **Windows便携版**:
           1. 下载并解压 ZIP 文件
-          2. 运行文件夹中的 `GeneticImprove.exe`
+          2. 运行文件夹中的 `伊利奶牛选配.exe`
           
           **macOS**:
           1. 下载并打开 DMG 文件
           2. 将 伊利奶牛选配.app 拖拽到应用程序文件夹
           3. 从启动台或应用程序文件夹启动
         files: |
-          ./windows-installer/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.exe
-          ./windows-portable/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_win.zip
-          ./macos-release/GeneticImprove_v${{ steps.get_version.outputs.VERSION }}_mac.dmg
+          ./windows-installer/伊利奶牛选配_v${{ steps.get_version.outputs.VERSION }}_win.exe
+          ./windows-portable/伊利奶牛选配_v${{ steps.get_version.outputs.VERSION }}_win.zip
+          ./macos-release/伊利奶牛选配_v${{ steps.get_version.outputs.VERSION }}_mac.dmg
         draft: false
         prerelease: false

@@ -83,29 +83,27 @@ def main():
             app.processEvents()
             logging.info("Splash screen closed")
             
-            # 登录成功后检查版本更新（延迟到主窗口创建后）
-            def check_version_after_login():
-                try:
-                    import sys
-                    import os
-                    # 确保当前目录在Python路径中
-                    current_dir = os.path.dirname(os.path.abspath(__file__))
-                    if current_dir not in sys.path:
-                        sys.path.insert(0, current_dir)
-                    
-                    from core.update.version_manager import check_and_handle_updates
-                    logging.info("Checking for version updates with smart update system...")
-                    should_exit = check_and_handle_updates()
-                    if should_exit:
-                        logging.info("Force update initiated, application will exit")
-                        # 强制更新时立即退出
-                        QTimer.singleShot(100, lambda: sys.exit(0))
-                    else:
-                        logging.info("Version check completed, continuing normal operation")
-                except Exception as e:
-                    logging.warning(f"Smart update check failed: {e}")
-                    import traceback
-                    logging.error(f"Smart update traceback: {traceback.format_exc()}")
+            # 登录成功后立即检查版本更新（在创建主窗口之前）
+            logging.info("第一步：检查应用版本更新...")
+            try:
+                # 确保当前目录在Python路径中
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                if current_dir not in sys.path:
+                    sys.path.insert(0, current_dir)
+                
+                from core.update.version_manager import check_and_handle_updates
+                should_exit = check_and_handle_updates()
+                if should_exit:
+                    logging.info("检测到强制更新，应用即将退出")
+                    # 强制更新时立即退出
+                    sys.exit(0)
+                else:
+                    logging.info("应用版本检查完成，现在创建主窗口...")
+            except Exception as e:
+                logging.warning(f"应用版本检查失败: {e}")
+                import traceback
+                logging.error(f"应用版本检查错误详情: {traceback.format_exc()}")
+                logging.info("应用版本检查失败，但继续创建主窗口...")
             
             # 先测试是否能创建简单窗口
             logging.info("Testing simple window creation...")
@@ -182,8 +180,7 @@ def main():
                     else:
                         logging.info("Main window is visible")
                         
-                    # 主窗口显示正常后，先检查应用版本更新，再检查数据库版本
-                    QTimer.singleShot(500, check_version_after_login)
+                    # 主窗口显示正常，版本检查已在窗口创建前完成
                     
                 except Exception as e:
                     logging.exception(f"Error in check_window_visibility: {e}")
