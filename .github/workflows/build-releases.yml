@@ -173,21 +173,71 @@ jobs:
         # 安装创建DMG的工具
         brew install create-dmg
     
-    - name: Build macOS application
+    - name: Convert ICO to ICNS and build macOS application
       run: |
+        # 检查是否有icon.ico文件
+        if [ -f "_internal/icon.ico" ]; then
+          # 创建临时目录用于图标转换
+          mkdir -p icon_temp.iconset
+          
+          # 使用sips转换ICO到PNG，然后创建ICNS
+          sips -z 16 16 "_internal/icon.ico" --out "icon_temp.iconset/icon_16x16.png" || true
+          sips -z 32 32 "_internal/icon.ico" --out "icon_temp.iconset/icon_16x16@2x.png" || true
+          sips -z 32 32 "_internal/icon.ico" --out "icon_temp.iconset/icon_32x32.png" || true
+          sips -z 64 64 "_internal/icon.ico" --out "icon_temp.iconset/icon_32x32@2x.png" || true
+          sips -z 128 128 "_internal/icon.ico" --out "icon_temp.iconset/icon_128x128.png" || true
+          sips -z 256 256 "_internal/icon.ico" --out "icon_temp.iconset/icon_128x128@2x.png" || true
+          sips -z 256 256 "_internal/icon.ico" --out "icon_temp.iconset/icon_256x256.png" || true
+          sips -z 512 512 "_internal/icon.ico" --out "icon_temp.iconset/icon_256x256@2x.png" || true
+          sips -z 512 512 "_internal/icon.ico" --out "icon_temp.iconset/icon_512x512.png" || true
+          sips -z 1024 1024 "_internal/icon.ico" --out "icon_temp.iconset/icon_512x512@2x.png" || true
+          
+          # 创建ICNS文件
+          iconutil -c icns icon_temp.iconset -o "_internal/icon.icns" || true
+          
+          # 清理临时文件
+          rm -rf icon_temp.iconset
+        fi
+        
         python -m PyInstaller GeneticImprove.spec --clean --noconfirm
     
-    - name: Fix app permissions and name
+    - name: Fix app permissions, icon and security
       run: |
         # 设置应用名称为中文
         /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 奶牛育种智选报告专家" "dist/GeneticImprove.app/Contents/Info.plist" || true
         /usr/libexec/PlistBuddy -c "Set :CFBundleName 奶牛育种智选报告专家" "dist/GeneticImprove.app/Contents/Info.plist" || true
         
+        # 如果有ICNS文件，确保正确设置
+        if [ -f "_internal/icon.icns" ]; then
+          cp "_internal/icon.icns" "dist/GeneticImprove.app/Contents/Resources/" || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile icon.icns" "dist/GeneticImprove.app/Contents/Info.plist" || true
+        fi
+        
         # 修复权限
         chmod -R 755 "dist/GeneticImprove.app"
+        find "dist/GeneticImprove.app" -name "*.dylib" -exec chmod 755 {} \;
+        find "dist/GeneticImprove.app" -name "*.so" -exec chmod 755 {} \;
         
         # 清除扩展属性（避免"已损坏"警告）
         xattr -cr "dist/GeneticImprove.app"
+        
+        # 创建安装说明文件
+        cat > "安装说明.txt" << EOF
+奶牛育种智选报告专家 安装说明
+
+如果遇到"Apple无法验证此应用"的提示：
+
+方法1（推荐）：
+1. 右键点击应用程序
+2. 选择"打开"
+3. 在弹出对话框中点击"打开"
+
+方法2：
+1. 打开"系统偏好设置" > "安全性与隐私"
+2. 在"通用"选项卡中点击"仍要打开"
+
+这是因为应用未经过Apple官方签名，但软件本身是安全的。
+EOF
     
     - name: Create beautiful DMG with background
       run: |
@@ -216,14 +266,15 @@ jobs:
         create-dmg \
           --volname "奶牛育种智选报告专家" \
           --window-pos 200 120 \
-          --window-size 600 450 \
+          --window-size 600 300 \
           --icon-size 100 \
-          --icon "${APP_NAME}.app" 150 225 \
+          --icon "${APP_NAME}.app" 150 150 \
           --hide-extension "${APP_NAME}.app" \
-          --app-drop-link 450 225 \
+          --app-drop-link 450 150 \
           --text-size 14 \
           --format UDZO \
           --hdiutil-quiet \
+          --no-internet-enable \
           "$DMG_PATH" \
           "dist/" || {
             # 如果create-dmg失败，使用简单方法

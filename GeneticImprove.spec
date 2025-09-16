@@ -16,6 +16,8 @@ a = Analysis(
         # 添加其他必要的数据文件夹
         ('core', 'core'),
         ('version.py', '.'),
+        # 添加图标文件
+        ('_internal/icon.ico', '_internal'),
     ],
     hiddenimports=[
         # PyQt6 相关模块
@@ -114,7 +116,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='GeneticImprove.app',
-    icon=None,
+    icon='_internal/icon.icns',
     bundle_identifier='com.geneticimprove.app',
     version='1.0.4',
     info_plist={
