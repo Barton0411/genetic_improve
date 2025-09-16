@@ -101,8 +101,8 @@ class ForceUpdateDialog(QDialog):
         self.setFixedSize(800, 620)
         self.setModal(True)
         
-        # 禁用关闭按钮
-        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.CustomizeWindowHint | 
+        # 允许显示关闭按钮
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint | 
                            Qt.WindowType.WindowTitleHint)
         
         # 主体容器
@@ -1099,17 +1099,35 @@ class ForceUpdateDialog(QDialog):
                            f"{message}\n\n请检查网络连接后重试，或联系技术支持。")
     
     def closeEvent(self, event):
-        """阻止用户关闭对话框"""
-        event.ignore()
+        """处理用户关闭对话框的操作"""
+        # 弹出确认对话框
+        reply = QMessageBox.question(
+            self, 
+            "确认关闭", 
+            "关闭更新窗口将跳过此次更新。\n\n"
+            "注意：强制更新包含重要的安全修复和功能改进。\n"
+            "跳过更新可能影响系统稳定性和安全性。\n\n"
+            "确定要关闭更新窗口吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
         
-        QMessageBox.warning(self, "无法关闭", 
-                           "为确保系统安全，必须完成更新后才能使用程序。\n"
-                           "请点击'立即更新'按钮完成更新。")
+        if reply == QMessageBox.StandardButton.Yes:
+            # 用户确认关闭，停止下载线程（如果正在运行）
+            if self.download_thread and self.download_thread.isRunning():
+                self.download_thread.quit()
+                self.download_thread.wait()
+            
+            logger.info("用户选择跳过强制更新")
+            event.accept()  # 允许关闭
+        else:
+            event.ignore()  # 取消关闭
     
     def keyPressEvent(self, event):
-        """阻止ESC键关闭对话框"""
+        """处理键盘按键事件"""
         if event.key() == Qt.Key.Key_Escape:
-            event.ignore()
+            # ESC键触发关闭事件，会通过closeEvent处理确认
+            self.close()
         else:
             super().keyPressEvent(event)
 
