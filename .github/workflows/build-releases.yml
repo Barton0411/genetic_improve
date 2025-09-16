@@ -176,24 +176,24 @@ jobs:
     - name: Convert ICO to ICNS and build macOS application
       run: |
         # 检查是否有icon.ico文件
-        if [ -f "_internal/icon.ico" ]; then
+        if [ -f "icon.ico" ]; then
           # 创建临时目录用于图标转换
           mkdir -p icon_temp.iconset
           
           # 使用sips转换ICO到PNG，然后创建ICNS
-          sips -z 16 16 "_internal/icon.ico" --out "icon_temp.iconset/icon_16x16.png" || true
-          sips -z 32 32 "_internal/icon.ico" --out "icon_temp.iconset/icon_16x16@2x.png" || true
-          sips -z 32 32 "_internal/icon.ico" --out "icon_temp.iconset/icon_32x32.png" || true
-          sips -z 64 64 "_internal/icon.ico" --out "icon_temp.iconset/icon_32x32@2x.png" || true
-          sips -z 128 128 "_internal/icon.ico" --out "icon_temp.iconset/icon_128x128.png" || true
-          sips -z 256 256 "_internal/icon.ico" --out "icon_temp.iconset/icon_128x128@2x.png" || true
-          sips -z 256 256 "_internal/icon.ico" --out "icon_temp.iconset/icon_256x256.png" || true
-          sips -z 512 512 "_internal/icon.ico" --out "icon_temp.iconset/icon_256x256@2x.png" || true
-          sips -z 512 512 "_internal/icon.ico" --out "icon_temp.iconset/icon_512x512.png" || true
-          sips -z 1024 1024 "_internal/icon.ico" --out "icon_temp.iconset/icon_512x512@2x.png" || true
+          sips -z 16 16 "icon.ico" --out "icon_temp.iconset/icon_16x16.png" || true
+          sips -z 32 32 "icon.ico" --out "icon_temp.iconset/icon_16x16@2x.png" || true
+          sips -z 32 32 "icon.ico" --out "icon_temp.iconset/icon_32x32.png" || true
+          sips -z 64 64 "icon.ico" --out "icon_temp.iconset/icon_32x32@2x.png" || true
+          sips -z 128 128 "icon.ico" --out "icon_temp.iconset/icon_128x128.png" || true
+          sips -z 256 256 "icon.ico" --out "icon_temp.iconset/icon_128x128@2x.png" || true
+          sips -z 256 256 "icon.ico" --out "icon_temp.iconset/icon_256x256.png" || true
+          sips -z 512 512 "icon.ico" --out "icon_temp.iconset/icon_256x256@2x.png" || true
+          sips -z 512 512 "icon.ico" --out "icon_temp.iconset/icon_512x512.png" || true
+          sips -z 1024 1024 "icon.ico" --out "icon_temp.iconset/icon_512x512@2x.png" || true
           
           # 创建ICNS文件
-          iconutil -c icns icon_temp.iconset -o "_internal/icon.icns" || true
+          iconutil -c icns icon_temp.iconset -o "icon.icns" || true
           
           # 清理临时文件
           rm -rf icon_temp.iconset
@@ -208,8 +208,8 @@ jobs:
         /usr/libexec/PlistBuddy -c "Set :CFBundleName 奶牛育种智选报告专家" "dist/GeneticImprove.app/Contents/Info.plist" || true
         
         # 如果有ICNS文件，确保正确设置
-        if [ -f "_internal/icon.icns" ]; then
-          cp "_internal/icon.icns" "dist/GeneticImprove.app/Contents/Resources/" || true
+        if [ -f "icon.icns" ]; then
+          cp "icon.icns" "dist/GeneticImprove.app/Contents/Resources/" || true
           /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile icon.icns" "dist/GeneticImprove.app/Contents/Info.plist" || true
         fi
         
