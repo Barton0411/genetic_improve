@@ -1,168 +1,250 @@
-# 阿里云账号验证登录模块
+# 伊利奶牛选配系统
 
-这是一个从奶牛育种项目中提取的阿里云数据库账号验证登录功能模块，可以独立使用在其他项目中。
+一个专业的奶牛遗传改良和选配管理系统，集成了数据分析、遗传评估、选配推荐等功能。
 
-## 功能特点
+## 🎯 功能特点
 
-- ✅ 支持阿里云 MySQL PolarDB 数据库连接
-- ✅ 用户账号密码验证
-- ✅ 数据库连接信息加密存储
-- ✅ 现代化 PyQt6 登录界面
-- ✅ 异步登录处理，避免界面卡顿
-- ✅ 完整的错误处理和用户提示
-- ✅ 模块化设计，易于集成
+### 核心功能
+- ✅ **育种项目管理** - 多项目并行管理，独立数据存储
+- ✅ **数据上传** - 支持母牛、公牛、配种记录、体型外貌、基因组数据
+- ✅ **关键育种性状分析** - 产奶量、乳脂率、乳蛋白率等性状分析  
+- ✅ **牛只指数计算排名** - 基于遗传评估的综合指数排名
+- ✅ **近交系数分析** - 群体近交水平监控和风险评估
+- ✅ **隐性基因分析** - 遗传缺陷基因筛查和载体识别
+- ✅ **个体选配推荐** - 智能选配算法，优化后代遗传潜力
+- ✅ **冻精分配管理** - 基于选配结果的冻精智能分配
+- ✅ **选配报告生成** - 详细的选配推荐报告和后代预测
+- ✅ **PPT自动报告** - 专业的育种分析演示文稿生成
 
-## 文件结构
+### 技术特点
+- 🔐 **安全登录** - 阿里云账号验证系统
+- ☁️ **云端数据库** - 基于阿里云PolarDB的高性能数据存储
+- 🔄 **自动更新** - 内置版本检查和自动更新功能
+- 📱 **现代界面** - 基于PyQt6的现代化用户界面
+- 🚀 **高性能** - 优化的数据处理和缓存机制
+- 📊 **数据可视化** - 丰富的图表和血缘图展示
+- 📤 **多格式导出** - 支持Excel、PPT等多种格式导出
+
+## 🏗️ 系统架构
 
 ```
-阿里云登录模块/
-├── database_config.py    # 数据库配置（包含加密功能）
-├── auth_service.py       # 用户认证服务
-├── login_dialog.py       # 登录对话框组件
-├── example_usage.py      # 使用示例
-├── requirements.txt      # 依赖清单
-└── README.md            # 说明文档
+伊利奶牛选配系统/
+├── core/                    # 核心功能模块
+│   ├── config/             # 配置管理
+│   ├── data_processor/     # 数据处理器
+│   ├── genetics/           # 遗传学计算
+│   ├── mating/             # 选配算法
+│   ├── reports/            # 报告生成
+│   └── update/             # 版本更新
+├── gui/                    # 用户界面
+│   ├── main_window.py      # 主窗口
+│   ├── login_dialog.py     # 登录对话框
+│   ├── splash_screen.py    # 启动画面
+│   └── components/         # UI组件
+├── database/               # 数据库相关
+│   ├── connection.py       # 数据库连接
+│   ├── models/             # 数据模型
+│   └── migrations/         # 数据库迁移
+├── utils/                  # 工具模块
+├── assets/                 # 静态资源
+├── deployment/             # 部署配置
+└── docs/                   # 文档
 ```
 
-## 数据库信息
+## 🔧 安装与部署
 
-### 连接参数
-- **主机**: `defectgene-new.mysql.polardb.rds.aliyuncs.com`
-- **端口**: `3306`
-- **用户名**: `defect_genetic_checking`
-- **密码**: `Jaybz@890411`
-- **数据库**: `bull_library`
+### 系统要求
+- **操作系统**: Windows 10/11 或 macOS 10.14+
+- **内存**: 最低4GB，推荐8GB+
+- **存储空间**: 最低2GB可用空间
+- **网络**: 稳定的互联网连接（用于云端数据同步）
 
-### 用户表结构
-用户账号信息存储在 `id-pw` 表中：
-- `ID`: 用户名
-- `PW`: 密码
+### 安装方法
 
-## 安装依赖
+#### 方法1: 下载预编译版本（推荐）
+1. 访问 [Releases页面](https://github.com/your-repo/genetic-improve/releases)
+2. 下载适合您操作系统的安装包：
+   - Windows: `GeneticImprove_v1.0.5_win.exe`
+   - macOS: `GeneticImprove_v1.0.5_mac.dmg`
+3. 运行安装包并按照提示完成安装
 
+#### 方法2: 从源代码构建
 ```bash
+# 克隆仓库
+git clone https://github.com/your-repo/genetic-improve.git
+cd genetic-improve
+
+# 创建虚拟环境
+python -m venv venv
+source venv/bin/activate  # Windows: venv\\Scripts\\activate
+
+# 安装依赖
 pip install -r requirements.txt
+
+# 运行程序
+python main.py
 ```
 
-## 使用方法
+### 首次使用配置
+1. 运行程序，将显示登录界面
+2. 使用提供的账号密码登录系统
+3. 系统将自动检查并下载最新版本
+4. 登录成功后即可开始使用各项功能
 
-### 方法1：使用便捷函数
+## 📚 使用指南
 
-```python
-from login_dialog import show_login_dialog
+### 基本工作流程
+1. **创建项目** - 新建育种项目或选择现有项目
+2. **数据上传** - 上传母牛、公牛等基础数据
+3. **数据分析** - 查看关键性状分析和遗传评估结果
+4. **选配决策** - 使用个体选配功能获取推荐方案
+5. **报告生成** - 生成详细的选配报告和分析PPT
 
-# 显示登录对话框
-success, username = show_login_dialog(title="系统登录", use_encryption=True)
+### 主要模块说明
 
-if success:
-    print(f"登录成功，用户：{username}")
-else:
-    print("登录失败或取消")
-```
+#### 数据管理
+- **母牛数据**: 基本信息、生产性能、体型外貌数据
+- **公牛数据**: 种公牛信息、遗传评估值、精液库存
+- **配种记录**: 历史配种数据、妊娠结果
+- **基因组数据**: SNP标记、基因型信息
 
-### 方法2：使用对话框对象
+#### 遗传分析
+- **育种值估计**: BLUP方法估计个体育种值
+- **近交分析**: 计算个体和群体近交系数
+- **遗传进展**: 分析群体遗传改良趋势
+- **基因频率**: 监控重要基因的频率变化
 
-```python
-from login_dialog import LoginDialog
-from PyQt6.QtWidgets import QApplication
+#### 选配优化
+- **约束条件**: 设置近交、隐性基因等约束
+- **目标权重**: 调整不同性状的选择重点  
+- **算法选择**: 多种选配算法可选
+- **结果评估**: 预测后代性能和遗传风险
 
-app = QApplication([])
-login_dialog = LoginDialog(title="自定义登录", use_encryption=True)
+## 🛠️ 开发指南
 
-if login_dialog.exec() == LoginDialog.DialogCode.Accepted:
-    username = login_dialog.get_username()
-    print(f"登录成功，用户：{username}")
-```
-
-### 方法3：单独使用认证服务
-
-```python
-from auth_service import AuthService
-
-auth = AuthService(use_encryption=True)
-if auth.authenticate_user("用户名", "密码"):
-    print("认证成功")
-else:
-    print("认证失败")
-```
-
-## 配置选项
-
-### 加密模式（推荐）
-```python
-# 使用加密的数据库连接信息
-success, username = show_login_dialog(use_encryption=True)
-```
-
-### 明文模式（测试用）
-```python
-# 使用明文数据库连接信息（不推荐生产环境使用）
-success, username = show_login_dialog(use_encryption=False)
-```
-
-## 安全说明
-
-1. **加密存储**: 数据库连接信息使用 Fernet 对称加密存储
-2. **密码保护**: 登录界面密码输入框使用掩码显示
-3. **连接安全**: 支持 SSL 加密的数据库连接
-4. **错误处理**: 完善的异常处理，不暴露敏感信息
-
-## 定制化
-
-### 修改数据库连接
-编辑 `database_config.py` 文件中的连接参数：
-
-```python
-CLOUD_DB_HOST = '你的数据库主机'
-CLOUD_DB_PORT = 3306
-CLOUD_DB_USER = '你的用户名'
-CLOUD_DB_PASSWORD_RAW = '你的密码'
-CLOUD_DB_NAME = '你的数据库名'
-```
-
-### 修改界面样式
-编辑 `login_dialog.py` 中的 `_setup_styles()` 方法来自定义界面外观。
-
-### 自定义认证逻辑
-继承 `AuthService` 类并重写 `authenticate_user` 方法：
-
-```python
-class CustomAuthService(AuthService):
-    def authenticate_user(self, username, password):
-        # 自定义认证逻辑
-        return super().authenticate_user(username, password)
-```
-
-## 运行示例
-
+### 开发环境设置
 ```bash
-python example_usage.py
+# 安装开发依赖
+pip install -r requirements-dev.txt
+
+# 安装pre-commit钩子
+pre-commit install
+
+# 运行测试
+python -m pytest tests/
+
+# 代码格式化
+black .
 ```
 
-## 注意事项
+### 构建发布版本
+```bash
+# Windows
+python build_scripts/build_windows.py
 
-1. 确保网络能够访问阿里云数据库
-2. 首次使用时会连接远程数据库验证用户
-3. 建议在生产环境中使用加密模式
-4. 数据库连接信息请妥善保管
+# macOS
+python build_scripts/build_mac.py
+```
 
-## 故障排除
+### 数据库开发
+- **连接信息**: 详见 `deployment/README.md`
+- **模型定义**: 使用SQLAlchemy ORM
+- **迁移管理**: Alembic数据库迁移工具
+
+## 🚀 部署架构
+
+### 云服务架构
+```
+用户端应用程序
+       ↓
+    负载均衡器
+       ↓
+  API服务器集群 (阿里云ECS)
+       ↓
+  数据库集群 (阿里云PolarDB)
+       ↓
+  对象存储 (阿里云OSS)
+```
+
+### 服务器配置
+- **域名**: `https://api.genepop.com`
+- **备用服务器**: `http://39.96.189.27:8080`
+- **数据库**: 阿里云PolarDB MySQL
+- **文件存储**: 阿里云OSS
+- **SSL证书**: Let's Encrypt自动续期
+
+### 版本更新机制
+- **检查频率**: 用户登录时自动检查
+- **更新通知**: GUI对话框提示用户
+- **下载方式**: 浏览器自动下载，手动安装
+- **回滚支持**: 支持版本回退机制
+
+## 📊 版本历史
+
+### v1.0.5 (2025-09-16)
+- ✨ 完善版本自动更新系统，支持GUI选择下载
+- 🐛 修复版本检查逻辑，优化服务器连接稳定性
+- 📝 更新文档和部署指南
+- 🔧 优化GitHub Actions构建流程
+
+### v1.0.4 (2025-09-15)
+- 🎨 修复Mac应用图标显示问题
+- 🔧 优化Windows构建完整性
+- 📱 更新应用名称为"伊利奶牛选配"
+
+### v1.0.3 (2025-08-27)
+- 🐛 修复后代近交系数排序问题
+- 🎨 修复血缘图滚轮缩放时图形消失问题
+- ✨ 添加代数选择按钮，支持2-6代血缘图显示
+- 🎯 提升用户界面交互体验
+
+### v1.0.2 (2025-08-08)
+- ⚡ 优化冻精分配算法
+- 📊 加载公牛指数得分用于计算后代得分
+- 🐛 修复冻精预览表列宽问题
+- ✨ 添加育种项目管理文件操作功能
+
+### v1.0.1 (2025-07-29)
+- 🚀 重大改进PPT生成功能
+- ✨ 新增多个专业分析页面
+- 🔧 修复数据库连接问题
+- 📦 更新依赖项管理
+
+### v1.0.0 (2025-07-28)
+- 🎉 初始版本发布
+- ✨ 实现核心育种管理功能
+- 🔐 集成阿里云认证系统
+- 📊 完整的数据分析和报告生成
+
+## 🤝 技术支持
+
+### 联系方式
+- **技术支持**: 通过GitHub Issues提交问题
+- **功能建议**: 通过GitHub Discussions讨论
+- **紧急联系**: 联系系统管理员
 
 ### 常见问题
+1. **登录问题**: 检查网络连接和账号密码
+2. **数据上传失败**: 确认文件格式和数据完整性  
+3. **报告生成错误**: 检查数据依赖关系
+4. **界面显示异常**: 更新显卡驱动或重启应用
 
-1. **导入错误**: 确保安装了所有依赖包
-2. **连接超时**: 检查网络连接和防火墙设置
-3. **认证失败**: 确认用户名密码正确，检查数据库中的用户数据
+### 故障排除
+- 查看应用日志: `~/.genetic_improve/app_debug.log`
+- 重置用户配置: 删除用户配置目录
+- 清除缓存数据: 重新启动应用程序
 
-### 日志调试
+## 📄 许可证
 
-启用详细日志：
+Copyright © 2025 伊利奶牛选配系统开发团队. All rights reserved.
 
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-```
+本软件为专有软件，未经授权不得复制、分发或修改。
 
-## 许可证
+---
 
-此模块从原奶牛育种项目中提取，仅供学习和参考使用。 
+**构建信息**
+- 版本: v1.0.5
+- 构建时间: 2025-09-16
+- Python版本: 3.9+
+- PyQt版本: 6.x
+- 支持平台: Windows, macOS

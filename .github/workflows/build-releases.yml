@@ -7,9 +7,9 @@ on:
   workflow_dispatch:  # 允许手动触发
     inputs:
       version:
-        description: 'Version to build (e.g., 1.0.4)'
+        description: 'Version to build (e.g., 1.0.5)'
         required: true
-        default: '1.0.4'
+        default: '1.0.5'
 
 # 添加权限设置
 permissions:
@@ -409,12 +409,12 @@ jobs:
           ## 伊利奶牛选配 v${{ steps.get_version.outputs.VERSION }}
           
           ### 🚀 新功能和改进
-          - 优化个体选配报告生成性能，添加约束数据缓存机制
-          - 实现选配备注系统，详细说明约束过滤情况
-          - 新增近交系数和隐性基因约束分析功能
-          - 修复备注格式，去除冗余前缀文字
-          - 大幅提升报告生成速度，减少文件I/O操作
-          - 修复Mac应用图标显示和Windows构建完整性问题
+          - 完善版本自动更新系统，支持GUI对话框选择下载
+          - 修复版本检查服务器连接逻辑，增加备用服务器支持  
+          - 优化下载URL获取机制，直接从版本信息API响应中提取
+          - 更新PyQt6更新对话框，替换原有tkinter实现避免崩溃
+          - 更新全面的系统文档和部署指南
+          - 优化requirements.txt依赖版本和兼容性
           
           ### 📦 下载选项
           
