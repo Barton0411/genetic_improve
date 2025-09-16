@@ -50,18 +50,21 @@ class VersionManager:
         
     def _get_platform_info(self) -> Dict[str, str]:
         """获取平台信息"""
-        system = platform.system().lower()
+        system = platform.system()
+        logger.info(f"检测到操作系统: {system}")
         
-        if system == "darwin":
+        system_lower = system.lower()
+        
+        if system_lower == "darwin":
             return {
                 "os": "mac",
-                "platform": "macOS",
+                "platform": "darwin",
                 "file_extension": ".dmg"
             }
-        elif system == "windows":
+        elif system_lower == "windows":
             return {
                 "os": "win",
-                "platform": "Windows", 
+                "platform": "windows", 
                 "file_extension": ".exe"
             }
         else:
@@ -483,28 +486,43 @@ def check_and_handle_updates(server_url: str = "https://api.genepop.com") -> boo
     Returns:
         是否需要退出程序进行更新
     """
+    logger.info("==================== 开始版本更新检查 ====================")
     try:
+        logger.info(f"初始化版本管理器，服务器URL: {server_url}")
         manager = VersionManager(server_url)
         
+        logger.info(f"当前版本: {manager.current_version}")
+        logger.info(f"检测到平台: {manager.platform_info}")
+        
         # 检查更新
+        logger.info("正在检查更新...")
         has_update, version_info, is_force_update = manager.check_for_updates()
+        
+        logger.info(f"更新检查结果: has_update={has_update}, is_force_update={is_force_update}")
         
         if not has_update:
             logger.info("当前已是最新版本")
+            logger.info("==================== 版本更新检查结束（无需更新） ====================")
             return False
         
         latest_version_for_log = version_info.get('data', {}).get('version') or version_info.get('version', '未知')
         logger.info(f"发现新版本: {latest_version_for_log}，强制更新: {is_force_update}")
         
         if is_force_update:
+            logger.info("准备显示强制更新对话框")
             # 强制更新 - 显示强制更新对话框
-            return manager.handle_force_update(version_info)
+            result = manager.handle_force_update(version_info)
+            logger.info(f"强制更新对话框处理结果: {result}")
+            logger.info("==================== 版本更新检查结束（强制更新） ====================")
+            return result
         else:
+            logger.info("准备显示可选更新对话框")
             # 可选更新 - 显示原有的更新对话框
             should_update, selected_platform = manager.show_update_dialog(version_info)
             
             if not should_update:
                 logger.info("用户选择跳过更新")
+                logger.info("==================== 版本更新检查结束（用户跳过） ====================")
                 return False
             
             # 获取版本号（处理不同的API响应格式）
@@ -526,11 +544,16 @@ def check_and_handle_updates(server_url: str = "https://api.genepop.com") -> boo
             if success:
                 # 记录日志
                 logger.info("下载已开始，建议现在退出程序以便安装新版本")
+                logger.info("==================== 版本更新检查结束（下载开始） ====================")
                 # 默认不退出程序，让用户自己决定
                 return False
             
+            logger.info("==================== 版本更新检查结束（下载失败） ====================")
             return False
         
     except Exception as e:
+        import traceback
         logger.error(f"更新检查失败: {e}")
+        logger.error(f"详细错误信息: {traceback.format_exc()}")
+        logger.info("==================== 版本更新检查结束（异常） ====================")
         return False
