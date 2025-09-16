@@ -72,8 +72,6 @@ a = Analysis(
     excludes=[
         # 排除一些不需要的模块以减小大小
         'tkinter',
-        'test',
-        'unittest',
         'pdb',
         'doctest',
     ],

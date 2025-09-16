@@ -73,8 +73,6 @@ a = Analysis(
     excludes=[
         # 排除一些不需要的模块以减小大小
         'tkinter',
-        'test',
-        'unittest',
         'pdb',
         'doctest',
     ],
@@ -113,10 +111,14 @@ coll = COLLECT(
     name='GeneticImprove',
 )
 
+# 检查图标文件是否存在
+import os
+icon_path = 'icon.icns' if os.path.exists('icon.icns') else None
+
 app = BUNDLE(
     coll,
     name='GeneticImprove.app',
-    icon='icon.icns',
+    icon=icon_path,
     bundle_identifier='com.geneticimprove.app',
     version='1.0.4',
     info_plist={

@@ -47,7 +47,18 @@ def get_project_root() -> Path:
         raise
 
 PROJECT_ROOT = get_project_root()
-LOCAL_DB_DIR = PROJECT_ROOT  # 直接使用项目根目录
+
+# 获取用户数据目录，避免权限问题
+import os
+if os.name == 'nt':  # Windows
+    USER_DATA_DIR = Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'GeneticImprove'
+else:  # Mac/Linux
+    USER_DATA_DIR = Path.home() / '.genetic_improve'
+
+# 确保用户数据目录存在
+USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+LOCAL_DB_DIR = USER_DATA_DIR  # 使用用户数据目录
 LOCAL_DB_PATH = LOCAL_DB_DIR / 'local_bull_library.db'  # 本地数据库文件路径
 LOCAL_DB_URI = f'sqlite:///{LOCAL_DB_PATH}'
 PEDIGREE_CACHE_PATH = LOCAL_DB_DIR / 'pedigree_cache.pkl'  # 系谱库缓存路径

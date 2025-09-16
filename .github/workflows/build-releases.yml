@@ -177,26 +177,42 @@ jobs:
       run: |
         # 检查是否有icon.ico文件
         if [ -f "icon.ico" ]; then
+          echo "Found icon.ico, converting to ICNS..."
+          
           # 创建临时目录用于图标转换
           mkdir -p icon_temp.iconset
           
           # 使用sips转换ICO到PNG，然后创建ICNS
-          sips -z 16 16 "icon.ico" --out "icon_temp.iconset/icon_16x16.png" || true
-          sips -z 32 32 "icon.ico" --out "icon_temp.iconset/icon_16x16@2x.png" || true
-          sips -z 32 32 "icon.ico" --out "icon_temp.iconset/icon_32x32.png" || true
-          sips -z 64 64 "icon.ico" --out "icon_temp.iconset/icon_32x32@2x.png" || true
-          sips -z 128 128 "icon.ico" --out "icon_temp.iconset/icon_128x128.png" || true
-          sips -z 256 256 "icon.ico" --out "icon_temp.iconset/icon_128x128@2x.png" || true
-          sips -z 256 256 "icon.ico" --out "icon_temp.iconset/icon_256x256.png" || true
-          sips -z 512 512 "icon.ico" --out "icon_temp.iconset/icon_256x256@2x.png" || true
-          sips -z 512 512 "icon.ico" --out "icon_temp.iconset/icon_512x512.png" || true
-          sips -z 1024 1024 "icon.ico" --out "icon_temp.iconset/icon_512x512@2x.png" || true
+          sips -z 16 16 "icon.ico" --out "icon_temp.iconset/icon_16x16.png" || echo "Failed to create 16x16 icon"
+          sips -z 32 32 "icon.ico" --out "icon_temp.iconset/icon_16x16@2x.png" || echo "Failed to create 16x16@2x icon"
+          sips -z 32 32 "icon.ico" --out "icon_temp.iconset/icon_32x32.png" || echo "Failed to create 32x32 icon"
+          sips -z 64 64 "icon.ico" --out "icon_temp.iconset/icon_32x32@2x.png" || echo "Failed to create 32x32@2x icon"
+          sips -z 128 128 "icon.ico" --out "icon_temp.iconset/icon_128x128.png" || echo "Failed to create 128x128 icon"
+          sips -z 256 256 "icon.ico" --out "icon_temp.iconset/icon_128x128@2x.png" || echo "Failed to create 128x128@2x icon"
+          sips -z 256 256 "icon.ico" --out "icon_temp.iconset/icon_256x256.png" || echo "Failed to create 256x256 icon"
+          sips -z 512 512 "icon.ico" --out "icon_temp.iconset/icon_256x256@2x.png" || echo "Failed to create 256x256@2x icon"
+          sips -z 512 512 "icon.ico" --out "icon_temp.iconset/icon_512x512.png" || echo "Failed to create 512x512 icon"
+          sips -z 1024 1024 "icon.ico" --out "icon_temp.iconset/icon_512x512@2x.png" || echo "Failed to create 512x512@2x icon"
           
           # 创建ICNS文件
-          iconutil -c icns icon_temp.iconset -o "icon.icns" || true
+          if iconutil -c icns icon_temp.iconset -o "icon.icns"; then
+            echo "Successfully created icon.icns"
+          else
+            echo "Failed to create ICNS file, will proceed without icon"
+            rm -f "icon.icns"
+          fi
           
           # 清理临时文件
           rm -rf icon_temp.iconset
+        else
+          echo "No icon.ico file found"
+        fi
+        
+        # 检查是否成功创建了ICNS文件
+        if [ -f "icon.icns" ]; then
+          echo "icon.icns exists, size: $(ls -lh icon.icns)"
+        else
+          echo "No icon.icns file available for build"
         fi
         
         python -m PyInstaller GeneticImprove.spec --clean --noconfirm

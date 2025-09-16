@@ -12,18 +12,39 @@ def lazy_import():
     from gui.splash_screen import VideoSplashScreen
 
 def main():
-    # 设置日志记录
+    # 设置日志记录到用户目录，避免权限问题
     import logging
-    log_file = Path(__file__).parent / 'app_debug.log'
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file, encoding='utf-8'),
-            logging.StreamHandler()
-        ]
-    )
-    logging.info("Application starting...")
+    from pathlib import Path
+    
+    # 获取用户AppData目录（Windows）或用户主目录（Mac/Linux）
+    if os.name == 'nt':  # Windows
+        app_data_dir = Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'GeneticImprove'
+    else:  # Mac/Linux
+        app_data_dir = Path.home() / '.genetic_improve'
+    
+    # 确保目录存在
+    app_data_dir.mkdir(parents=True, exist_ok=True)
+    
+    log_file = app_data_dir / 'app_debug.log'
+    
+    try:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_file, encoding='utf-8'),
+                logging.StreamHandler()
+            ]
+        )
+        logging.info(f"Application starting... Log file: {log_file}")
+    except Exception as e:
+        # 如果仍然无法创建日志文件，只使用控制台输出
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[logging.StreamHandler()]
+        )
+        logging.warning(f"Could not create log file {log_file}: {e}. Using console logging only.")
     
     # 设置项目根目录环境变量
     root_dir = Path(__file__).parent
