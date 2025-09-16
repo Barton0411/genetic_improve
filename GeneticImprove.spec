@@ -97,7 +97,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='_internal/icon.icns',
+    icon=None,
 )
 
 coll = COLLECT(
@@ -114,7 +114,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='GeneticImprove.app',
-    icon='_internal/icon.icns',
+    icon=None,
     bundle_identifier='com.geneticimprove.app',
     version='1.0.4',
     info_plist={

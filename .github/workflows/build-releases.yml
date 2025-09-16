@@ -79,7 +79,7 @@ jobs:
         ArchitecturesInstallIn64BitMode=x64compatible
         DisableProgramGroupPage=yes
         OutputBaseFilename=GeneticImprove_v{#MyAppVersion}_win_setup
-        SetupIconFile=_internal\icon.ico
+        ; SetupIconFile=_internal\icon.ico
         SolidCompression=yes
         WizardStyle=modern
         OutputDir=installer_output
@@ -96,8 +96,8 @@ jobs:
         Source: "dist\GeneticImprove\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
         
         [Icons]
-        Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\_internal\icon.ico"
-        Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\_internal\icon.ico"; Tasks: desktopicon
+        Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
+        Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
         
         [Run]
         Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
@@ -177,18 +177,11 @@ jobs:
       run: |
         python -m PyInstaller GeneticImprove.spec --clean --noconfirm
     
-    - name: Add icon and fix permissions
+    - name: Fix app permissions and name
       run: |
-        # 确保应用图标正确设置
-        if [ -f "_internal/icon.icns" ]; then
-          cp "_internal/icon.icns" "dist/GeneticImprove.app/Contents/Resources/icon.icns"
-          # 更新Info.plist中的图标引用
-          /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile icon.icns" "dist/GeneticImprove.app/Contents/Info.plist"
-        fi
-        
         # 设置应用名称为中文
-        /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 奶牛育种智选报告专家" "dist/GeneticImprove.app/Contents/Info.plist"
-        /usr/libexec/PlistBuddy -c "Set :CFBundleName 奶牛育种智选报告专家" "dist/GeneticImprove.app/Contents/Info.plist"
+        /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 奶牛育种智选报告专家" "dist/GeneticImprove.app/Contents/Info.plist" || true
+        /usr/libexec/PlistBuddy -c "Set :CFBundleName 奶牛育种智选报告专家" "dist/GeneticImprove.app/Contents/Info.plist" || true
         
         # 修复权限
         chmod -R 755 "dist/GeneticImprove.app"
