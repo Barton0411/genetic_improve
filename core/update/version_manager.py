@@ -32,20 +32,16 @@ logger = logging.getLogger(__name__)
 class VersionManager:
     """版本管理器"""
     
-    def __init__(self, server_url: str = "https://api.genepop.com"):
+    def __init__(self, server_url: str = "https://genetic-improve.oss-cn-beijing.aliyuncs.com"):
         """
         初始化版本管理器
         
         Args:
-            server_url: 服务器URL
+            server_url: 服务器URL（默认使用阿里云OSS）
         """
         self.server_url = server_url.rstrip('/')
-        # 备用服务器列表（按优先级排序）
-        self.backup_servers = [
-            "https://genetic-improve.oss-cn-beijing.aliyuncs.com",  # 阿里云OSS（优先）
-            "http://39.96.189.27:8080",  # 备用API服务器
-            "https://api.genepop.com",   # 主域名
-        ]
+        # 没有备用服务器，只使用阿里云OSS
+        self.backup_servers = []
         self.current_version = get_version()
         self.platform_info = self._get_platform_info()
         
@@ -77,7 +73,7 @@ class VersionManager:
     
     def check_for_updates(self) -> Tuple[bool, Optional[Dict], bool]:
         """
-        检查是否有新版本（支持备用服务器重试）
+        检查是否有新版本（仅使用阿里云OSS）
         
         Returns:
             (是否有更新, 版本信息字典, 是否强制更新)
@@ -85,58 +81,52 @@ class VersionManager:
         if requests is None:
             logger.error("requests模块未安装，无法检查版本更新")
             return False, None, False
-            
-        # 尝试主服务器和备用服务器
-        servers_to_try = [self.server_url] + [s for s in self.backup_servers if s != self.server_url]
         
-        for server_url in servers_to_try:
-            try:
-                logger.info(f"尝试连接服务器: {server_url}")
+        try:
+            # 构建阿里云OSS的version.json URL
+            version_url = f"{self.server_url}/releases/latest/version.json"
+            logger.info(f"检查版本更新: {version_url}")
+            
+            # 请求版本信息
+            response = requests.get(version_url, timeout=10)
+            
+            if response.status_code == 200:
+                version_info = response.json()
                 
-                # 根据服务器类型构建URL
-                if "oss-cn-beijing.aliyuncs.com" in server_url:
-                    # 阿里云OSS直接访问version.json
-                    version_url = f"{server_url}/releases/latest/version.json"
-                else:
-                    # API服务器使用API接口
-                    version_url = f"{server_url}/api/version/latest"
+                # 支持两种JSON格式：直接版本号或嵌套在data中
+                latest_version = version_info.get('version')
+                if not latest_version and 'data' in version_info:
+                    latest_version = version_info['data'].get('version')
                 
-                logger.info(f"请求URL: {version_url}")
-                response = requests.get(version_url, timeout=10)
+                # 打印详细的版本信息用于调试
+                logger.info(f"当前应用版本: {self.current_version}")
+                logger.info(f"OSS最新版本: {latest_version}")
+                logger.info(f"版本信息: {version_info}")
                 
-                if response.status_code == 200:
-                    version_info = response.json()
-                    latest_version = version_info.get('data', {}).get('version') or version_info.get('version')
-                    
-                    # 打印详细的版本信息用于调试
-                    logger.info(f"当前应用版本: {self.current_version}")
-                    logger.info(f"API返回的最新版本: {latest_version}")
-                    logger.info(f"完整API响应: {version_info}")
-                    
-                    if latest_version:
-                        if latest_version != self.current_version:
-                            # 版本不一致，强制更新到服务器版本
-                            logger.info(f"版本不一致！当前版本: {self.current_version}, 服务器版本: {latest_version}")
-                            logger.info(f"需要强制更新到 {latest_version}，服务器: {server_url}")
-                            # 版本不一致总是强制更新
-                            return True, version_info, True
-                        else:
-                            # 版本相同
-                            logger.info(f"当前已是最新版本 {self.current_version}，服务器: {server_url}")
-                            return False, None, False
+                if latest_version:
+                    if latest_version != self.current_version:
+                        # 版本不一致，强制更新到服务器版本
+                        logger.info(f"版本不一致！当前版本: {self.current_version}, OSS版本: {latest_version}")
+                        logger.info(f"需要强制更新到 {latest_version}")
+                        # 版本不一致总是强制更新
+                        return True, version_info, True
                     else:
-                        logger.warning(f"服务器 {server_url} 未返回版本信息")
+                        # 版本相同
+                        logger.info(f"当前已是最新版本 {self.current_version}")
                         return False, None, False
                 else:
-                    logger.warning(f"服务器 {server_url} 返回错误: HTTP {response.status_code}")
-                    continue
-                    
-            except requests.RequestException as e:
-                logger.warning(f"服务器 {server_url} 连接失败: {e}")
-                continue
-        
-        logger.error("所有服务器都无法访问")
-        return False, None, False
+                    logger.error("OSS版本文件未包含版本号")
+                    return False, None, False
+            else:
+                logger.error(f"OSS版本文件访问失败: HTTP {response.status_code}")
+                return False, None, False
+                
+        except requests.RequestException as e:
+            logger.error(f"OSS连接失败: {e}")
+            return False, None, False
+        except Exception as e:
+            logger.error(f"检查版本更新时发生错误: {e}")
+            return False, None, False
     
     def _is_force_update_required(self, version_info: Dict) -> bool:
         """判断是否需要强制更新"""
@@ -490,7 +480,7 @@ class UpdateDialog(QDialog):
             return "win"
 
 
-def check_and_handle_updates(server_url: str = "https://api.genepop.com") -> bool:
+def check_and_handle_updates(server_url: str = "https://genetic-improve.oss-cn-beijing.aliyuncs.com") -> bool:
     """
     检查并处理更新
     
