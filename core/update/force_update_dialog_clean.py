@@ -1106,8 +1106,8 @@ class ForceUpdateDialog(QDialog):
             self, 
             "确认退出程序", 
             "关闭更新窗口将退出整个程序。\n\n"
-            "注意：由于存在强制更新，不更新将无法使用程序。\n"
-            "您需要完成更新才能继续使用系统。\n\n"
+            "注意：本次更新涉及重要逻辑，跳过更新将无法使用程序。\n"
+            "请完成更新！\n\n"
             "确定要退出程序吗？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
