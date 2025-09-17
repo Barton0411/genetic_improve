@@ -40,9 +40,10 @@ class VersionManager:
             server_url: 服务器URL
         """
         self.server_url = server_url.rstrip('/')
-        # 备用服务器列表（用于海外访问）
+        # 备用服务器列表（按优先级排序）
         self.backup_servers = [
-            "http://39.96.189.27:8080",  # 直接IP访问
+            "https://genetic-improve.oss-cn-beijing.aliyuncs.com",  # 阿里云OSS（优先）
+            "http://39.96.189.27:8080",  # 备用API服务器
             "https://api.genepop.com",   # 主域名
         ]
         self.current_version = get_version()
@@ -91,11 +92,17 @@ class VersionManager:
         for server_url in servers_to_try:
             try:
                 logger.info(f"尝试连接服务器: {server_url}")
-                # 调用服务器API检查版本
-                response = requests.get(
-                    f"{server_url}/api/version/latest",
-                    timeout=10
-                )
+                
+                # 根据服务器类型构建URL
+                if "oss-cn-beijing.aliyuncs.com" in server_url:
+                    # 阿里云OSS直接访问version.json
+                    version_url = f"{server_url}/releases/latest/version.json"
+                else:
+                    # API服务器使用API接口
+                    version_url = f"{server_url}/api/version/latest"
+                
+                logger.info(f"请求URL: {version_url}")
+                response = requests.get(version_url, timeout=10)
                 
                 if response.status_code == 200:
                     version_info = response.json()
