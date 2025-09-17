@@ -600,14 +600,22 @@ class ForceUpdateDialog(QDialog):
     def _get_package_url(self) -> str:
         """获取适合当前平台的下载URL"""
         
-        data = self.version_info.get('data', {})
-        
+        # 优先从顶层获取，如果没有则从data字段获取（兼容两种格式）
         if self.app_info['platform'] == 'windows':
-            return data.get('win_download_url', '')
+            url = self.version_info.get('win_download_url', '')
+            if not url:
+                url = self.version_info.get('data', {}).get('win_download_url', '')
+            return url
         elif self.app_info['platform'] == 'darwin':
-            return data.get('mac_download_url', '')
+            url = self.version_info.get('mac_download_url', '')
+            if not url:
+                url = self.version_info.get('data', {}).get('mac_download_url', '')
+            return url
         else:
-            return data.get('linux_download_url', '')
+            url = self.version_info.get('linux_download_url', '')
+            if not url:
+                url = self.version_info.get('data', {}).get('linux_download_url', '')
+            return url
     
     def _start_download(self, package_url: str):
         """开始下载更新包"""
@@ -615,7 +623,7 @@ class ForceUpdateDialog(QDialog):
         # 设置保存路径 - 使用用户下载文件夹，更容易找到
         import os
         downloads_dir = Path(os.path.expanduser("~/Downloads"))
-        version = self.version_info.get('data', {}).get('version', 'unknown')
+        version = self.version_info.get('version') or self.version_info.get('data', {}).get('version', 'unknown')
         
         # 根据平台设置正确的文件扩展名
         if self.app_info['platform'] == 'windows':
