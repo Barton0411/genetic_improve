@@ -93,6 +93,7 @@ class ForceUpdateDialog(QDialog):
         self.version_info = version_info
         self.app_info = app_info
         self.download_thread = None
+        self.user_chose_exit = False  # 用户是否选择退出程序
         self.setupUI()
         
     def setupUI(self):
@@ -1120,9 +1121,10 @@ class ForceUpdateDialog(QDialog):
             
             logger.info("用户选择退出程序而不是进行强制更新")
             
-            # 退出整个应用程序
+            # 设置退出标志并关闭对话框
+            self.user_chose_exit = True
             event.accept()  # 允许关闭对话框
-            QApplication.instance().quit()  # 退出整个程序
+            self.reject()  # 返回QDialog.Rejected状态
         else:
             event.ignore()  # 取消关闭
     

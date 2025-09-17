@@ -240,9 +240,14 @@ class VersionManager:
             # 显示对话框（用户可以选择关闭并退出程序）
             result = dialog.exec()
             
-            # 强制更新对话框的处理结果：
+            # 检查用户是否选择退出程序
+            if hasattr(dialog, 'user_chose_exit') and dialog.user_chose_exit:
+                logger.info("强制更新对话框：用户选择退出程序")
+                return True  # 返回True表示需要退出程序
+            
+            # 强制更新对话框的其他处理结果：
             # - 如果用户完成更新，对话框会处理重启
-            # - 如果用户关闭对话框，程序会通过QApplication.quit()退出
+            # - 如果用户取消关闭，对话框会继续显示
             # 如果代码执行到这里，说明对话框正常关闭，不需要退出
             return False
             
