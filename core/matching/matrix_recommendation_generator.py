@@ -23,6 +23,7 @@ class MatrixRecommendationGenerator:
         self.genetic_defect_data = None
         self.cow_score_columns = []  # 存储找到的母牛得分列
         self.group_manager = None  # 分组管理器
+        self.last_error = None  # 存储最后的错误信息
         
     def load_data(self) -> bool:
         """加载所需数据"""
@@ -30,7 +31,9 @@ class MatrixRecommendationGenerator:
             # 加载母牛数据
             cow_file = self.project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
             if not cow_file.exists():
-                logger.error("未找到母牛指数数据")
+                error_msg = f"未找到母牛指数数据文件: {cow_file}"
+                logger.error(error_msg)
+                self.last_error = error_msg
                 return False
             self.cow_data = pd.read_excel(cow_file)
             
@@ -55,7 +58,9 @@ class MatrixRecommendationGenerator:
             # 加载公牛数据
             bull_file = self.project_path / "standardized_data" / "processed_bull_data.xlsx"
             if not bull_file.exists():
-                logger.error("未找到公牛数据")
+                error_msg = f"未找到公牛数据文件: {bull_file}"
+                logger.error(error_msg)
+                self.last_error = error_msg
                 return False
             self.bull_data = pd.read_excel(bull_file)
             
@@ -76,7 +81,9 @@ class MatrixRecommendationGenerator:
             return True
             
         except Exception as e:
-            logger.error(f"加载数据失败: {e}")
+            error_msg = f"加载数据失败: {str(e)}"
+            logger.error(error_msg)
+            self.last_error = error_msg
             return False
             
     def _load_inbreeding_data(self):
@@ -86,8 +93,9 @@ class MatrixRecommendationGenerator:
             possible_files = list(self.project_path.glob("**/备选公牛_近交系数及隐性基因分析结果_*.xlsx"))
             
             if not possible_files:
-                logger.error("未找到备选公牛近交系数及隐性基因分析结果文件")
-                logger.error("请先进行「备选公牛近交和隐性基因分析」")
+                error_msg = f"未找到备选公牛近交系数及隐性基因分析结果文件，请先进行「备选公牛近交和隐性基因分析」"
+                logger.error(error_msg)
+                self.last_error = error_msg
                 return False
             
             # 使用最新的文件
@@ -99,13 +107,17 @@ class MatrixRecommendationGenerator:
             required_cols = ['母牛号', '原始备选公牛号', '后代近交系数']
             missing_cols = [col for col in required_cols if col not in self.inbreeding_data.columns]
             if missing_cols:
-                logger.error(f"近交系数文件缺少必要列: {missing_cols}")
+                error_msg = f"近交系数文件缺少必要列: {missing_cols}"
+                logger.error(error_msg)
+                self.last_error = error_msg
                 return False
                 
             return True
                 
         except Exception as e:
-            logger.error(f"加载近交系数数据失败: {e}")
+            error_msg = f"加载近交系数数据失败: {e}"
+            logger.error(error_msg)
+            self.last_error = error_msg
             return False
             
     def _load_genetic_defect_data(self):
@@ -222,8 +234,9 @@ class MatrixRecommendationGenerator:
                     # 最终检查
                     final_missing = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
                     if final_missing:
-                        logger.error(f"以下公牛缺少性状数据: {final_missing}")
-                        logger.error("请先进行公牛育种指数计算或更新公牛数据库")
+                        error_msg = f"以下公牛缺少性状数据: {final_missing[:10]}...（共{len(final_missing)}头）\n请先进行公牛育种指数计算或更新公牛数据库"
+                        logger.error(error_msg)
+                        self.last_error = error_msg
                         return False
                     
                     logger.info("成功从数据库补充公牛性状数据")
@@ -235,8 +248,9 @@ class MatrixRecommendationGenerator:
                         logger.info("使用已有的公牛指数数据")
                         return True
                     else:
-                        logger.error("公牛数据库中没有性状数据")
-                        logger.error("请先进行公牛育种指数计算")
+                        error_msg = "公牛数据库中没有性状数据，请先进行公牛育种指数计算"
+                        logger.error(error_msg)
+                        self.last_error = error_msg
                         return False
             else:
                 # 检查是否已经从文件加载了数据

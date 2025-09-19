@@ -71,7 +71,12 @@ class CompleteMatingExecutor:
                 progress_callback("正在加载数据...", 10)
             
             if not self.recommendation_generator.load_data():
-                raise Exception("加载数据失败，请检查必要的文件是否存在")
+                # 获取具体的错误信息
+                error_msg = getattr(self.recommendation_generator, 'last_error', None)
+                if error_msg:
+                    raise Exception(f"加载数据失败: {error_msg}")
+                else:
+                    raise Exception("加载数据失败，请检查必要的文件是否存在")
             
             # 步骤2: 执行分组 (20%)
             if progress_callback:
