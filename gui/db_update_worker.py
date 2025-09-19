@@ -14,15 +14,18 @@ class DBUpdateWorker(QObject):
     def run(self):
         try:
             # 在这里可以添加更多的进度更新逻辑
-            from core.data.update_manager import get_local_db_version
-            from datetime import datetime
+            from core.data.update_manager import get_local_db_version_with_time
 
             run_update_process()
 
-            # 获取更新后的版本号
-            current_version = get_local_db_version()
-            update_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            version_info = f"{current_version}#{update_time}"  # 用#分隔版本和时间
+            # 获取更新后的版本号和数据库中的更新时间
+            current_version, update_time = get_local_db_version_with_time()
+
+            if current_version and update_time:
+                version_info = f"{current_version}#{update_time}"  # 用#分隔版本和时间
+            else:
+                # 如果获取失败，返回空字符串
+                version_info = ""
 
             self.finished.emit(version_info)
         except Exception as e:

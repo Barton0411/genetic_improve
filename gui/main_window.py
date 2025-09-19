@@ -1602,12 +1602,14 @@ class MainWindow(QMainWindow):
             version, update_time = version_info.split('#', 1)
             message = f"数据库版本已更新为 {version} ({update_time})"
         else:
-            # 如果没有版本信息，使用默认消息
-            from core.data.update_manager import get_local_db_version
-            from datetime import datetime
-            version = get_local_db_version()
-            update_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            message = f"数据库版本已更新为 {version} ({update_time})"
+            # 如果没有版本信息，从数据库获取
+            from core.data.update_manager import get_local_db_version_with_time
+            version, update_time = get_local_db_version_with_time()
+            if version and update_time:
+                message = f"数据库版本已更新为 {version} ({update_time})"
+            else:
+                # 最后备用消息
+                message = "本地数据库已成功检查和更新。"
 
         logging.info(message)
         QMessageBox.information(self, "更新完成", message)

@@ -200,6 +200,43 @@ def get_local_db_version():
         logging.error(f"获取本地数据库版本失败: {e}")
         return None
 
+def get_local_db_version_with_time():
+    """
+    获取本地数据库的当前版本号和更新时间。
+    返回: (version, update_time) 元组
+    """
+    try:
+        result = session.execute(
+            db_version_table.select().order_by(db_version_table.c.id.desc()).limit(1)
+        ).fetchone()
+        if result:
+            # 根据查询结果的类型，决定如何访问数据
+            if isinstance(result, dict):
+                version = result['version']
+                update_time = result.get('update_time')
+            else:
+                # 如果是元组，假设结构是 (id, version, update_time)
+                version = result[1]
+                update_time = result[2] if len(result) > 2 else None
+
+            # 格式化时间
+            if update_time:
+                if isinstance(update_time, str):
+                    # 如果已经是字符串，直接返回
+                    time_str = update_time
+                else:
+                    # 如果是datetime对象，格式化
+                    time_str = update_time.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            return version, time_str
+        else:
+            return None, None
+    except Exception as e:
+        logging.error(f"获取本地数据库版本和时间失败: {e}")
+        return None, None
+
 def set_local_db_version(version: str):
     """
     设置本地数据库的版本号。
