@@ -2725,43 +2725,41 @@ class MainWindow(QMainWindow):
         # 获取用户的选择
         confirmation_result = confirm_dialog.get_confirmation_result()
         skip_missing_bulls = confirmation_result.get('skip_missing', False)
-        
-        # 创建进度对话框
-        self.progress_dialog = ProgressDialog(self)
-        self.progress_dialog.setWindowTitle("执行个体选配")
-        self.progress_dialog.set_task_info("正在执行个体选配...")
-        self.progress_dialog.show()
-        
-        try:
-            # 使用完整执行器
-            from core.matching.complete_mating_executor import CompleteMatingExecutor
-            
-            executor = CompleteMatingExecutor(self.selected_project_path)
-            
-            # 获取参数
-            inbreeding_threshold = self._get_inbreeding_threshold()
-            control_defect_genes = self.gene_control_checkbox.isChecked()
-            
-            # 执行完整流程
-            def progress_callback(msg, pct):
-                self.progress_dialog.set_task_info(msg)
-                self.progress_dialog.update_progress(pct)
-            
-            result = executor.execute(
-                bull_inventory=semen_inventory,
-                inbreeding_threshold=inbreeding_threshold,
-                control_defect_genes=control_defect_genes,
-                heifer_age_days=420,  # 可以从设置中获取
-                cycle_days=21,        # 可以从设置中获取
-                skip_missing_bulls=skip_missing_bulls,  # 传递是否跳过缺失数据的公牛
-                progress_callback=progress_callback
-            )
-            
-            self.progress_dialog.close()
-            
-            if result['success']:
-                # 构建成功消息
-                message = f"""个体选配完成！
+
+        # 获取参数
+        inbreeding_threshold = self._get_inbreeding_threshold()
+        control_defect_genes = self.gene_control_checkbox.isChecked()
+
+        # 准备选配参数
+        mating_params = {
+            'bull_inventory': semen_inventory,
+            'inbreeding_threshold': inbreeding_threshold,
+            'control_defect_genes': control_defect_genes,
+            'heifer_age_days': 420,
+            'cycle_days': 21,
+            'skip_missing_bulls': skip_missing_bulls
+        }
+
+        # 使用多线程进度对话框
+        from gui.mating_progress import MatingProgressDialog
+
+        self.mating_dialog = MatingProgressDialog(
+            self.selected_project_path,
+            mating_params,
+            self
+        )
+
+        # 连接完成信号
+        self.mating_dialog.completed.connect(self.on_mating_completed)
+
+        # 显示对话框（模态）
+        self.mating_dialog.exec()
+
+    def on_mating_completed(self, result: dict):
+        """选配完成的处理"""
+        if result['success']:
+            # 构建成功消息
+            message = f"""个体选配完成！
 
 已生成完整的选配报告：
 {result['report_path'].name}
@@ -2769,37 +2767,30 @@ class MainWindow(QMainWindow):
 报告包含了所有分组的母牛选配结果。
 
 是否打开查看报告？"""
-                
-                reply = QMessageBox.question(
-                    self, 
-                    "选配完成", 
-                    message,
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                
-                if reply == QMessageBox.StandardButton.Yes:
-                    try:
-                        QDesktopServices.openUrl(QUrl.fromLocalFile(str(result['report_path'])))
-                    except Exception as e:
-                        QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}")
-                
-                # 更新分组预览
-                self.load_group_preview()
-                
-            else:
-                QMessageBox.critical(
-                    self, 
-                    "选配失败", 
-                    f"个体选配失败:\n{result.get('error', '未知错误')}"
-                )
-                
-        except Exception as e:
-            self.progress_dialog.close()
-            logger.error(f"执行个体选配失败: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            QMessageBox.critical(self, "错误", f"执行个体选配失败:\n{str(e)}")
-    
+
+            reply = QMessageBox.question(
+                self,
+                "选配完成",
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(result['report_path'])))
+                except Exception as e:
+                    QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}")
+
+            # 更新分组预览
+            self.load_group_preview()
+
+        else:
+            QMessageBox.critical(
+                self,
+                "选配失败",
+                f"个体选配失败:\n{result.get('error', '未知错误')}"
+            )
+
     def on_allocate_mating(self):
         """选配分配按钮点击事件"""
         if not self.selected_project_path:
