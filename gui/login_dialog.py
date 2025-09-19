@@ -4,19 +4,15 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QIcon
-from pathlib import Path  
+from pathlib import Path
 import logging
-from sqlalchemy import create_engine, text
-from core.data.update_manager import (
-    CLOUD_DB_HOST, CLOUD_DB_PORT, CLOUD_DB_USER, 
-    CLOUD_DB_PASSWORD, CLOUD_DB_NAME
-)
+from auth.auth_service import AuthService
 
 class LoginDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("伊利奶牛选配 - 登录")
-        self.setFixedSize(350, 200)
+        self.setFixedSize(420, 200)
         
         # 设置窗口标志，移除WindowStaysOnTopHint避免Windows上的层级问题
         self.setWindowFlags(
@@ -49,9 +45,12 @@ class LoginDialog(QDialog):
         self.button_layout = QHBoxLayout()
         self.login_button = QPushButton("登录")
         self.login_button.clicked.connect(self.login)
+        self.register_button = QPushButton("注册")
+        self.register_button.clicked.connect(self.show_register)
         self.cancel_button = QPushButton("取消")
         self.cancel_button.clicked.connect(self.reject)
         self.button_layout.addWidget(self.login_button)
+        self.button_layout.addWidget(self.register_button)
         self.button_layout.addWidget(self.cancel_button)
         self.layout.addLayout(self.button_layout)
 
@@ -133,31 +132,24 @@ class LoginDialog(QDialog):
         QTimer.singleShot(100, lambda: self.process_login(username, password))
 
     def process_login(self, username, password):
-        """处理登录验证"""
+        """处理登录验证（使用API认证服务）"""
         try:
-            cloud_engine = create_engine(
-                f"mysql+pymysql://{CLOUD_DB_USER}:{CLOUD_DB_PASSWORD}"
-                f"@{CLOUD_DB_HOST}:{CLOUD_DB_PORT}/{CLOUD_DB_NAME}?charset=utf8mb4"
-            )
+            # 使用API认证服务进行登录验证
+            auth_service = AuthService()
+            success, message = auth_service.login(username, password)
 
-            with cloud_engine.connect() as connection:
-                result = connection.execute(
-                    text("SELECT * FROM `id-pw` WHERE ID=:username AND PW=:password"),
-                    {"username": username, "password": password}
-                ).fetchone()
-
-                if result:
-                    self.username = username
-                    self.accept()
-                else:
-                    self.show_login_form()
-                    QMessageBox.warning(self, "登录失败", "账号或密码错误，请重试。")
-                    self.username_input.clear()
-                    self.password_input.clear()
-                    self.username_input.setFocus()
+            if success:
+                self.username = username
+                self.accept()
+            else:
+                self.show_login_form()
+                QMessageBox.warning(self, "登录失败", message or "账号或密码错误，请重试。")
+                self.username_input.clear()
+                self.password_input.clear()
+                self.username_input.setFocus()
 
         except Exception as e:
-            logging.error(f"数据库连接错误: {str(e)}")
+            logging.error(f"登录错误: {str(e)}")
             self.show_login_form()
             
             # 判断错误类型并给出友好提示
@@ -181,3 +173,31 @@ class LoginDialog(QDialog):
             self.username_input.clear()
             self.password_input.clear()
             self.username_input.setFocus()
+
+    def show_register(self):
+        """显示注册对话框"""
+        try:
+            from gui.register_dialog import show_register_dialog
+
+            # 创建认证服务实例
+            auth_service = AuthService()
+
+            # 显示注册对话框
+            success, username = show_register_dialog(self, auth_service)
+
+            if success and username:
+                # 注册成功，自动填入用户名
+                self.username_input.setText(username)
+                self.password_input.setFocus()
+                QMessageBox.information(
+                    self,
+                    "注册成功",
+                    f"账号 {username} 注册成功！\n请输入密码登录。"
+                )
+        except Exception as e:
+            logging.error(f"注册对话框打开失败: {e}")
+            QMessageBox.critical(
+                self,
+                "错误",
+                f"无法打开注册界面: {str(e)}"
+            )

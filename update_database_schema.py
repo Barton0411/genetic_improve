@@ -6,18 +6,19 @@
 import pymysql
 import json
 import logging
+import os
 
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# 数据库连接配置
+# 数据库连接配置 - 更新为环境变量模式
 DB_CONFIG = {
-    'host': 'defectgene-new.mysql.polardb.rds.aliyuncs.com',
-    'port': 3306,
-    'user': 'defect_genetic_checking',
-    'password': 'Jaybz@890411',
-    'database': 'bull_library',
+    'host': os.getenv('DB_HOST', 'defectgene-new.mysql.polardb.rds.aliyuncs.com'),
+    'port': int(os.getenv('DB_PORT', '3306')),
+    'user': os.getenv('DB_USER', 'defect_genetic_checking'),
+    'password': os.getenv('DB_PASSWORD'),  # 从环境变量获取，不再硬编码
+    'database': os.getenv('DB_NAME', 'bull_library'),
     'charset': 'utf8mb4'
 }
 

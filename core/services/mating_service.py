@@ -14,6 +14,7 @@ from ..data import DataLoader
 from ..grouping.group_manager import GroupManager
 from ..matching.matrix_recommendation_generator import MatrixRecommendationGenerator
 from ..matching.cycle_based_matcher import CycleBasedMatcher
+from api.data_client import DataAPIClient
 
 logger = logging.getLogger(__name__)
 
@@ -21,32 +22,37 @@ logger = logging.getLogger(__name__)
 class MatingService:
     """统一的选配服务"""
     
-    def __init__(self, base_path: Path, project_name: Optional[str] = None):
+    def __init__(self, base_path: Path, project_name: Optional[str] = None, farm_id: Optional[str] = None):
         """
         初始化选配服务
-        
+
         Args:
             base_path: 项目基础路径
             project_name: 项目名称
+            farm_id: 牧场站号
         """
         self.base_path = Path(base_path)
         self.project_name = project_name
-        
+        self.farm_id = farm_id
+
         # 初始化各个组件
         self.data_loader = DataLoader(base_path, project_name)
-        
+
         # 设置项目路径
         if project_name:
             project_path = base_path / "genetic_projects" / project_name
         else:
             project_path = base_path
-            
+
         self.group_manager = GroupManager(project_path)
         self.recommendation_generator = MatrixRecommendationGenerator(project_path)
         self.matcher = CycleBasedMatcher()
-        
+
         # 数据缓存
         self.data_cache = {}
+
+        # 初始化API客户端
+        self.api_client = None
         
     def load_data(self) -> bool:
         """
@@ -366,3 +372,90 @@ class MatingService:
         except Exception as e:
             logger.error(f"保存结果失败: {e}")
             return False
+
+    def upload_results_to_api(self, results: Dict[str, Any], constraints: Dict[str, Any] = None, notes: str = None) -> Tuple[bool, str]:
+        """
+        上传选配结果到API服务器
+
+        Args:
+            results: 选配结果字典
+            constraints: 选配约束条件
+            notes: 备注
+
+        Returns:
+            Tuple[bool, str]: (成功标志, 消息)
+        """
+        try:
+            # 检查必要参数
+            if not self.farm_id:
+                return False, "未设置牧场站号"
+
+            if not self.project_name:
+                return False, "未设置项目名称"
+
+            # 初始化API客户端
+            if not self.api_client:
+                self.api_client = DataAPIClient()
+
+            # 准备数据
+            allocations = []
+            group_summaries = []
+            bull_summaries = []
+            unallocated_cows = []
+
+            # 处理分配结果
+            if 'allocation' in results and not results['allocation'].empty:
+                allocation_df = results['allocation']
+                for _, row in allocation_df.iterrows():
+                    allocations.append({
+                        'cow_id': str(row.get('cow_id', '')),
+                        'bull_id': str(row.get('bull_id', '')),
+                        'choice_num': int(row.get('choice_num', 1)) if pd.notna(row.get('choice_num')) else 1,
+                        'semen_type': str(row.get('semen_type', '常规')),
+                        'offspring_score': float(row.get('offspring_score', 0)) if pd.notna(row.get('offspring_score')) else 0,
+                        'inbreeding_coeff': float(row.get('inbreeding_coeff', 0)) if pd.notna(row.get('inbreeding_coeff')) else 0,
+                        'gene_status': str(row.get('gene_status', 'Unknown'))
+                    })
+
+            # 处理分组汇总
+            if 'grouping' in results and not results['grouping'].empty:
+                grouping_df = results['grouping']
+                groups = grouping_df['group'].unique()
+                for group in groups:
+                    group_data = grouping_df[grouping_df['group'] == group]
+                    group_summaries.append({
+                        'group_name': str(group),
+                        'total_cows': len(group_data),
+                        'allocated_cows': len(group_data[group_data['bull_id'].notna()]) if 'bull_id' in group_data.columns else 0,
+                        'unallocated_cows': len(group_data[group_data['bull_id'].isna()]) if 'bull_id' in group_data.columns else len(group_data)
+                    })
+
+            # 准备约束条件
+            if not constraints:
+                constraints = {
+                    'inbreeding_threshold': 6.25,
+                    'control_defect_genes': True
+                }
+
+            # 上传到API
+            success, result_id, message = self.api_client.upload_mating_result(
+                farm_id=self.farm_id,
+                project_name=self.project_name,
+                allocations=allocations,
+                group_summaries=group_summaries,
+                bull_summaries=bull_summaries,
+                unallocated_cows=unallocated_cows,
+                constraints=constraints,
+                notes=notes
+            )
+
+            if success:
+                logger.info(f"成功上传选配结果到API, ID: {result_id}")
+                return True, f"结果已上传，ID: {result_id}"
+            else:
+                logger.error(f"上传选配结果失败: {message}")
+                return False, message
+
+        except Exception as e:
+            logger.error(f"上传选配结果到API失败: {e}")
+            return False, str(e)

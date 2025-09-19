@@ -136,9 +136,17 @@ def get_chinese_font_prop(size=10, weight='normal'):
 from .models import InbreedingDetailModel, AbnormalDetailModel, StatisticsModel
 from gui.progress import ProgressDialog
 from core.data.update_manager import (
-    CLOUD_DB_HOST, CLOUD_DB_PORT, CLOUD_DB_USER, 
-    CLOUD_DB_PASSWORD, CLOUD_DB_NAME, LOCAL_DB_PATH, get_pedigree_db
+    CLOUD_DB_HOST, CLOUD_DB_PORT, CLOUD_DB_USER,
+    CLOUD_DB_NAME, LOCAL_DB_PATH, get_pedigree_db
 )
+
+# 导入数据API客户端
+try:
+    from api.data_client import upload_missing_bulls_to_cloud
+    USE_API = True
+except ImportError:
+    USE_API = False
+    logging.warning("数据API客户端未安装，上传缺失公牛功能可能不可用")
 
 class PedigreeDialog(QDialog):
     """血缘关系图对话框"""
@@ -2458,14 +2466,19 @@ class InbreedingPage(QWidget):
                 'user': username
             })
             
-            # 连接云端数据库并上传
-            print("尝试连接云端数据库上传缺失公牛记录...")
-            cloud_engine = create_engine(
-                f"mysql+pymysql://{CLOUD_DB_USER}:{CLOUD_DB_PASSWORD}"
-                f"@{CLOUD_DB_HOST}:{CLOUD_DB_PORT}/{CLOUD_DB_NAME}?charset=utf8mb4"
-            )
-            missing_df.to_sql('miss_bull', cloud_engine, if_exists='append', index=False)
-            print(f"成功上传{len(missing_bulls)}个缺失公牛记录到云端数据库")
+            # 通过API上传缺失公牛记录
+            if USE_API:
+                print("尝试通过API上传缺失公牛记录...")
+                # 将DataFrame转换为字典列表
+                missing_records = missing_df.to_dict(orient='records')
+                success = upload_missing_bulls_to_cloud(missing_records)
+                if success:
+                    print(f"成功通过API上传{len(missing_bulls)}个缺失公牛记录")
+                else:
+                    print(f"API上传失败，{len(missing_bulls)}个缺失公牛记录未能上传")
+            else:
+                print("数据API客户端未安装，无法上传缺失公牛记录")
+                logging.error("无法上传缺失公牛记录：API客户端未安装")
             
             # 提示用户
             print("警告：在本地数据库中未找到公牛基因信息，涉及这些公牛的配对将显示为'缺少公牛信息'")

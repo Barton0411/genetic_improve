@@ -1,0 +1,80 @@
+{
+  "normalize_mappings": {
+    "cow_id": [
+      "cow_id", "ID", "Cow_ID", "CowID", "牛号", "牛只编号",
+      "animal_id", "cattle_id", "耳号", "个体号"
+    ],
+    "birth_date": [
+      "birth_date", "Birth_Date", "BirthDate", "出生日期",
+      "birth_dt", "birthday"
+    ],
+    "lac": [
+      "lac", "LAC", "Lactation", "胎次", "lactation"
+    ],
+    "sex": [
+      "sex", "Sex", "Gender", "性别"
+    ],
+    "sire_id": [
+      "sire_id", "Sire_ID", "SireID", "父号", "sire", "父亲ID"
+    ],
+    "dam_id": [
+      "dam_id", "Dam_ID", "DamID", "母号", "dam", "母亲ID"
+    ],
+    "naab": [
+      "NAAB", "Bull_NAAB", "BullNAAB", "公牛号", "bull_id", "Bull_ID",
+      "bull_cattle_id", "种公牛"
+    ],
+    "farm_code": [
+      "farm_code", "farm_id", "站号", "牧场编号",
+      "result_farm_code", "牧场代码"
+    ],
+    "mating_date": [
+      "mating_date", "配种日期", "选配日期"
+    ],
+    "milk_yield": [
+      "milk_yield", "产奶量", "日产奶量", "milk_production"
+    ],
+    "fat_percentage": [
+      "fat_percentage", "乳脂率", "fat_rate", "脂肪率"
+    ],
+    "protein_percentage": [
+      "protein_percentage", "乳蛋白率", "protein_rate", "蛋白率"
+    ],
+    "employee_id": [
+      "employee_id", "user_id", "工号", "username"
+    ],
+    "password": [
+      "password", "密码", "PW", "pwd"
+    ],
+    "mating_result_id": [
+      "mating_result_id", "result_id", "match_id", "选配结果"
+    ],
+    "name": [
+      "name", "姓名", "名称", "cattle_name", "bull_name"
+    ]
+  },
+  "display_mappings": {
+    "cow_id": "牛号",
+    "birth_date": "出生日期",
+    "lac": "胎次",
+    "sex": "性别",
+    "sire_id": "父号",
+    "dam_id": "母号",
+    "naab": "公牛号",
+    "cattle_name": "牛只名称",
+    "farm_code": "牧场代码",
+    "farm_name": "牧场名称",
+    "mating_date": "选配日期",
+    "milk_yield": "产奶量",
+    "fat_percentage": "乳脂率",
+    "protein_percentage": "乳蛋白率",
+    "employee_id": "工号",
+    "password": "密码",
+    "name": "姓名",
+    "mating_result_id": "选配结果编号",
+    "inbreeding_coefficient": "近交系数",
+    "status": "状态",
+    "created_at": "创建时间",
+    "updated_at": "更新时间"
+  }
+}

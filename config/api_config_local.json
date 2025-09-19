@@ -1,0 +1,26 @@
+{
+  "current_environment": "local",
+  "environments": {
+    "production": {
+      "api_base_url": "https://api.genepop.com",
+      "timeout": 15,
+      "retry_count": 3
+    },
+    "local": {
+      "api_base_url": "http://localhost:8081",
+      "timeout": 5,
+      "retry_count": 1,
+      "offline_mode": true
+    }
+  },
+  "offline_credentials": {
+    "test_user": {
+      "password": "test123",
+      "name": "测试用户"
+    },
+    "admin": {
+      "password": "admin123",
+      "name": "管理员"
+    }
+  }
+}

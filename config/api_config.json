@@ -1,0 +1,37 @@
+{
+  "environments": {
+    "development": {
+      "api_base_url": "http://localhost:8081",
+      "timeout": 10,
+      "retry_attempts": 3,
+      "description": "本地开发环境"
+    },
+    "production": {
+      "api_base_url": "http://39.96.189.27",
+      "timeout": 15,
+      "retry_attempts": 5,
+      "description": "生产环境(临时使用HTTP+IP)"
+    },
+    "production_domain": {
+      "api_base_url": "https://api.genepop.com",
+      "timeout": 15,
+      "retry_attempts": 5,
+      "description": "生产环境(域名)"
+    }
+  },
+  "current_environment": "production",
+  "logging": {
+    "level": "INFO",
+    "log_api_requests": false,
+    "log_token_events": true
+  },
+  "security": {
+    "verify_ssl": false,
+    "token_auto_refresh": false,
+    "max_token_age_hours": 24
+  },
+  "fallback": {
+    "enable_offline_mode": false,
+    "offline_message": "当前处于离线模式，部分功能可能不可用"
+  }
+}

@@ -1,6 +1,7 @@
 # core/data/update_manager.py
 
 
+import os
 import sys
 import logging
 import datetime
@@ -18,12 +19,13 @@ from core.inbreeding.pedigree_database import load_or_build_pedigree, update_ped
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # 云端 MySQL 数据库连接参数
-CLOUD_DB_HOST = 'defectgene-new.mysql.polardb.rds.aliyuncs.com'
-CLOUD_DB_PORT = 3306
-CLOUD_DB_USER = 'defect_genetic_checking'
-CLOUD_DB_PASSWORD_RAW = 'Jaybz@890411'  # 原始密码
-CLOUD_DB_PASSWORD = urllib.parse.quote_plus(CLOUD_DB_PASSWORD_RAW)  # URL 编码后的密码
-CLOUD_DB_NAME = 'bull_library'
+# 完全API化模式 - 客户端不再需要数据库密码
+# 所有数据库操作通过API服务进行
+CLOUD_DB_HOST = 'defectgene-new.mysql.polardb.rds.aliyuncs.com'  # 仅供参考，不再使用
+CLOUD_DB_PORT = 3306  # 仅供参考，不再使用
+CLOUD_DB_USER = 'defect_genetic_checking'  # 仅供参考，不再使用
+CLOUD_DB_PASSWORD = None  # 已移除，使用API服务
+CLOUD_DB_NAME = 'bull_library'  # 仅供参考，不再使用
 
 # 本地 SQLite 数据库连接参数
 def get_project_root() -> Path:
@@ -49,7 +51,6 @@ def get_project_root() -> Path:
 PROJECT_ROOT = get_project_root()
 
 # 获取用户数据目录，避免权限问题
-import os
 if os.name == 'nt':  # Windows
     USER_DATA_DIR = Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'GeneticImprove'
 else:  # Mac/Linux
@@ -83,9 +84,34 @@ db_version_table = Table(
     Column('update_time', DateTime, default=datetime.datetime.utcnow)
 )
 
-# 设置 SQLAlchemy 引擎用于云端 MySQL
-CLOUD_DB_URI = f"mysql+pymysql://{CLOUD_DB_USER}:{CLOUD_DB_PASSWORD}@{CLOUD_DB_HOST}:{CLOUD_DB_PORT}/{CLOUD_DB_NAME}?charset=utf8mb4"
-cloud_engine = create_engine(CLOUD_DB_URI, echo=False)
+# 云端数据库引擎已废弃 - 使用API服务
+# 导入数据API客户端
+try:
+    from api.data_client import (
+        get_cloud_db_version as api_get_cloud_db_version,
+        fetch_cloud_bull_library as api_fetch_cloud_bull_library,
+        get_data_client
+    )
+    USE_API = True
+except ImportError:
+    USE_API = False
+    logging.warning("数据API客户端未安装，某些功能可能不可用")
+
+def get_cloud_engine():
+    """
+    获取云端数据库引擎（已废弃）
+
+    此函数保留仅为向后兼容，实际不再提供数据库连接
+    请使用API服务进行所有数据库操作
+
+    Raises:
+        NotImplementedError: 总是抛出异常，提示使用API服务
+    """
+    raise NotImplementedError(
+        "直接数据库连接已废弃，请使用API服务。\n"
+        "确保已登录并配置了认证令牌。\n"
+        "如需帮助，请联系系统管理员。"
+    )
 
 # 全局系谱库管理器实例
 pedigree_db_instance = None
@@ -212,58 +238,45 @@ def initialize_local_db_version(initial_version: str = "1.0.0"):
 
 def get_cloud_db_version():
     """
-    获取云端数据库的当前版本号。
-    
+    获取云端数据库的当前版本号（通过API）。
+
     Returns:
         str: 云端数据库的版本号，如果获取失败则返回 None。
     """
-    try:
-        with cloud_engine.connect() as connection:
-            result = connection.execute(text("SELECT version FROM db_version ORDER BY id DESC LIMIT 1")).fetchone()
-            if result:
-                version = result['version'] if isinstance(result, dict) else result[0]
-                logging.info(f"云端数据库当前版本: {version}")
-                return version
-            else:
-                logging.warning("云端数据库版本信息不存在。")
-                return None
-    except Exception as e:
-        logging.error(f"获取云端数据库版本失败: {e}")
+    if USE_API:
+        try:
+            # 使用API获取版本
+            return api_get_cloud_db_version()
+        except Exception as e:
+            logging.error(f"通过API获取数据库版本失败: {e}")
+            return None
+    else:
+        logging.error("数据API客户端未安装，无法获取云端数据库版本")
         return None
 
 def fetch_cloud_bull_library():
     """
-    从云端 MySQL 数据库中获取 bull_library 表的数据。
-    
+    从云端获取 bull_library 表的数据（通过API）。
+
     Returns:
         pandas.DataFrame: bull_library 表的数据。
     """
-    try:
-        query = "SELECT * FROM bull_library"
-        df = pd.read_sql(query, cloud_engine)  # 使用 cloud_engine
-        logging.info(f"成功从云端数据库获取 bull_library 表，共 {len(df)} 条记录。")
-        
-        # 添加调试信息
-        if not df.empty:
-            logging.info(f"提取的前5行数据:\n{df.head()}")
-            
-            # 验证是否有表头行作为数据行
-            if 'BULL NAAB' in df.columns:
-                header_rows = df[df['BULL NAAB'] == 'BULL NAAB']
-                if not header_rows.empty:
-                    logging.warning(f"数据中包含 {len(header_rows)} 条表头行，将进行过滤。")
-                    df = df[df['BULL NAAB'] != 'BULL NAAB']
-                    logging.info(f"过滤表头后的记录数: {len(df)}")
-                else:
-                    logging.info("数据中不包含表头行。")
+    if USE_API:
+        try:
+            # 使用API获取公牛库数据
+            records = api_fetch_cloud_bull_library()
+            if records:
+                df = pd.DataFrame(records)
+                logging.info(f"成功从API获取 bull_library 表，共 {len(df)} 条记录。")
+                return df
             else:
-                logging.warning("'BULL NAAB' 列不存在，无法进行表头行过滤。")
-        else:
-            logging.warning("提取的数据为空。")
-        
-        return df
-    except Exception as e:
-        logging.error(f"从云端数据库获取 bull_library 表数据失败: {e}")
+                logging.warning("API返回的数据为空")
+                return None
+        except Exception as e:
+            logging.error(f"通过API获取公牛库数据失败: {e}")
+            return None
+    else:
+        logging.error("数据API客户端未安装，无法获取云端公牛库数据")
         return None
 
 def update_local_bull_library(df: pd.DataFrame):

@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import pymysql
 import json
+import os
 from datetime import datetime, date
 import uvicorn
 import logging
@@ -33,11 +34,11 @@ app.add_middleware(
 
 # 数据库配置
 DB_CONFIG = {
-    'host': 'defectgene-new.mysql.polardb.rds.aliyuncs.com',
-    'port': 3306,
-    'user': 'defect_genetic_checking',
-    'password': 'Jaybz@890411',
-    'database': 'bull_library',
+    'host': os.getenv('DB_HOST', 'defectgene-new.mysql.polardb.rds.aliyuncs.com'),
+    'port': int(os.getenv('DB_PORT', '3306')),
+    'user': os.getenv('DB_USER', 'defect_genetic_checking'),
+    'password': os.getenv('DB_PASSWORD'),  # 从环境变量获取
+    'database': os.getenv('DB_NAME', 'bull_library'),
     'charset': 'utf8mb4'
 }
 
