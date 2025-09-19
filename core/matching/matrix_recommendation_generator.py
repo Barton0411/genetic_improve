@@ -457,7 +457,7 @@ class MatrixRecommendationGenerator:
         if progress_callback:
             progress_callback("生成推荐汇总...", 85)
 
-        matrices['推荐汇总'] = self._generate_recommendation_summary()
+        matrices['推荐汇总'] = self._generate_recommendation_summary(progress_callback=progress_callback)
 
         if progress_callback:
             progress_callback("矩阵生成完成", 95)
@@ -740,16 +740,101 @@ class MatrixRecommendationGenerator:
             
         return "-"
         
-    def _generate_recommendation_summary(self) -> pd.DataFrame:
-        """生成推荐汇总（兼容原有格式）"""
+    def _build_inbreeding_dict(self) -> dict:
+        """预构建近交系数查找字典"""
+        inbreeding_dict = {}
+
+        if self.inbreeding_data is None:
+            return inbreeding_dict
+
+        # 找到实际的列名
+        cow_cols = ['母牛号', 'dam_id', 'cow_id']
+        bull_cols = ['原始备选公牛号', '备选公牛号', '公牛号', 'sire_id', 'bull_id']
+        coeff_cols = ['后代近交系数', '近交系数', 'inbreeding_coefficient']
+
+        cow_col = next((col for col in cow_cols if col in self.inbreeding_data.columns), None)
+        bull_col = next((col for col in bull_cols if col in self.inbreeding_data.columns), None)
+        coeff_col = next((col for col in coeff_cols if col in self.inbreeding_data.columns), None)
+
+        if cow_col and bull_col and coeff_col:
+            for _, row in self.inbreeding_data.iterrows():
+                key = (str(row[cow_col]), str(row[bull_col]))
+                value = row[coeff_col]
+                if pd.notna(value):
+                    if isinstance(value, str) and '%' in value:
+                        value = float(value.replace('%', '')) / 100
+                    inbreeding_dict[key] = float(value)
+
+        return inbreeding_dict
+
+    def _build_genetic_dict(self) -> dict:
+        """预构建隐性基因查找字典"""
+        genetic_dict = {}
+
+        if self.genetic_defect_data is None:
+            return genetic_dict
+
+        # 找到实际的列名
+        cow_cols = ['母牛号', 'dam_id', 'cow_id']
+        bull_cols = ['原始备选公牛号', '备选公牛号', '公牛号', 'sire_id', 'bull_id']
+
+        cow_col = next((col for col in cow_cols if col in self.genetic_defect_data.columns), None)
+        bull_col = next((col for col in bull_cols if col in self.genetic_defect_data.columns), None)
+
+        defect_genes = ['HH1', 'HH2', 'HH3', 'HH4', 'HH5', 'HH6',
+                       'MW', 'BLAD', 'CVM', 'DUMPS', 'Citrullinemia',
+                       'Brachyspina', 'Factor XI', 'Mulefoot',
+                       'Cholesterol deficiency', 'Chondrodysplasia']
+
+        if cow_col and bull_col:
+            for _, row in self.genetic_defect_data.iterrows():
+                key = (str(row[cow_col]), str(row[bull_col]))
+
+                # 检查各种隐性基因
+                for gene in defect_genes:
+                    if gene in row.index:
+                        status = str(row[gene]).strip()
+                        if status == '高风险':
+                            genetic_dict[key] = '高风险'
+                            break
+                else:
+                    genetic_dict[key] = 'Safe'
+
+        return genetic_dict
+
+    def _generate_recommendation_summary(self, progress_callback=None) -> pd.DataFrame:
+        """生成推荐汇总（优化版）"""
+        import numpy as np
+
         recommendations = []
         skipped_cows = 0
-        
-        logger.info(f"开始生成推荐汇总，母牛总数: {len(self.cow_data)}")
-        
-        for _, cow in self.cow_data.iterrows():
+        total_cows = len(self.cow_data)
+
+        logger.info(f"开始生成推荐汇总，母牛总数: {total_cows}")
+
+        # 预构建近交系数和隐性基因查找字典
+        inbreeding_dict = self._build_inbreeding_dict()
+        genetic_dict = self._build_genetic_dict()
+
+        # 分别处理常规和性控公牛
+        regular_bulls = self.bull_data[self.bull_data['classification'] == '常规']
+        sexed_bulls = self.bull_data[self.bull_data['classification'] == '性控']
+
+        # 预计算公牛得分
+        regular_bull_scores = dict(zip(regular_bulls['bull_id'].astype(str), regular_bulls['Index Score'])) if not regular_bulls.empty else {}
+        sexed_bull_scores = dict(zip(sexed_bulls['bull_id'].astype(str), sexed_bulls['Index Score'])) if not sexed_bulls.empty else {}
+
+        for idx, (_, cow) in enumerate(self.cow_data.iterrows()):
             cow_id = str(cow['cow_id'])
-            
+            current_cow_num = idx + 1
+
+            # 更新进度（更频繁的更新）
+            if progress_callback:
+                if current_cow_num <= 10 or current_cow_num % 10 == 0 or current_cow_num == total_cows:
+                    progress_msg = f"生成推荐汇总 ({current_cow_num}/{total_cows}头)"
+                    progress_pct = int(85 + (current_cow_num / total_cows) * 10)  # 85-95%
+                    progress_callback(progress_msg, progress_pct)
+
             # 复制母牛基本信息
             rec = {
                 'cow_id': cow_id,
@@ -758,82 +843,82 @@ class MatrixRecommendationGenerator:
                 'birth_date': cow.get('birth_date', ''),
                 'index_score': self._get_cow_score(cow)
             }
-            
-            has_valid_bulls = False  # 标记是否有任何有效的公牛
-            
-            # 为每种冻精类型生成前3个推荐
-            for semen_type in ['常规', '性控']:
-                type_bulls = self.bull_data[self.bull_data['classification'] == semen_type]
 
-                if not type_bulls.empty:
-                    # 【优化】数据已在加载时过滤，直接使用有效公牛
-                    valid_type_bulls = []
-
-                    for _, bull in type_bulls.iterrows():
-                        bull_id = str(bull['bull_id'])
-                        bull_score = bull['Index Score']
-                        valid_type_bulls.append((bull_id, bull_score, bull))
-
-                    # 计算有效公牛的得分
-                    bull_scores = []
-                    for bull_id, bull_score, bull in valid_type_bulls:
-                        
-                        # 获取母牛得分
-                        cow_score = self._get_cow_score(cow)
-                        
-                        if cow_score is None:
-                            # 跳过没有得分的母牛
-                            if len(bull_scores) == 0:  # 只在第一次记录
-                                logger.warning(f"母牛 {cow_id} 没有得分，跳过该母牛")
-                                skipped_cows += 1
-                            continue
-                        offspring_score = 0.5 * (cow_score + bull_score)
-                        inbreeding_coeff = self._get_inbreeding_coefficient(cow_id, bull_id)
-                        gene_status = self._check_genetic_defects(cow_id, bull_id)
-                        
-                        # 只添加满足约束的公牛（避开高风险）
-                        if inbreeding_coeff <= 0.03125 and gene_status != '高风险':
-                            bull_scores.append({
-                                'bull_id': bull_id,
-                                'offspring_score': offspring_score,
-                                'inbreeding_coeff': inbreeding_coeff,
-                                'gene_status': gene_status
-                            })
-                    
-                    # 按得分排序
-                    bull_scores.sort(key=lambda x: x['offspring_score'], reverse=True)
-                    
-                    if bull_scores:  # 如果有有效的公牛
-                        has_valid_bulls = True
-                    
-                    # 保存前3个推荐
-                    for i in range(min(3, len(bull_scores))):
-                        if i < len(bull_scores):
-                            rec[f'推荐{semen_type}冻精{i+1}选'] = bull_scores[i]['bull_id']
-                            rec[f'{semen_type}冻精{i+1}近交系数'] = f"{bull_scores[i]['inbreeding_coeff']*100:.3f}%"
-                            rec[f'{semen_type}冻精{i+1}隐性基因情况'] = bull_scores[i]['gene_status']
-                            rec[f'{semen_type}冻精{i+1}得分'] = round(bull_scores[i]['offspring_score'], 2)
-                        else:
-                            rec[f'推荐{semen_type}冻精{i+1}选'] = ''
-                            rec[f'{semen_type}冻精{i+1}近交系数'] = ''
-                            rec[f'{semen_type}冻精{i+1}隐性基因情况'] = ''
-                            rec[f'{semen_type}冻精{i+1}得分'] = ''
-                    
-                    # 保存所有有效公牛信息（不只是前3个，用于递进机制）
-                    rec[f'{semen_type}_valid_bulls'] = str(bull_scores)
-            
-            if not has_valid_bulls:
-                logger.warning(f"母牛 {cow_id} 没有任何有效的公牛可选（可能因为近交系数或隐性基因约束）")
+            cow_score = rec['index_score']
+            if cow_score is None:
+                logger.warning(f"母牛 {cow_id} 没有得分，跳过该母牛")
                 skipped_cows += 1
-                # 但仍然添加到推荐列表中，以便在分配时显示为无法分配
-                            
+                recommendations.append(rec)
+                continue
+
+            has_valid_bulls = False
+
+            # 为每种冻精类型生成前3个推荐
+            for semen_type, bull_scores_dict in [('常规', regular_bull_scores), ('性控', sexed_bull_scores)]:
+                if not bull_scores_dict:
+                    # 填充空值
+                    for i in range(3):
+                        rec[f'推荐{semen_type}冻精{i+1}选'] = ''
+                        rec[f'{semen_type}冻精{i+1}近交系数'] = ''
+                        rec[f'{semen_type}冻精{i+1}隐性基因情况'] = ''
+                        rec[f'{semen_type}冻精{i+1}得分'] = ''
+                    rec[f'{semen_type}_valid_bulls'] = '[]'
+                    continue
+
+                # 快速计算所有公牛得分
+                bull_recommendations = []
+
+                for bull_id, bull_score in bull_scores_dict.items():
+                    # 计算后代得分
+                    offspring_score = 0.5 * (cow_score + bull_score)
+
+                    # 从字典中查找近交系数和隐性基因状态
+                    inbreeding_key = (cow_id, bull_id)
+                    inbreeding_coeff = inbreeding_dict.get(inbreeding_key, 0.0)
+                    gene_status = genetic_dict.get(inbreeding_key, 'Safe')
+
+                    # 只添加满足约束的公牛
+                    if inbreeding_coeff <= self.inbreeding_threshold and gene_status != '高风险':
+                        bull_recommendations.append({
+                            'bull_id': bull_id,
+                            'offspring_score': offspring_score,
+                            'inbreeding_coeff': inbreeding_coeff,
+                            'gene_status': gene_status
+                        })
+
+                # 按得分排序
+                bull_recommendations.sort(key=lambda x: x['offspring_score'], reverse=True)
+
+                if bull_recommendations:
+                    has_valid_bulls = True
+
+                # 保存前3个推荐
+                for i in range(3):
+                    if i < len(bull_recommendations):
+                        rec[f'推荐{semen_type}冻精{i+1}选'] = bull_recommendations[i]['bull_id']
+                        rec[f'{semen_type}冻精{i+1}近交系数'] = f"{bull_recommendations[i]['inbreeding_coeff']*100:.3f}%"
+                        rec[f'{semen_type}冻精{i+1}隐性基因情况'] = bull_recommendations[i]['gene_status']
+                        rec[f'{semen_type}冻精{i+1}得分'] = round(bull_recommendations[i]['offspring_score'], 2)
+                    else:
+                        rec[f'推荐{semen_type}冻精{i+1}选'] = ''
+                        rec[f'{semen_type}冻精{i+1}近交系数'] = ''
+                        rec[f'{semen_type}冻精{i+1}隐性基因情况'] = ''
+                        rec[f'{semen_type}冻精{i+1}得分'] = ''
+
+                # 保存所有有效公牛信息
+                rec[f'{semen_type}_valid_bulls'] = str(bull_recommendations)
+
+            if not has_valid_bulls:
+                logger.debug(f"母牛 {cow_id} 没有任何有效的公牛可选")
+                skipped_cows += 1
+
             recommendations.append(rec)
-        
+
         logger.info(f"推荐汇总生成完成:")
-        logger.info(f"  总母牛数: {len(self.cow_data)}")
+        logger.info(f"  总母牛数: {total_cows}")
         logger.info(f"  跳过的母牛数: {skipped_cows}")
         logger.info(f"  生成推荐的母牛数: {len(recommendations)}")
-        
+
         return pd.DataFrame(recommendations)
         
     def save_matrices(self, matrices: Dict[str, pd.DataFrame], output_file: Path):
