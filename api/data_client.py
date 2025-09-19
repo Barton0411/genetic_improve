@@ -68,6 +68,10 @@ class DataAPIClient:
             else:
                 return False, None, data.get('message', '获取版本失败')
 
+        except requests.exceptions.RequestException as e:
+            logger.error(f"获取数据库版本失败: {e}")
+            return False, None, str(e)
+
     def get_database_version_with_time(self) -> Tuple[bool, Optional[str], Optional[str], str]:
         """
         获取数据库版本和更新时间
@@ -91,8 +95,8 @@ class DataAPIClient:
                 return False, None, None, data.get('message', '获取版本失败')
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"获取数据库版本失败: {e}")
-            return False, None, str(e)
+            logger.error(f"获取数据库版本和时间失败: {e}")
+            return False, None, None, str(e)
 
     def get_bull_library(self) -> Tuple[bool, Optional[List[Dict]], str]:
         """
