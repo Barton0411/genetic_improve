@@ -8,10 +8,7 @@ from typing import Tuple, Optional
 import numpy as np
 import datetime
 
-from core.data.update_manager import (
-    CLOUD_DB_HOST, CLOUD_DB_PORT, CLOUD_DB_USER, 
-    CLOUD_DB_PASSWORD, CLOUD_DB_NAME, LOCAL_DB_PATH
-)
+from core.data.update_manager import LOCAL_DB_PATH
 
 class BaseCowCalculation:
     def __init__(self):
@@ -148,27 +145,6 @@ class BaseCowCalculation:
 
         except Exception as e:
             print(f"处理缺失公牛信息失败: {e}")
-            # 如果API方式失败，尝试直接连接（仅用于开发环境）
-            if CLOUD_DB_PASSWORD:
-                try:
-                    missing_df = pd.DataFrame({
-                        'bull': missing_bulls,
-                        'source': source,
-                        'time': datetime.datetime.now(),
-                        'user': username
-                    })
-
-                    cloud_engine = create_engine(
-                        f"mysql+pymysql://{CLOUD_DB_USER}:{CLOUD_DB_PASSWORD}"
-                        f"@{CLOUD_DB_HOST}:{CLOUD_DB_PORT}/{CLOUD_DB_NAME}?charset=utf8mb4"
-                    )
-
-                    missing_df.to_sql('miss_bull', cloud_engine, if_exists='append', index=False)
-                    print(f"通过直接连接上传了 {len(missing_bulls)} 条缺失公牛记录")
-                    return True
-                except Exception as db_error:
-                    print(f"直接数据库连接也失败: {db_error}")
-
             return False
 
     def query_bull_traits(self, bull_id: str, selected_traits: list) -> Tuple[dict, bool]:
