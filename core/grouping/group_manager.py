@@ -389,8 +389,9 @@ class GroupManager:
         heifer_count = heifer_mask.sum()
         mature_count = mature_mask.sum()
         
+        total_cows = len(df)
         if progress_callback:
-            progress_callback.update_info(f"牛只分类: 后备牛 {heifer_count} 头, 成母牛 {mature_count} 头")
+            progress_callback.update_info(f"牛只分类完成 ({total_cows}头): 后备牛 {heifer_count} 头, 成母牛 {mature_count} 头")
         
         if progress_callback:
             progress_callback.set_task_info("正在处理后备牛分组...")
@@ -413,8 +414,8 @@ class GroupManager:
         difficult_count = difficult_mask.sum()
         
         if progress_callback:
-            progress_callback.update_info(f"后备牛已孕牛: {pregnant_count} 头")
-            progress_callback.update_info(f"后备牛难孕牛: {difficult_count} 头")
+            processed_heifers = pregnant_count + difficult_count
+            progress_callback.update_info(f"后备牛特殊分组 ({processed_heifers}/{heifer_count}头): 已孕 {pregnant_count} 头, 难孕 {difficult_count} 头")
         
         print(f"后备牛已孕牛数量：{pregnant_count}头")
         print(f"后备牛难孕牛数量：{difficult_count}头")
@@ -425,7 +426,7 @@ class GroupManager:
         normal_count = len(heifer_normal)
         
         if progress_callback:
-            progress_callback.update_info(f"普通后备牛: {normal_count} 头，需要按周期分组")
+            progress_callback.update_info(f"待分组后备牛: ({normal_count}/{heifer_count}头) 需要按周期分组")
         
         print(f"普通后备牛数量：{normal_count}头")
         print(f"后备牛总数量：{len(heifer_df)}头")
@@ -558,17 +559,15 @@ class GroupManager:
                 print(f"  {status}: {count} 头")
             print(f"难孕牛DIM范围: {difficult_cows['DIM'].min():.1f} - {difficult_cows['DIM'].max():.1f} 天")
         
-        mature_info = [
-            f"成母牛已孕牛: {pregnant_count} 头",
-            f"成母牛难孕牛: {difficult_count} 头", 
-            f"成母牛未孕牛: {normal_count} 头",
-            f"成母牛总数: {len(mature_df)} 头"
-        ]
-        
-        for info in mature_info:
-            print(info.replace(": ", "数量：").replace(" 头", "头"))
-            if progress_callback:
-                progress_callback.update_info(info)
+        mature_info = f"成母牛分组完成 ({len(mature_df)}头): 已孕 {pregnant_count} 头, 难孕 {difficult_count} 头, 未孕 {normal_count} 头"
+
+        print(f"成母牛已孕牛数量：{pregnant_count}头")
+        print(f"成母牛难孕牛数量：{difficult_count}头")
+        print(f"成母牛未孕牛数量：{normal_count}头")
+        print(f"成母牛总数量：{len(mature_df)}头")
+
+        if progress_callback:
+            progress_callback.update_info(mature_info)
         
         if progress_callback:
             progress_callback.set_task_info("正在处理遗传物质分配...")

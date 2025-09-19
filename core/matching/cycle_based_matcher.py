@@ -192,15 +192,23 @@ class CycleBasedMatcher:
         total_cycles = len(cycle_groups)
         
         # 按周期顺序处理
+        total_cows_all_cycles = sum(len(cows) for _, cows in cycle_groups)
+        processed_cows = 0
+
         for cycle_idx, (cycle_name, cycle_cows) in enumerate(cycle_groups):
+            cycle_cow_count = len(cycle_cows)
+
             if progress_callback:
                 progress = int((cycle_idx / total_cycles) * 100)
-                progress_callback(f"正在分配 {cycle_name}", progress)
-                
-            logger.info(f"开始分配 {cycle_name}，包含 {len(cycle_cows)} 头母牛")
-            
+                progress_callback(f"正在分配 {cycle_name} ({cycle_cow_count}头母牛)", progress)
+
+            logger.info(f"开始分配 {cycle_name}，包含 {cycle_cow_count} 头母牛")
+
             # 为这个周期的所有母牛分配
             self._allocate_cycle(cycle_name, cycle_cows)
+
+            processed_cows += cycle_cow_count
+            logger.info(f"累计已处理: ({processed_cows}/{total_cows_all_cycles}头)")
             
         # 转换结果为DataFrame
         result_df = self._convert_results_to_dataframe()
@@ -283,13 +291,20 @@ class CycleBasedMatcher:
     def _allocate_all_choices_with_progression(self, cycle_name: str, cycle_cows: pd.DataFrame, semen_type: str):
         """使用递进机制一次性为所有母牛分配1、2、3选"""
         logger.info(f"开始为 {cycle_name} 分配 {semen_type} 冻精（使用完整递进机制）")
-        
+
+        total_cows = len(cycle_cows)
+
         # 第一步：按比例分配1选
         self._allocate_first_choice_proportional(cycle_name, cycle_cows, semen_type)
-        
+
         # 第二步：为每头母牛处理递进分配
-        for _, cow in cycle_cows.iterrows():
+        for idx, (_, cow) in enumerate(cycle_cows.iterrows()):
             cow_id = str(cow['cow_id'])
+            current_cow = idx + 1
+
+            # 记录进度
+            if current_cow % 50 == 0 or current_cow == total_cows:
+                logger.info(f"{cycle_name} {semen_type}递进分配进度: ({current_cow}/{total_cows}头)")
             valid_bulls_key = f'{semen_type}_valid_bulls'
             
             # 获取有效公牛列表
@@ -398,8 +413,14 @@ class CycleBasedMatcher:
         # 创建候选列表（每头母牛的有效公牛列表）
         candidates = []
         skipped_cows = []
-        for _, cow in cycle_cows.iterrows():
+
+        for idx, (_, cow) in enumerate(cycle_cows.iterrows()):
             cow_id = str(cow['cow_id'])
+            current_cow = idx + 1
+
+            # 记录进度
+            if current_cow % 100 == 0 or current_cow == total_cows:
+                logger.info(f"{cycle_name} {semen_type}第1选准备: ({current_cow}/{total_cows}头)")
             valid_bulls_key = f'{semen_type}_valid_bulls'
             
             valid_bulls = cow.get(valid_bulls_key, None)
@@ -467,9 +488,15 @@ class CycleBasedMatcher:
         
         # 分配
         used_quotas = defaultdict(int)
-        
-        for candidate in candidates:
+        total_candidates = len(candidates)
+
+        for idx, candidate in enumerate(candidates):
             cow_id = candidate['cow_id']
+            current_candidate = idx + 1
+
+            # 记录分配进度
+            if current_candidate % 100 == 0 or current_candidate == total_candidates:
+                logger.info(f"{cycle_name} {semen_type}第1选分配: ({current_candidate}/{total_candidates}头)")
             allocated = False
             
             # 尝试分配给得分最高且有配额的公牛
@@ -519,9 +546,15 @@ class CycleBasedMatcher:
         # 记录已使用的配额
         used_quotas = {bull_id: 0 for bull_id in available_bulls}
         skipped_count = 0
-        
-        for _, cow in cycle_cows.iterrows():
+        total_cows_for_choice = len(cycle_cows)
+
+        for idx, (_, cow) in enumerate(cycle_cows.iterrows()):
             cow_id = str(cow['cow_id'])
+            current_cow = idx + 1
+
+            # 记录进度
+            if current_cow % 100 == 0 or current_cow == total_cows_for_choice:
+                logger.info(f"{cycle_name} {semen_type}{choice_num}选分配: ({current_cow}/{total_cows_for_choice}头)")
             
             # 获取已分配的公牛
             already_allocated = self._get_cow_allocations(cow_id, semen_type)
