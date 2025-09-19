@@ -68,6 +68,28 @@ class DataAPIClient:
             else:
                 return False, None, data.get('message', '获取版本失败')
 
+    def get_database_version_with_time(self) -> Tuple[bool, Optional[str], Optional[str], str]:
+        """
+        获取数据库版本和更新时间
+
+        Returns:
+            Tuple[bool, Optional[str], Optional[str], str]: (成功标志, 版本号, 更新时间, 消息)
+        """
+        try:
+            response = self.session.get(
+                f"{self.base_url}/api/data/version",
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            if data.get('success'):
+                version = data['data'].get('version')
+                update_time = data['data'].get('update_time')
+                return True, version, update_time, f"数据库版本: {version}"
+            else:
+                return False, None, None, data.get('message', '获取版本失败')
+
         except requests.exceptions.RequestException as e:
             logger.error(f"获取数据库版本失败: {e}")
             return False, None, str(e)
@@ -209,6 +231,21 @@ def get_cloud_db_version() -> Optional[str]:
     else:
         logger.error(f"获取版本失败: {message}")
         return None
+
+def get_cloud_db_version_with_time() -> Tuple[Optional[str], Optional[str]]:
+    """
+    获取云端数据库版本和更新时间
+
+    Returns:
+        Tuple[Optional[str], Optional[str]]: (版本号, 更新时间)，失败返回(None, None)
+    """
+    client = get_data_client()
+    success, version, update_time, message = client.get_database_version_with_time()
+    if success:
+        return version, update_time
+    else:
+        logger.error(f"获取版本和时间失败: {message}")
+        return None, None
 
 def fetch_cloud_bull_library() -> Optional[List[Dict]]:
     """

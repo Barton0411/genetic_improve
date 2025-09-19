@@ -89,6 +89,7 @@ db_version_table = Table(
 try:
     from api.data_client import (
         get_cloud_db_version as api_get_cloud_db_version,
+        get_cloud_db_version_with_time as api_get_cloud_db_version_with_time,
         fetch_cloud_bull_library as api_fetch_cloud_bull_library,
         get_data_client
     )
@@ -237,15 +238,21 @@ def get_local_db_version_with_time():
         logging.error(f"获取本地数据库版本和时间失败: {e}")
         return None, None
 
-def set_local_db_version(version: str):
+def set_local_db_version(version: str, update_time: str = None):
     """
     设置本地数据库的版本号。
-    
+
     Args:
         version (str): 要设置的版本号。
+        update_time (str): 更新时间，如果不提供则使用当前时间
     """
     try:
-        insert_stmt = db_version_table.insert().values(version=version, update_time=datetime.datetime.utcnow())
+        if update_time:
+            # 使用提供的时间（云端时间）
+            insert_stmt = db_version_table.insert().values(version=version, update_time=update_time)
+        else:
+            # 使用当前时间
+            insert_stmt = db_version_table.insert().values(version=version, update_time=datetime.datetime.now())
         session.execute(insert_stmt)
         session.commit()
         logging.info(f"已更新本地数据库版本为: {version}")
@@ -290,6 +297,24 @@ def get_cloud_db_version():
     else:
         logging.error("数据API客户端未安装，无法获取云端数据库版本")
         return None
+
+def get_cloud_db_version_with_time():
+    """
+    获取云端数据库的版本号和更新时间（通过API）。
+
+    Returns:
+        tuple: (版本号, 更新时间)，如果获取失败则返回 (None, None)。
+    """
+    if USE_API:
+        try:
+            # 使用API获取版本和时间
+            return api_get_cloud_db_version_with_time()
+        except Exception as e:
+            logging.error(f"通过API获取数据库版本和时间失败: {e}")
+            return None, None
+    else:
+        logging.error("数据API客户端未安装，无法获取云端数据库版本和时间")
+        return None, None
 
 def fetch_cloud_bull_library():
     """
@@ -353,7 +378,7 @@ def check_and_update_database(progress_callback=None):
         local_version = get_local_db_version()
         if progress_callback:
             progress_callback(50, "获取云端数据库版本号...")
-        cloud_version = get_cloud_db_version()
+        cloud_version, cloud_update_time = get_cloud_db_version_with_time()
 
         print(f"本地数据库版本: {local_version}")
         print(f"云端数据库版本: {cloud_version}")
@@ -404,14 +429,13 @@ def check_and_update_database(progress_callback=None):
             if progress_callback:
                 progress_callback(70, "更新本地数据库版本号...")
 
-            # 更新本地数据库的版本号
-            set_local_db_version(cloud_version)
+            # 更新本地数据库的版本号，使用云端的时间
+            set_local_db_version(cloud_version, cloud_update_time)
 
-            # 获取数据库中的版本和时间（已转换为本地时间）
-            version, update_time = get_local_db_version_with_time()
-            if version and update_time:
-                print(f"数据库版本已更新为 {version} ({update_time})")
-                logging.info(f"数据库版本已更新为 {version} ({update_time})")
+            # 显示更新信息
+            if cloud_update_time:
+                print(f"数据库版本已更新为 {cloud_version} ({cloud_update_time})")
+                logging.info(f"数据库版本已更新为 {cloud_version} ({cloud_update_time})")
             else:
                 print(f"数据库版本已更新为 {cloud_version}")
                 logging.info(f"数据库版本已更新为 {cloud_version}")
@@ -424,9 +448,9 @@ def check_and_update_database(progress_callback=None):
             get_pedigree_db(force_update=True, progress_callback=lambda p, m: progress_callback(75 + int(p * 0.25), m) if progress_callback else None)
 
             if progress_callback:
-                # 使用数据库中的时间
-                if version and update_time:
-                    progress_callback(100, f"数据库版本已更新为 {version} ({update_time})")
+                # 使用云端的时间
+                if cloud_update_time:
+                    progress_callback(100, f"数据库版本已更新为 {cloud_version} ({cloud_update_time})")
                 else:
                     progress_callback(100, f"数据库版本已更新为 {cloud_version}")
         else:
