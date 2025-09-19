@@ -217,12 +217,12 @@ def set_local_db_version(version: str):
         session.rollback()
         raise
 
-def initialize_local_db_version(initial_version: str = "1.0.0"):
+def initialize_local_db_version(initial_version: str = "0.0.0"):
     """
     初始化本地数据库版本信息。如果 db_version 表为空，则插入初始版本号。
     
     Args:
-        initial_version (str): 初始版本号，默认为 "1.0.0"。
+        initial_version (str): 初始版本号，默认为 "0.0.0"。
     """
     try:
         version_count = session.query(db_version_table).count()
@@ -328,7 +328,7 @@ def check_and_update_database(progress_callback=None):
             if progress_callback:
                 progress_callback(55, "初始化本地数据库版本号...")
             # 初始化本地数据库版本
-            initialize_local_db_version(initial_version=cloud_version or "1.0.0")
+            initialize_local_db_version(initial_version=cloud_version or "0.0.0")
             # 重新获取本地版本号
             local_version = get_local_db_version()
 
@@ -369,8 +369,10 @@ def check_and_update_database(progress_callback=None):
 
             # 更新本地数据库的版本号
             set_local_db_version(cloud_version)
-            print(f"本地数据库已更新到版本: {cloud_version}")
-            logging.info(f"本地数据库已更新到版本: {cloud_version}")
+            from datetime import datetime
+            update_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f"数据库版本已更新为 {cloud_version} ({update_time})")
+            logging.info(f"数据库版本已更新为 {cloud_version} ({update_time})")
             
             # 数据库更新后，更新系谱库
             if progress_callback:
@@ -380,7 +382,9 @@ def check_and_update_database(progress_callback=None):
             get_pedigree_db(force_update=True, progress_callback=lambda p, m: progress_callback(75 + int(p * 0.25), m) if progress_callback else None)
             
             if progress_callback:
-                progress_callback(100, "本地数据库和系谱库已更新到最新版本。")
+                from datetime import datetime
+                update_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                progress_callback(100, f"数据库版本已更新为 {cloud_version} ({update_time})")
         else:
             print("本地数据库版本与云端数据库版本一致，无需更新。")
             logging.info("本地数据库版本与云端数据库版本一致，无需更新。")
@@ -425,7 +429,7 @@ def initialize_and_update_db(progress_callback=None):
     
     if progress_callback:
         progress_callback("初始化本地数据库版本信息...")
-    initialize_local_db_version(initial_version='1.0.0')
+    initialize_local_db_version(initial_version='0.0.0')
     
     if progress_callback:
         progress_callback("检查并更新数据库版本...")
@@ -442,7 +446,7 @@ def run_update_process():
     try:
         # 初始化本地数据库和版本信息
         initialize_local_db()
-        initialize_local_db_version(initial_version='1.0.0')
+        initialize_local_db_version(initial_version='0.0.0')
         
         # 执行版本检查和更新
         check_and_update_database()
@@ -453,7 +457,7 @@ def run_update_process():
 if __name__ == "__main__":
     # 初始化本地数据库和版本信息
     initialize_local_db()
-    initialize_local_db_version(initial_version='1.0.0')
+    initialize_local_db_version(initial_version='0.0.0')
     
     # 执行版本检查和更新
     check_and_update_database()

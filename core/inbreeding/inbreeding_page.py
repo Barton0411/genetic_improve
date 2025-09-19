@@ -8,7 +8,7 @@ from PyQt6.QtGui import QBrush, QColor, QStandardItemModel, QStandardItem
 import pandas as pd
 import logging
 from pathlib import Path
-from sqlalchemy import create_engine, text
+import pymysql
 import datetime
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -1069,33 +1069,35 @@ class PedigreeDialog(QDialog):
             
         try:
             # 初始化数据库连接
-            from sqlalchemy import create_engine, text
+            import sqlite3
             from core.data.update_manager import LOCAL_DB_PATH
-            
+
             # 连接数据库
-            engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
+            conn = sqlite3.connect(LOCAL_DB_PATH)
+            cursor = conn.cursor()
             bull_ids_str = "', '".join(bull_ids)
-            
+
             # 查询NAAB号码
-            query = text(f"""
-                SELECT `BULL REG`, `BULL NAAB` 
-                FROM bull_library 
+            query = f"""
+                SELECT `BULL REG`, `BULL NAAB`
+                FROM bull_library
                 WHERE `BULL REG` IN ('{bull_ids_str}')
-            """)
-            
+            """
+
             # 执行查询
-            with engine.connect() as conn:
-                result = conn.execute(query).fetchall()
-                
-                # 处理查询结果
-                for row in result:
-                    reg = row[0]
-                    naab = row[1]
-                    if reg and naab:
-                        naab_dict[reg] = naab
-                        
+            cursor.execute(query)
+            result = cursor.fetchall()
+
+            # 处理查询结果
+            for row in result:
+                reg = row[0]
+                naab = row[1]
+                if reg and naab:
+                    naab_dict[reg] = naab
+
             # 关闭连接
-            engine.dispose()
+            cursor.close()
+            conn.close()
             
         except Exception as e:
             logging.error(f"查询NAAB号码时出错: {str(e)}")
@@ -2255,12 +2257,13 @@ class InbreedingPage(QWidget):
     def init_db_connection(self) -> bool:
         """初始化数据库连接"""
         try:
-            if self.db_engine:
-                self.db_engine.dispose()
-            self.db_engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
+            # 使用sqlite3替代SQLAlchemy
+            import sqlite3
+            self.db_connection = sqlite3.connect(LOCAL_DB_PATH)
             # 测试连接
-            with self.db_engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
+            cursor = self.db_connection.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
             return True
         except Exception as e:
             logging.error(f"数据库连接失败: {e}")
@@ -2373,70 +2376,77 @@ class InbreedingPage(QWidget):
             # 注意：这种方式可能存在SQL注入风险，但在这种特定场景下风险较低
             bull_ids_str = "', '".join(valid_bull_ids)
             
-            query = text(f"""
-                SELECT `BULL NAAB`, `BULL REG`, 
-                    HH1, HH2, HH3, HH4, HH5, HH6, 
-                    BLAD, Chondrodysplasia, Citrullinemia, 
-                    DUMPS, `Factor XI`, CVM, Brachyspina, 
+            query = f"""
+                SELECT `BULL NAAB`, `BULL REG`,
+                    HH1, HH2, HH3, HH4, HH5, HH6,
+                    BLAD, Chondrodysplasia, Citrullinemia,
+                    DUMPS, `Factor XI`, CVM, Brachyspina,
                     Mulefoot, `Cholesterol deficiency`, MW
-                FROM bull_library 
-                WHERE `BULL NAAB` IN ('{bull_ids_str}') 
+                FROM bull_library
+                WHERE `BULL NAAB` IN ('{bull_ids_str}')
                 OR `BULL REG` IN ('{bull_ids_str}')
-            """)
-            
+            """
+
             logging.info(f"要查询的公牛号: {valid_bull_ids}")
             print(f"SQL查询: {query}")
-            
+
             # 执行查询
-            with self.db_engine.connect() as conn:
-                print("开始执行SQL查询...")
-                # 不需要传递参数，因为已经在SQL中直接包含了值
-                result = conn.execute(query).fetchall()
-                print(f"查询完成，获取到{len(result)}条记录")
-                logging.info(f"查询到的记录数: {len(result)}")
-                
-                # 处理查询结果
-                found_bulls = set()
-                print("开始处理查询结果...")
-                for i, row in enumerate(result):
-                    if i < 5:  # 只打印前5行，避免日志过长
-                        print(f"处理第{i+1}行数据")
-                    # 使用_mapping属性访问行数据
-                    row_dict = dict(row._mapping)
-                    naab = row_dict.get('BULL NAAB')
-                    reg = row_dict.get('BULL REG')
-                    
-                    # 提取基因信息
-                    gene_data = {}
-                    for gene in self.defect_genes:
-                        value = row_dict.get(gene)
-                        if pd.isna(value):
-                            # 数据库中的NULL值表示不携带该基因
+            import sqlite3
+            conn = sqlite3.connect(LOCAL_DB_PATH)
+            conn.row_factory = sqlite3.Row  # 让结果可以像字典一样访问
+            cursor = conn.cursor()
+            print("开始执行SQL查询...")
+            cursor.execute(query)
+            result = cursor.fetchall()
+            print(f"查询完成，获取到{len(result)}条记录")
+            logging.info(f"查询到的记录数: {len(result)}")
+
+            # 处理查询结果
+            found_bulls = set()
+            print("开始处理查询结果...")
+            for i, row in enumerate(result):
+                if i < 5:  # 只打印前5行，避免日志过长
+                    print(f"处理第{i+1}行数据")
+                # 转换Row对象为字典
+                row_dict = dict(row)
+                naab = row_dict.get('BULL NAAB')
+                reg = row_dict.get('BULL REG')
+
+                # 提取基因信息
+                gene_data = {}
+                for gene in self.defect_genes:
+                    value = row_dict.get(gene)
+                    if pd.isna(value):
+                        # 数据库中的NULL值表示不携带该基因
+                        gene_data[gene] = 'F'
+                    else:
+                        value = str(value).strip().upper()
+                        if value == 'C':
+                            gene_data[gene] = 'C'
+                        elif value == 'F':
                             gene_data[gene] = 'F'
                         else:
-                            value = str(value).strip().upper()
-                            if value == 'C':
-                                gene_data[gene] = 'C'
-                            elif value == 'F':
-                                gene_data[gene] = 'F'
-                            else:
-                                gene_data[gene] = value
-                    
-                    # 添加到结果字典
-                    if naab:
-                        bull_genes[str(naab)] = gene_data
-                        found_bulls.add(str(naab))
-                    if reg:
-                        bull_genes[str(reg)] = gene_data
-                        found_bulls.add(str(reg))
-                
-                # 记录未找到的公牛
-                missing_bulls = list(valid_bull_ids - found_bulls)
-                print(f"处理完成，找到{len(found_bulls)}个公牛的基因信息，有{len(missing_bulls)}个公牛未找到")
-                logging.info(f"找到基因信息的公牛数量: {len(found_bulls)}")
-                logging.info(f"未找到基因信息的公牛数量: {len(missing_bulls)}")
-                
-                return bull_genes, missing_bulls
+                            gene_data[gene] = value
+
+                # 添加到结果字典
+                if naab:
+                    bull_genes[str(naab)] = gene_data
+                    found_bulls.add(str(naab))
+                if reg:
+                    bull_genes[str(reg)] = gene_data
+                    found_bulls.add(str(reg))
+
+            # 记录未找到的公牛
+            missing_bulls = list(valid_bull_ids - found_bulls)
+            print(f"处理完成，找到{len(found_bulls)}个公牛的基因信息，有{len(missing_bulls)}个公牛未找到")
+            logging.info(f"找到基因信息的公牛数量: {len(found_bulls)}")
+            logging.info(f"未找到基因信息的公牛数量: {len(missing_bulls)}")
+
+            # 关闭数据库连接
+            cursor.close()
+            conn.close()
+
+            return bull_genes, missing_bulls
                 
         except Exception as e:
             print(f"查询公牛基因信息时发生错误: {e}")
