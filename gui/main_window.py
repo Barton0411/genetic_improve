@@ -2747,14 +2747,29 @@ class MainWindow(QMainWindow):
             self.progress_dialog.close()
             
             if result['success']:
-                # 显示成功消息
-                message = (
-                    f"个体选配完成！\n\n"
-                    f"已生成完整的选配报告：\n"
-                    f"{result['report_path'].name}\n\n"
-                    f"报告包含了所有分组的母牛选配结果。\n\n"
+                # 构建成功消息
+                message_parts = ["个体选配完成！\n"]
+
+                # 如果有警告信息，添加到消息中
+                if result.get('warnings'):
+                    message_parts.append("\n⚠️ 注意：")
+                    message_parts.append(result['warnings'])
+                    message_parts.append("")
+
+                # 如果有跳过的公牛，显示数量
+                if result.get('skipped_bulls'):
+                    skipped_count = len(result['skipped_bulls'])
+                    message_parts.append(f"已跳过 {skipped_count} 头缺少数据的公牛")
+                    message_parts.append("")
+
+                message_parts.extend([
+                    f"已生成完整的选配报告：",
+                    f"{result['report_path'].name}\n",
+                    f"报告包含了所有分组的母牛选配结果。\n",
                     f"是否打开查看报告？"
-                )
+                ])
+
+                message = "\n".join(message_parts)
                 
                 reply = QMessageBox.question(
                     self, 

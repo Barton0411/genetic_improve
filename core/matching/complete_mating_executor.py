@@ -70,11 +70,23 @@ class CompleteMatingExecutor:
             if progress_callback:
                 progress_callback("正在加载数据...", 10)
             
-            if not self.recommendation_generator.load_data():
-                # 获取具体的错误信息
-                error_msg = getattr(self.recommendation_generator, 'last_error', None)
+            load_success = self.recommendation_generator.load_data()
+            error_msg = getattr(self.recommendation_generator, 'last_error', None)
+            skipped_bulls = getattr(self.recommendation_generator, 'skipped_bulls', [])
+
+            # 如果有警告信息但加载成功，记录警告
+            if load_success and error_msg and error_msg.startswith("警告:"):
+                logger.warning(error_msg)
+                # 将警告信息添加到结果中
+                result['warnings'] = error_msg
+                if skipped_bulls:
+                    result['skipped_bulls'] = skipped_bulls
+                    logger.info(f"跳过 {len(skipped_bulls)} 头缺少数据的公牛")
+
+            # 如果加载失败，抛出异常
+            elif not load_success:
                 if error_msg:
-                    raise Exception(f"加载数据失败: {error_msg}")
+                    raise Exception(f"加载数据失败:\n{error_msg}")
                 else:
                     raise Exception("加载数据失败，请检查必要的文件是否存在")
             

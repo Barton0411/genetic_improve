@@ -24,6 +24,7 @@ class MatrixRecommendationGenerator:
         self.cow_score_columns = []  # 存储找到的母牛得分列
         self.group_manager = None  # 分组管理器
         self.last_error = None  # 存储最后的错误信息
+        self.skipped_bulls = []  # 存储被跳过的公牛
         
     def load_data(self) -> bool:
         """加载所需数据"""
@@ -175,11 +176,16 @@ class MatrixRecommendationGenerator:
                     # 检查是否有缺失值
                     missing_bulls = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
                     if missing_bulls:
-                        logger.warning(f"以下公牛在指数文件中缺少数据: {missing_bulls}")
-                        # 不再返回False，尝试从数据库获取
+                        logger.warning(f"以下公牛在指数文件中缺少数据，将尝试从数据库获取: {missing_bulls}")
+                        # 记录但继续处理
+                        self.skipped_bulls.extend(missing_bulls)
+
+                    # 如果至少有一部分公牛有数据，继续处理
+                    if self.bull_data['Index Score'].notna().any():
+                        logger.info(f"从公牛指数文件加载了 {self.bull_data['Index Score'].notna().sum()} 头公牛数据")
+                        # 继续尝试从数据库补充缺失的数据
                     else:
-                        logger.info("成功从公牛指数文件加载数据")
-                        return True
+                        logger.warning("公牛指数文件中所有公牛都缺少数据，尝试从数据库获取")
                 else:
                     logger.warning("公牛指数文件中未找到指数列")
             
@@ -234,10 +240,23 @@ class MatrixRecommendationGenerator:
                     # 最终检查
                     final_missing = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
                     if final_missing:
-                        error_msg = f"以下公牛缺少性状数据: {final_missing[:10]}...（共{len(final_missing)}头）\n请先进行公牛育种指数计算或更新公牛数据库"
-                        logger.error(error_msg)
-                        self.last_error = error_msg
-                        return False
+                        # 记录被跳过的公牛
+                        self.skipped_bulls = list(set(self.skipped_bulls + final_missing))
+
+                        valid_count = self.bull_data['Index Score'].notna().sum()
+                        if valid_count > 0:
+                            # 有部分公牛有数据，允许继续
+                            warning_msg = f"以下 {len(final_missing)} 头公牛缺少性状数据，将被跳过选配: {final_missing[:5]}{'...' if len(final_missing) > 5 else ''}"
+                            logger.warning(warning_msg)
+                            self.last_error = f"警告: {warning_msg}\n但有 {valid_count} 头公牛可用于选配"
+                            logger.info(f"使用 {valid_count} 头公牛的数据进行选配")
+                            return True
+                        else:
+                            # 没有任何公牛有数据
+                            error_msg = f"所有公牛都缺少性状数据，无法进行选配。\n缺失的公牛: {final_missing[:10]}...（共{len(final_missing)}头）\n请先进行公牛育种指数计算或更新公牛数据库"
+                            logger.error(error_msg)
+                            self.last_error = error_msg
+                            return False
                     
                     logger.info("成功从数据库补充公牛性状数据")
                     return True
@@ -258,9 +277,26 @@ class MatrixRecommendationGenerator:
                     logger.info("使用公牛指数文件数据")
                     return True
                 else:
-                    logger.error("未找到公牛指数数据")
-                    logger.error("请先进行公牛育种指数计算")
-                    return False
+                    # 即使没有数据库，如果有部分公牛有数据也允许继续
+                    if 'Index Score' in self.bull_data.columns and self.bull_data['Index Score'].notna().any():
+                        valid_count = self.bull_data['Index Score'].notna().sum()
+                        missing_bulls = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
+
+                        # 记录被跳过的公牛
+                        self.skipped_bulls = list(set(self.skipped_bulls + missing_bulls))
+
+                        if missing_bulls:
+                            warning_msg = f"以下 {len(missing_bulls)} 头公牛缺少指数数据，将被跳过选配: {missing_bulls[:5]}{'...' if len(missing_bulls) > 5 else ''}"
+                            logger.warning(warning_msg)
+                            self.last_error = f"警告: {warning_msg}\n但有 {valid_count} 头公牛可用于选配"
+
+                        logger.info(f"使用 {valid_count} 头公牛的指数数据进行选配")
+                        return True
+                    else:
+                        error_msg = "所有公牛都缺少指数数据，无法进行选配。请先进行公牛育种指数计算"
+                        logger.error(error_msg)
+                        self.last_error = error_msg
+                        return False
                 
         except Exception as e:
             logger.error(f"加载公牛性状失败: {e}")
@@ -278,10 +314,16 @@ class MatrixRecommendationGenerator:
         
         # 准备母牛和公牛ID列表
         cow_ids = self.cow_data['cow_id'].astype(str).tolist()
-        
+
+        # 过滤掉没有Index Score的公牛
+        valid_bull_data = self.bull_data[self.bull_data['Index Score'].notna()].copy()
+        skipped_count = len(self.bull_data) - len(valid_bull_data)
+        if skipped_count > 0:
+            logger.info(f"过滤掉 {skipped_count} 头缺少指数数据的公牛")
+
         # 分别处理常规和性控公牛
-        regular_bulls = self.bull_data[self.bull_data['classification'] == '常规']
-        sexed_bulls = self.bull_data[self.bull_data['classification'] == '性控']
+        regular_bulls = valid_bull_data[valid_bull_data['classification'] == '常规']
+        sexed_bulls = valid_bull_data[valid_bull_data['classification'] == '性控']
         
         regular_bull_ids = regular_bulls['bull_id'].astype(str).tolist() if not regular_bulls.empty else []
         sexed_bull_ids = sexed_bulls['bull_id'].astype(str).tolist() if not sexed_bulls.empty else []
@@ -340,7 +382,9 @@ class MatrixRecommendationGenerator:
                 
                 for bull_id in bull_ids:
                     if bull_id not in bull_scores:
-                        raise ValueError(f"公牛 {bull_id} 缺少得分数据")
+                        # 跳过缺少数据的公牛（理论上不应该发生，因为已经过滤）
+                        logger.warning(f"公牛 {bull_id} 缺少得分数据，跳过")
+                        continue
                     bull_score = bull_scores[bull_id]
                     # 后代得分 = 双亲平均
                     offspring_score = 0.5 * (cow_score + bull_score)
