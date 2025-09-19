@@ -297,17 +297,17 @@ class AllocationDialog(QDialog):
         if not result_df.empty:
             summary = self.matcher.get_allocation_summary()
             
-            # 显示使用情况
-            used_regular = summary[summary['冻精类型'] == '常规']['已使用'].sum()
-            used_sexed = summary[summary['冻精类型'] == '性控']['已使用'].sum()
+            # 显示推荐情况
+            used_regular = summary[summary['冻精类型'] == '常规']['1选推荐'].sum()
+            used_sexed = summary[summary['冻精类型'] == '性控']['1选推荐'].sum()
             
             QMessageBox.information(
                 self,
                 "分配完成",
                 f"分配已完成！\n\n"
                 f"共分配 {len(result_df)} 头母牛\n"
-                f"使用常规冻精: {used_regular} 支\n"
-                f"使用性控冻精: {used_sexed} 支\n\n"
+                f"1选推荐常规冻精: {used_regular} 头次\n"
+                f"1选推荐性控冻精: {used_sexed} 头次\n\n"
                 f"请点击「保存结果」保存分配方案。"
             )
             

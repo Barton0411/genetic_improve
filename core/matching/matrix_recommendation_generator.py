@@ -26,8 +26,13 @@ class MatrixRecommendationGenerator:
         self.last_error = None  # 存储最后的错误信息
         self.skipped_bulls = []  # 存储被跳过的公牛
         
-    def load_data(self) -> bool:
-        """加载所需数据"""
+    def load_data(self, skip_missing_bulls: bool = False) -> bool:
+        """加载所需数据
+
+        Args:
+            skip_missing_bulls: 是否跳过缺失数据的公牛继续选配
+        """
+        self.skip_missing_bulls_flag = skip_missing_bulls
         try:
             # 加载母牛数据
             cow_file = self.project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
@@ -70,15 +75,18 @@ class MatrixRecommendationGenerator:
                 return False
             
             logger.info(f"加载了 {len(self.bull_data)} 头公牛数据")
-            
+
+            # 数据质量检查和汇总
+            self._check_bull_data_quality()
+
             # 加载近交系数数据
             if not self._load_inbreeding_data():
                 return False
-            
+
             # 加载隐性基因数据
             if not self._load_genetic_defect_data():
                 return False
-            
+
             return True
             
         except Exception as e:
@@ -307,7 +315,61 @@ class MatrixRecommendationGenerator:
             else:
                 logger.error("请先进行公牛育种指数计算")
                 return False
-            
+
+    def _check_bull_data_quality(self):
+        """检查公牛数据质量并生成汇总报告"""
+        if self.bull_data.empty:
+            return
+
+        total_bulls = len(self.bull_data)
+        regular_bulls = len(self.bull_data[self.bull_data['classification'] == '常规'])
+        sexed_bulls = len(self.bull_data[self.bull_data['classification'] == '性控'])
+
+        # 检查库存
+        no_inventory = 0
+        low_inventory = 0
+        if '支数' in self.bull_data.columns:
+            no_inventory = self.bull_data[
+                self.bull_data['支数'].isna() | (self.bull_data['支数'] <= 0)
+            ].shape[0]
+            low_inventory = self.bull_data[
+                (self.bull_data['支数'] > 0) & (self.bull_data['支数'] < 5)
+            ].shape[0]
+
+        # 检查数据完整性
+        no_data = 0
+        if 'Index Score' in self.bull_data.columns:
+            no_data = self.bull_data['Index Score'].isna().sum()
+
+        # 生成汇总报告
+        logger.info("=" * 60)
+        logger.info("公牛数据质量汇总")
+        logger.info("=" * 60)
+        logger.info(f"总公牛数: {total_bulls} (常规: {regular_bulls}, 性控: {sexed_bulls})")
+
+        if no_inventory > 0 or low_inventory > 0:
+            logger.warning(f"库存问题: 无库存 {no_inventory} 头, 低库存(<5) {low_inventory} 头")
+
+        if no_data > 0:
+            logger.warning(f"数据问题: {no_data} 头公牛缺少Index Score")
+            # 列出缺少数据的公牛
+            missing_data_bulls = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
+            if len(missing_data_bulls) <= 10:
+                logger.warning(f"  缺少数据的公牛: {missing_data_bulls}")
+            else:
+                logger.warning(f"  缺少数据的公牛(前10头): {missing_data_bulls[:10]}...")
+
+        # 统计将被使用的有效公牛数
+        valid_bulls = self.bull_data[
+            (self.bull_data['支数'] > 0) &
+            (self.bull_data['Index Score'].notna())
+        ]
+        valid_regular = len(valid_bulls[valid_bulls['classification'] == '常规'])
+        valid_sexed = len(valid_bulls[valid_bulls['classification'] == '性控'])
+
+        logger.info(f"有效公牛数(有库存且有数据): {len(valid_bulls)} (常规: {valid_regular}, 性控: {valid_sexed})")
+        logger.info("=" * 60)
+
     def generate_matrices(self) -> Dict[str, pd.DataFrame]:
         """生成所有配对矩阵"""
         logger.info("开始生成配对矩阵...")
@@ -564,15 +626,47 @@ class MatrixRecommendationGenerator:
             # 为每种冻精类型生成前3个推荐
             for semen_type in ['常规', '性控']:
                 type_bulls = self.bull_data[self.bull_data['classification'] == semen_type]
-                
+
                 if not type_bulls.empty:
-                    # 计算所有公牛的得分
-                    bull_scores = []
+                    # 首先过滤出有库存且有数据的公牛
+                    valid_type_bulls = []
+                    skipped_no_inventory = 0
+                    skipped_no_data = 0
+
                     for _, bull in type_bulls.iterrows():
                         bull_id = str(bull['bull_id'])
+
+                        # 检查库存
+                        inventory = bull.get('支数', 0)
+                        if pd.isna(inventory) or inventory <= 0:
+                            skipped_no_inventory += 1
+                            logger.debug(f"公牛 {bull_id} 没有库存，跳过")
+                            continue
+
+                        # 检查数据完整性
                         if 'Index Score' not in bull:
-                            continue  # 跳过没有得分的公牛
-                        bull_score = bull['Index Score']
+                            skipped_no_data += 1
+                            logger.debug(f"公牛 {bull_id} 缺少 Index Score，跳过")
+                            continue
+
+                        bull_score = bull.get('Index Score')
+                        if pd.isna(bull_score) or bull_score is None:
+                            skipped_no_data += 1
+                            logger.debug(f"公牛 {bull_id} 的 Index Score 为空或无效，跳过")
+                            continue
+
+                        # 有库存且有数据的公牛才进入推荐计算
+                        valid_type_bulls.append((bull_id, bull_score, bull))
+
+                    # 记录筛选信息
+                    if skipped_no_inventory > 0 or skipped_no_data > 0:
+                        logger.info(f"{semen_type}公牛筛选: 总数{len(type_bulls)}，"
+                                  f"无库存{skipped_no_inventory}，无数据{skipped_no_data}，"
+                                  f"有效{len(valid_type_bulls)}")
+
+                    # 计算有效公牛的得分
+                    bull_scores = []
+                    for bull_id, bull_score, bull in valid_type_bulls:
                         
                         # 获取母牛得分
                         cow_score = self._get_cow_score(cow)

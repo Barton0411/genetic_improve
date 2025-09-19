@@ -145,40 +145,43 @@ class CycleBasedMatcher:
     def perform_allocation(self, selected_groups: List[str], progress_callback=None) -> pd.DataFrame:
         """
         执行基于周期的分配
-        
+
         Args:
             selected_groups: 选中的分组列表
             progress_callback: 进度回调函数
-            
+
         Returns:
             分配结果DataFrame
         """
         # 重置结果
         self.allocation_results = []
-        
+
+        # 保存原始库存，不在分配过程中修改
+        self.original_inventory = self.bull_inventory.copy()
+
         # 检查推荐数据
         if self.recommendations_df is None:
             logger.error("recommendations_df 为 None")
             return pd.DataFrame()
-            
+
         logger.info(f"recommendations_df 类型: {type(self.recommendations_df)}")
         logger.info(f"recommendations_df 列: {list(self.recommendations_df.columns) if hasattr(self.recommendations_df, 'columns') else 'No columns'}")
-        
+
         if 'group' not in self.recommendations_df.columns:
             logger.error("recommendations_df 缺少 'group' 列")
             logger.error(f"可用列: {list(self.recommendations_df.columns)}")
             return pd.DataFrame()
-        
+
         # 筛选选中分组的母牛，同时处理 nan 值
         # 首先过滤掉 group 列中的 nan 值
         valid_recommendations = self.recommendations_df[self.recommendations_df['group'].notna()].copy()
         selected_cows = valid_recommendations[
             valid_recommendations['group'].isin(selected_groups)
         ].copy()
-        
+
         logger.info(f"选中的分组: {selected_groups}")
         logger.info(f"筛选后的母牛数量: {len(selected_cows)}")
-        
+
         if selected_cows.empty:
             logger.warning("未找到选中分组的母牛")
             return pd.DataFrame()
@@ -343,17 +346,18 @@ class CycleBasedMatcher:
                 
                 # 分配
                 self._record_allocation(cow_id, bull_id, semen_type, choice_num, bull_info)
-                self.bull_inventory[bull_id] -= 1
-                
+                # 不再减库存，1/2/3选是独立的推荐方案
+                # self.bull_inventory[bull_id] -= 1
+
                 # 从可用列表中移除已分配的公牛
                 available_bulls = available_bulls[1:]
-                
-                # 如果该公牛库存用尽，从所有待处理的母牛的可用列表中移除
-                if self.bull_inventory[bull_id] == 0:
-                    available_bulls = [
-                        b for b in available_bulls 
-                        if b['bull_id'] != bull_id
-                    ]
+
+                # 不再需要检查库存用尽，因为不扣库存
+                # if self.bull_inventory[bull_id] == 0:
+                #     available_bulls = [
+                #         b for b in available_bulls
+                #         if b['bull_id'] != bull_id
+                #     ]
                 
                 choice_num += 1
             
@@ -361,40 +365,30 @@ class CycleBasedMatcher:
                 logger.debug(f"母牛 {cow_id} 没有任何 {semen_type} 冻精分配")
             
     def _allocate_first_choice_proportional(self, cycle_name: str, cycle_cows: pd.DataFrame, semen_type: str):
-        """分配1选（严格按比例）"""
+        """分配1选（严格按库存比例）"""
         try:
-            # 检查 bull_inventory
-            if self.bull_inventory is None:
-                logger.error("bull_inventory 为 None")
-                return
-                
-            logger.info(f"bull_inventory 类型: {type(self.bull_inventory)}")
-            logger.info(f"bull_inventory 内容: {self.bull_inventory}")
-            
             # 获取该类型有库存的公牛
             bull_inventories = {}
             for bull_id, count in self.bull_inventory.items():
                 if count > 0:
                     bull_type = self._get_bull_type(bull_id)
-                    logger.debug(f"公牛 {bull_id}: 类型={bull_type}, 库存={count}")
                     if bull_type == semen_type:
                         bull_inventories[bull_id] = count
         except Exception as e:
             logger.error(f"获取公牛库存时出错: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
             return
-        
+
         if not bull_inventories:
             logger.warning(f"{cycle_name} 没有可用的{semen_type}公牛")
             return
-            
+
         total_cows = len(cycle_cows)
         logger.info(f"{cycle_name} {semen_type}1选：需要分配 {total_cows} 头母牛")
-        
-        # 使用新的分配函数，确保小库存公牛至少分配1头
+
+        # 使用按库存比例分配函数，确保小库存公牛至少分配1头
+        from core.matching.allocation_utils import calculate_proportional_allocation
         bull_quotas = calculate_proportional_allocation(
-            bull_inventories, 
+            bull_inventories,
             total_cows,
             ensure_minimum=True
         )
@@ -419,8 +413,8 @@ class CycleBasedMatcher:
                         valid_bulls = []
                 # 只保留有库存和配额的公牛
                 valid_bulls = [
-                    b for b in valid_bulls 
-                    if b['bull_id'] in bull_quotas and 
+                    b for b in valid_bulls
+                    if b['bull_id'] in bull_quotas and
                     bull_quotas[b['bull_id']] > 0 and
                     self.bull_inventory.get(b['bull_id'], 0) > 0 and
                     self._meets_constraints(b)  # 满足约束
@@ -482,14 +476,15 @@ class CycleBasedMatcher:
             for bull_info in candidate['valid_bulls']:
                 bull_id = bull_info['bull_id']
                 
-                if (bull_id in bull_quotas and 
+                if (bull_id in bull_quotas and
                     used_quotas[bull_id] < bull_quotas[bull_id] and
                     self.bull_inventory.get(bull_id, 0) > 0):
-                    
+
                     # 分配成功
                     self._record_allocation(cow_id, bull_id, semen_type, 1, bull_info)
                     used_quotas[bull_id] += 1
-                    self.bull_inventory[bull_id] -= 1
+                    # 不再减库存，1/2/3选是独立的推荐方案
+                    # self.bull_inventory[bull_id] -= 1
                     allocated = True
                     break
                     
@@ -500,21 +495,29 @@ class CycleBasedMatcher:
         actual_allocation = dict(used_quotas)
         logger.info(f"实际分配: {actual_allocation}")
         
-    def _allocate_second_third_choice(self, cycle_name: str, cycle_cows: pd.DataFrame, 
+    def _allocate_second_third_choice(self, cycle_name: str, cycle_cows: pd.DataFrame,
                                      semen_type: str, choice_num: int):
-        """分配2选或3选（平均分配）"""
+        """分配2选或3选（平均分配给库存>0的公牛）"""
         # 获取有库存的公牛列表
         available_bulls = [
             bull_id for bull_id, count in self.bull_inventory.items()
             if count > 0 and self._get_bull_type(bull_id) == semen_type
         ]
-        
+
         if not available_bulls:
             logger.warning(f"{cycle_name} 没有可用的{semen_type}公牛用于{choice_num}选")
             return
-            
-        # 轮询分配
-        bull_index = 0
+
+        # 计算平均分配配额
+        total_cows = len(cycle_cows)
+        from core.matching.equal_allocation_utils import calculate_equal_allocation
+        bull_quotas = calculate_equal_allocation(available_bulls, total_cows)
+
+        logger.info(f"{cycle_name} {semen_type}{choice_num}选: {total_cows}头母牛平均分配给{len(available_bulls)}头公牛")
+        logger.info(f"平均配额: {bull_quotas}")
+
+        # 记录已使用的配额
+        used_quotas = {bull_id: 0 for bull_id in available_bulls}
         skipped_count = 0
         
         for _, cow in cycle_cows.iterrows():
@@ -547,23 +550,22 @@ class CycleBasedMatcher:
                 # 按后代得分排序（高分优先）
                 valid_bulls.sort(key=lambda x: x.get('offspring_score', 0), reverse=True)
                 
-                # 找一个未分配且有库存的公牛
+                # 找一个未分配、有库存、未超配额的公牛
                 allocated = False
                 for bull_info in valid_bulls:
                     bull_id = bull_info['bull_id']
-                    
-                    if (bull_id not in already_allocated and 
-                        bull_id in available_bulls and
+
+                    if (bull_id not in already_allocated and
+                        bull_id in bull_quotas and
+                        used_quotas[bull_id] < bull_quotas[bull_id] and
                         self.bull_inventory.get(bull_id, 0) > 0):
-                        
+
                         # 分配成功
                         self._record_allocation(cow_id, bull_id, semen_type, choice_num, bull_info)
-                        self.bull_inventory[bull_id] -= 1
-                        
-                        # 如果库存用完，从可用列表中移除
-                        if self.bull_inventory[bull_id] == 0:
-                            available_bulls.remove(bull_id)
-                            
+                        used_quotas[bull_id] += 1
+                        # 不再减库存，1/2/3选是独立的推荐方案
+                        # self.bull_inventory[bull_id] -= 1
+
                         allocated = True
                         break
                         
@@ -576,6 +578,10 @@ class CycleBasedMatcher:
         
         if skipped_count > 0:
             logger.warning(f"{cycle_name} {semen_type}{choice_num}选: {skipped_count}头母牛无法分配")
+
+        # 记录实际分配情况
+        actual_allocation = dict(used_quotas)
+        logger.info(f"{choice_num}选实际分配: {actual_allocation}")
                     
     def _get_available_bulls_with_ratio(self, semen_type: str) -> Dict[str, float]:
         """获取有库存的公牛及其比例"""
@@ -710,7 +716,23 @@ class CycleBasedMatcher:
     def get_allocation_summary(self) -> pd.DataFrame:
         """获取分配汇总"""
         summary = []
-        
+
+        # 重新统计，分别计算每个选择的分配
+        # allocation_results 的结构是: {'cow_id', 'bull_id', 'semen_type', 'choice_num', ...}
+        choice_counts = {}
+        for result in self.allocation_results:
+            bull_id = result['bull_id']
+            choice_num = result['choice_num']  # 1, 2, 或 3
+            semen_type = result['semen_type']  # '常规' 或 '性控'
+
+            # 初始化公牛的计数器
+            if bull_id not in choice_counts:
+                choice_counts[bull_id] = {'1选': 0, '2选': 0, '3选': 0}
+
+            # 增加对应选择的计数
+            choice_key = f'{choice_num}选'
+            choice_counts[bull_id][choice_key] += 1
+
         for _, bull in self.bull_data.iterrows():
             bull_id = str(bull['bull_id'])
             # bull 是一个 Series
@@ -720,18 +742,24 @@ class CycleBasedMatcher:
                 original_count = int(bull['支数'])
             else:
                 original_count = 0
-            remaining_count = self.bull_inventory.get(bull_id, 0)
-            used_count = original_count - remaining_count
-            
+
+            # 获取该公牛的分配统计
+            bull_counts = choice_counts.get(bull_id, {'1选': 0, '2选': 0, '3选': 0})
+            first_choice = bull_counts['1选']
+            second_choice = bull_counts['2选']
+            third_choice = bull_counts['3选']
+
             summary.append({
                 '公牛号': bull_id,
                 '冻精类型': bull.get('classification', bull.get('semen_type', '')),
                 '原始库存': original_count,
-                '已使用': used_count,
-                '剩余库存': remaining_count,
-                '使用率': f"{(used_count/original_count*100):.1f}%" if original_count > 0 else "0%"
+                '1选推荐': first_choice,
+                '2选推荐': second_choice,
+                '3选推荐': third_choice,
+                '剩余库存': original_count,  # 库存不变，因为1/2/3选是独立推荐
+                '1选推荐率': f"{(first_choice/original_count*100):.1f}%" if original_count > 0 else "0%"
             })
-            
+
         return pd.DataFrame(summary)
     
     def _meets_constraints(self, bull_info: dict) -> bool:

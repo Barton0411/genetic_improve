@@ -38,22 +38,24 @@ class CompleteMatingExecutor:
         self.recommendation_generator = MatrixRecommendationGenerator(project_path)
         self.matcher = CycleBasedMatcher()
         
-    def execute(self, 
+    def execute(self,
                 bull_inventory: Dict[str, int],
                 inbreeding_threshold: float = 6.25,
                 control_defect_genes: bool = True,
                 heifer_age_days: int = 420,
                 cycle_days: int = 21,
+                skip_missing_bulls: bool = False,
                 progress_callback: Optional[callable] = None) -> Dict[str, Any]:
         """
         执行完整的个体选配流程
-        
+
         Args:
             bull_inventory: 公牛库存字典
             inbreeding_threshold: 近交系数阈值
             control_defect_genes: 是否控制隐性基因
             heifer_age_days: 后备牛开配日龄
             cycle_days: 周期天数
+            skip_missing_bulls: 是否跳过缺失数据的公牛
             progress_callback: 进度回调函数
             
         Returns:
@@ -70,7 +72,7 @@ class CompleteMatingExecutor:
             if progress_callback:
                 progress_callback("正在加载数据...", 10)
             
-            load_success = self.recommendation_generator.load_data()
+            load_success = self.recommendation_generator.load_data(skip_missing_bulls=skip_missing_bulls)
             error_msg = getattr(self.recommendation_generator, 'last_error', None)
             skipped_bulls = getattr(self.recommendation_generator, 'skipped_bulls', [])
 

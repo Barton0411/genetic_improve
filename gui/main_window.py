@@ -2682,7 +2682,7 @@ class MainWindow(QMainWindow):
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
-        
+
         # 获取选中的分组
         selected_groups = []
         for row in range(self.group_preview_table.rowCount()):
@@ -2692,27 +2692,39 @@ class MainWindow(QMainWindow):
                 if checkbox and checkbox.isChecked():
                     group_name = self.group_preview_table.item(row, 1).text()
                     selected_groups.append(group_name)
-        
+
         if not selected_groups:
             QMessageBox.warning(self, "警告", "请先在分组预览中勾选要进行选配的组")
             return
-        
+
         # 保存冻精支数
         self.save_all_semen_counts()
-        
+
         # 收集冻精库存
         semen_inventory = self._collect_semen_counts()
-        
+
         # 检查库存
         all_zero = all(count == 0 for count in semen_inventory.values())
         if all_zero:
             QMessageBox.warning(
-                self, 
-                "警告", 
+                self,
+                "警告",
                 "所有公牛的冻精支数都为0！\n\n"
                 "请在「冻精预览」表格中设置冻精支数后再进行选配。"
             )
             return
+
+        # 显示选配前确认对话框
+        from gui.mating_confirmation_dialog import MatingConfirmationDialog
+        confirm_dialog = MatingConfirmationDialog(self.selected_project_path, self)
+
+        if confirm_dialog.exec() != QDialog.DialogCode.Accepted:
+            # 用户取消了选配
+            return
+
+        # 获取用户的选择
+        confirmation_result = confirm_dialog.get_confirmation_result()
+        skip_missing_bulls = confirmation_result.get('skip_missing', False)
         
         # 创建进度对话框
         self.progress_dialog = ProgressDialog(self)
@@ -2741,6 +2753,7 @@ class MainWindow(QMainWindow):
                 control_defect_genes=control_defect_genes,
                 heifer_age_days=420,  # 可以从设置中获取
                 cycle_days=21,        # 可以从设置中获取
+                skip_missing_bulls=skip_missing_bulls,  # 传递是否跳过缺失数据的公牛
                 progress_callback=progress_callback
             )
             
@@ -2748,28 +2761,14 @@ class MainWindow(QMainWindow):
             
             if result['success']:
                 # 构建成功消息
-                message_parts = ["个体选配完成！\n"]
+                message = f"""个体选配完成！
 
-                # 如果有警告信息，添加到消息中
-                if result.get('warnings'):
-                    message_parts.append("\n⚠️ 注意：")
-                    message_parts.append(result['warnings'])
-                    message_parts.append("")
+已生成完整的选配报告：
+{result['report_path'].name}
 
-                # 如果有跳过的公牛，显示数量
-                if result.get('skipped_bulls'):
-                    skipped_count = len(result['skipped_bulls'])
-                    message_parts.append(f"已跳过 {skipped_count} 头缺少数据的公牛")
-                    message_parts.append("")
+报告包含了所有分组的母牛选配结果。
 
-                message_parts.extend([
-                    f"已生成完整的选配报告：",
-                    f"{result['report_path'].name}\n",
-                    f"报告包含了所有分组的母牛选配结果。\n",
-                    f"是否打开查看报告？"
-                ])
-
-                message = "\n".join(message_parts)
+是否打开查看报告？"""
                 
                 reply = QMessageBox.question(
                     self, 
