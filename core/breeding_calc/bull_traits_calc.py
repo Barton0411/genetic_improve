@@ -8,10 +8,7 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 import datetime
 from core.breeding_calc.traits_calculation import TraitsCalculation
-from core.data.update_manager import (
-    CLOUD_DB_HOST, CLOUD_DB_PORT, CLOUD_DB_USER, 
-    CLOUD_DB_PASSWORD, CLOUD_DB_NAME, LOCAL_DB_PATH
-)
+from core.data.update_manager import LOCAL_DB_PATH
 
 # 复用已有的性状翻译字典
 from core.breeding_calc.cow_traits_calc import TRAITS_TRANSLATION
@@ -229,37 +226,42 @@ class BullKeyTraitsPage(QWidget):
             # 如果有缺失的公牛，上传到云端数据库并提示用户
             if missing_bulls:
                 try:
-                    # 准备缺失公牛数据
-                    username = main_window.username if hasattr(main_window, 'username') else 'unknown'
-                    missing_df = pd.DataFrame({
-                        'bull': missing_bulls,
-                        'source': 'bull_key_traits',
-                        'time': datetime.datetime.now(),
-                        'user': username
-                    })
+                    # 通过API上传缺失公牛信息
+                    from api.api_client import APIClient
+                    api_client = APIClient()
 
-                    # 连接云端数据库
-                    cloud_engine = create_engine(
-                        f"mysql+pymysql://{CLOUD_DB_USER}:{CLOUD_DB_PASSWORD}"
-                        f"@{CLOUD_DB_HOST}:{CLOUD_DB_PORT}/{CLOUD_DB_NAME}?charset=utf8mb4"
-                    )
-                    
-                    # 上传缺失公牛信息
-                    missing_df.to_sql('miss_bull', cloud_engine, if_exists='append', index=False)
-                    
-                    # 提示用户
-                    QMessageBox.warning(
-                        self, 
-                        "警告", 
-                        f"以下公牛在数据库中未找到：\n{', '.join(missing_bulls)}\n"
-                        "这些信息已记录到云端数据库。\n"
-                        "结果文件中这些公牛的性状值将显示为空。"
-                    )
+                    username = main_window.username if hasattr(main_window, 'username') else 'unknown'
+
+                    # 准备上传数据
+                    bulls_data = []
+                    for bull_id in missing_bulls:
+                        bulls_data.append({
+                            'bull': bull_id,
+                            'source': 'bull_key_traits',
+                            'time': datetime.datetime.now().isoformat(),
+                            'user': username
+                        })
+
+                    # 调用API上传
+                    success = api_client.upload_missing_bulls(bulls_data)
+
+                    if success:
+                        # 提示用户
+                        QMessageBox.warning(
+                            self,
+                            "警告",
+                            f"以下公牛在数据库中未找到：\n{', '.join(missing_bulls)}\n"
+                            "这些信息已记录到云端数据库。\n"
+                            "结果文件中这些公牛的性状值将显示为空。"
+                        )
+                    else:
+                        raise Exception("API上传失败")
+
                 except Exception as e:
                     QMessageBox.warning(
                         self,
                         "警告",
-                        f"上传缺失公牛信息到云端数据库时发生错误：{str(e)}\n"
+                        f"上传缺失公牛信息时发生错误：{str(e)}\n"
                         f"缺失的公牛：{', '.join(missing_bulls)}"
                     )
 
