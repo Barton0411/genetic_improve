@@ -288,7 +288,7 @@ class APIClient:
             'bulls': bulls_data
         }
 
-        success, response = self._make_request('POST', '/api/data/upload_missing_bulls', data, headers=headers)
+        success, response = self._make_request('POST', '/api/data/missing_bulls', data, headers=headers)
 
         if success and response.get('success'):
             print(f"成功通过API上传 {len(bulls_data)} 条缺失公牛记录")
