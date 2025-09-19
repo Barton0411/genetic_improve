@@ -25,6 +25,9 @@ class APIClient:
         self.token = None
         self._load_config(config_file)
 
+        # 尝试从token manager恢复令牌
+        self._restore_token_from_manager()
+
         # 设置请求会话
         self.session = requests.Session()
         self.session.headers.update({
@@ -75,6 +78,18 @@ class APIClient:
             self.base_url = "https://api.genepop.com"
             self.timeout = 15
             self.retry_attempts = 3
+
+    def _restore_token_from_manager(self):
+        """从token manager恢复令牌"""
+        try:
+            from auth.token_manager import get_token_manager
+            token_manager = get_token_manager()
+            token = token_manager.get_token()
+            if token:
+                self.token = token
+                logger.info("已从本地恢复API令牌")
+        except Exception as e:
+            logger.debug(f"无法恢复令牌: {e}")
 
     def _make_request(self, method: str, endpoint: str, data: Optional[Dict] = None,
                      headers: Optional[Dict] = None) -> Tuple[bool, Dict]:
@@ -271,12 +286,13 @@ class APIClient:
         Returns:
             bool: 是否上传成功
         """
-        # 如果没有令牌，尝试从全局实例获取
+        # 如果没有令牌，尝试从token manager恢复
         if not self.token:
-            global_client = get_api_client()
-            if global_client and global_client.token:
-                self.token = global_client.token
-            else:
+            self._restore_token_from_manager()
+
+            # 如果仍然没有令牌，无法继续
+            if not self.token:
+                logger.error("未登录或令牌无效，无法上传缺失公牛数据")
                 print("未登录，无法上传缺失公牛数据")
                 return False
 
@@ -291,10 +307,13 @@ class APIClient:
         success, response = self._make_request('POST', '/api/data/missing_bulls', data, headers=headers)
 
         if success and response.get('success'):
+            logger.info(f"成功通过API上传 {len(bulls_data)} 条缺失公牛记录")
             print(f"成功通过API上传 {len(bulls_data)} 条缺失公牛记录")
             return True
         else:
-            print(f"API上传缺失公牛失败: {response.get('message', '未知错误')}")
+            error_msg = response.get('message', '未知错误')
+            logger.error(f"API上传缺失公牛失败: {error_msg}")
+            print(f"API上传缺失公牛失败: {error_msg}")
             return False
 
 
@@ -306,6 +325,11 @@ def get_api_client() -> APIClient:
     global _global_api_client
     if _global_api_client is None:
         _global_api_client = APIClient()
+
+    # 确保令牌是最新的
+    if not _global_api_client.token:
+        _global_api_client._restore_token_from_manager()
+
     return _global_api_client
 
 

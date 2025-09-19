@@ -2,6 +2,7 @@
 """
 数据API服务 - 处理所有数据库操作
 完全API化架构，客户端不需要数据库密码
+更新：移除认证要求，简化API调用
 """
 
 import os
@@ -170,7 +171,7 @@ async def upload_missing_bulls(request: MissingBullRequest):
         # 上传到数据库
         df.to_sql('miss_bull', engine, if_exists='append', index=False)
 
-        logger.info(f"用户 {user.get('username')} 上传了 {len(request.bulls)} 条缺失公牛记录")
+        logger.info(f"上传了 {len(request.bulls)} 条缺失公牛记录")
 
         return APIResponse(
             success=True,
@@ -183,84 +184,45 @@ async def upload_missing_bulls(request: MissingBullRequest):
         logger.error(f"上传缺失公牛记录失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/data/sync_bull_library")
-async def sync_bull_library(user=Depends(verify_token)):
-    """同步公牛库数据（替代原check_and_update_database）"""
+# ==================== 管理端点 ====================
+
+@app.get("/api/data/stats")
+async def get_statistics():
+    """获取数据统计（无需认证）"""
     try:
-        # 获取云端数据
-        query = "SELECT * FROM bull_library"
-        df = pd.read_sql(query, engine)
-
-        # 过滤表头行
-        if 'BULL NAAB' in df.columns:
-            initial_count = len(df)
-            df = df[df['BULL NAAB'] != 'BULL NAAB']
-            filtered_count = len(df)
-            if initial_count != filtered_count:
-                logger.info(f"过滤掉 {initial_count - filtered_count} 条表头记录")
-
-        # 获取版本信息
         with engine.connect() as conn:
-            result = conn.execute(text("SELECT version FROM db_version ORDER BY id DESC LIMIT 1")).fetchone()
-            version = result[0] if result else "1.0.0"
+            # 统计公牛数量
+            bull_count = conn.execute(text("SELECT COUNT(*) FROM bull_library")).fetchone()[0]
 
-        return APIResponse(
-            success=True,
-            message=f"成功同步{len(df)}条公牛记录",
-            data={
-                "total_records": len(df),
-                "version": version,
-                "records": df.to_dict(orient='records')
-            }
-        )
+            # 统计缺失公牛数量
+            missing_count = conn.execute(text("SELECT COUNT(*) FROM miss_bull")).fetchone()[0]
+
+            # 获取最新更新时间
+            version_info = conn.execute(text("SELECT version, update_time FROM db_version ORDER BY id DESC LIMIT 1")).fetchone()
+
+            return APIResponse(
+                success=True,
+                data={
+                    "bull_count": bull_count,
+                    "missing_bull_count": missing_count,
+                    "database_version": version_info[0] if version_info else None,
+                    "last_update": str(version_info[1]) if version_info else None
+                }
+            )
     except Exception as e:
-        logger.error(f"同步公牛库数据失败: {e}")
+        logger.error(f"获取统计信息失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/data/invitation_codes")
-async def get_invitation_codes(user=Depends(verify_token)):
-    """获取邀请码列表（管理员功能）"""
-    try:
-        query = """
-            SELECT id, code, status, max_uses, current_uses, expire_time
-            FROM invitation_codes
-            ORDER BY id DESC
-        """
-        df = pd.read_sql(query, engine)
-
-        return APIResponse(
-            success=True,
-            data={
-                "codes": df.to_dict(orient='records')
-            }
-        )
-    except Exception as e:
-        logger.error(f"获取邀请码列表失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ==================== 主程序入口 ====================
+# ==================== 启动服务 ====================
 
 if __name__ == "__main__":
     import uvicorn
+    # 在生产环境中使用环境变量配置
+    port = int(os.getenv('DATA_API_PORT', '8082'))
 
-    # 检查数据库密码
-    if not DB_PASSWORD:
-        logger.error("错误：未设置数据库密码环境变量 DB_PASSWORD")
-        sys.exit(1)
-
-    # 测试数据库连接
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-            logger.info("数据库连接测试成功")
-    except Exception as e:
-        logger.error(f"数据库连接测试失败: {e}")
-        sys.exit(1)
-
-    # 启动服务
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8082,
+        port=port,
         log_level="info"
     )

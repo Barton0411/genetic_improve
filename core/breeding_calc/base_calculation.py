@@ -118,10 +118,8 @@ class BaseCowCalculation:
             if not missing_bulls:
                 return True
 
-            # 通过API上传缺失公牛信息
-            from api.api_client import get_api_client
-
-            api_client = get_api_client()
+            import requests
+            import os
 
             # 准备上传数据
             bulls_data = []
@@ -133,14 +131,32 @@ class BaseCowCalculation:
                     'user': username
                 })
 
-            # 调用API上传
-            success = api_client.upload_missing_bulls(bulls_data)
+            # 准备请求数据（无需认证）
+            data = {
+                'bulls': bulls_data
+            }
 
-            if success:
-                print(f"成功上传 {len(missing_bulls)} 条缺失公牛记录到云端")
-                return True
+            # 创建session并禁用代理
+            session = requests.Session()
+            session.trust_env = False  # 忽略系统代理设置
+
+            # 直接调用API上传（无需认证头）
+            response = session.post(
+                'http://39.96.189.27/api/data/missing_bulls',
+                json=data,
+                timeout=15
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    print(f"成功上传 {len(missing_bulls)} 条缺失公牛记录到云端")
+                    return True
+                else:
+                    print(f"上传失败: {result.get('message', '未知错误')}")
+                    return False
             else:
-                print(f"上传缺失公牛信息到云端失败")
+                print(f"上传失败，HTTP状态码: {response.status_code}")
                 return False
 
         except Exception as e:
