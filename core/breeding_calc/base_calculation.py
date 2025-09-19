@@ -119,9 +119,9 @@ class BaseCowCalculation:
                 return True
 
             # 通过API上传缺失公牛信息
-            from api.api_client import APIClient
+            from api.api_client import get_api_client
 
-            api_client = APIClient()
+            api_client = get_api_client()
 
             # 准备上传数据
             bulls_data = []

@@ -503,8 +503,8 @@ class KeyTraitsPage(QWidget):
                 print("开始处理缺失公牛...")
                 try:
                     # 通过API上传缺失公牛信息
-                    from api.api_client import APIClient
-                    api_client = APIClient()
+                    from api.api_client import get_api_client
+                    api_client = get_api_client()
 
                     username = main_window.username if hasattr(main_window, 'username') else 'unknown'
 
@@ -1012,8 +1012,8 @@ class KeyTraitsPage(QWidget):
             if missing_bulls:
                 try:
                     # 通过API上传缺失公牛信息
-                    from api.api_client import APIClient
-                    api_client = APIClient()
+                    from api.api_client import get_api_client
+                    api_client = get_api_client()
 
                     username = main_window.username if hasattr(main_window, 'username') else 'unknown'
 

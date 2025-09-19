@@ -271,9 +271,14 @@ class APIClient:
         Returns:
             bool: 是否上传成功
         """
+        # 如果没有令牌，尝试从全局实例获取
         if not self.token:
-            print("未登录，无法上传缺失公牛数据")
-            return False
+            global_client = get_api_client()
+            if global_client and global_client.token:
+                self.token = global_client.token
+            else:
+                print("未登录，无法上传缺失公牛数据")
+                return False
 
         headers = {
             'Authorization': f'Bearer {self.token}'
