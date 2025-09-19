@@ -225,8 +225,10 @@ class CompleteMatingExecutor:
             self.recommendation_generator.inbreeding_threshold = inbreeding_threshold / 100.0  # 转换为小数
             self.recommendation_generator.control_defect_genes = control_defect_genes
             
-            # 生成矩阵
-            matrices = self.recommendation_generator.generate_matrices()
+            # 生成矩阵（传递进度回调）
+            matrices = self.recommendation_generator.generate_matrices(
+                progress_callback=lambda msg, pct: progress_callback(msg, 40 + int(pct * 0.2)) if progress_callback else None
+            )
             
             if matrices is None:
                 raise Exception("生成推荐矩阵返回 None")

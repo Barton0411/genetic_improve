@@ -390,10 +390,17 @@ class MatrixRecommendationGenerator:
 
         logger.info("=" * 60)
 
-    def generate_matrices(self) -> Dict[str, pd.DataFrame]:
-        """生成所有配对矩阵"""
+    def generate_matrices(self, progress_callback=None) -> Dict[str, pd.DataFrame]:
+        """生成所有配对矩阵
+
+        Args:
+            progress_callback: 进度回调函数，接收(message, percentage)
+        """
         logger.info("开始生成配对矩阵...")
-        
+
+        if progress_callback:
+            progress_callback("正在准备数据...", 5)
+
         # 准备母牛和公牛ID列表
         cow_ids = self.cow_data['cow_id'].astype(str).tolist()
 
@@ -406,48 +413,74 @@ class MatrixRecommendationGenerator:
         # 分别处理常规和性控公牛
         regular_bulls = valid_bull_data[valid_bull_data['classification'] == '常规']
         sexed_bulls = valid_bull_data[valid_bull_data['classification'] == '性控']
-        
+
         regular_bull_ids = regular_bulls['bull_id'].astype(str).tolist() if not regular_bulls.empty else []
         sexed_bull_ids = sexed_bulls['bull_id'].astype(str).tolist() if not sexed_bulls.empty else []
-        
+
         # 创建结果字典
         matrices = {}
-        
+
         # 生成常规冻精矩阵
         if regular_bull_ids:
             logger.info(f"生成常规冻精配对矩阵 ({len(cow_ids)}×{len(regular_bull_ids)})")
+
+            if progress_callback:
+                progress_callback(f"生成常规后代得分矩阵 ({len(cow_ids)}×{len(regular_bull_ids)})...", 10)
             matrices['常规_后代得分'] = self._create_score_matrix(cow_ids, regular_bull_ids, regular_bulls)
+
+            if progress_callback:
+                progress_callback(f"生成常规近交系数矩阵...", 20)
             matrices['常规_近交系数'] = self._create_inbreeding_matrix(cow_ids, regular_bull_ids)
+
+            if progress_callback:
+                progress_callback(f"生成常规隐性基因矩阵...", 30)
             matrices['常规_隐性基因'] = self._create_genetic_defect_matrix(cow_ids, regular_bull_ids)
-            
+
         # 生成性控冻精矩阵
         if sexed_bull_ids:
             logger.info(f"生成性控冻精配对矩阵 ({len(cow_ids)}×{len(sexed_bull_ids)})")
+
+            if progress_callback:
+                progress_callback(f"生成性控后代得分矩阵 ({len(cow_ids)}×{len(sexed_bull_ids)})...", 50)
             matrices['性控_后代得分'] = self._create_score_matrix(cow_ids, sexed_bull_ids, sexed_bulls)
+
+            if progress_callback:
+                progress_callback(f"生成性控近交系数矩阵...", 60)
             matrices['性控_近交系数'] = self._create_inbreeding_matrix(cow_ids, sexed_bull_ids)
+
+            if progress_callback:
+                progress_callback(f"生成性控隐性基因矩阵...", 70)
             matrices['性控_隐性基因'] = self._create_genetic_defect_matrix(cow_ids, sexed_bull_ids)
-            
+
         # 生成推荐汇总（保持原有格式的兼容性）
         logger.info("生成推荐汇总...")
+        if progress_callback:
+            progress_callback("生成推荐汇总...", 85)
+
         matrices['推荐汇总'] = self._generate_recommendation_summary()
-        
+
+        if progress_callback:
+            progress_callback("矩阵生成完成", 95)
+
         return matrices
         
     def _create_score_matrix(self, cow_ids: List[str], bull_ids: List[str], bull_df: pd.DataFrame) -> pd.DataFrame:
-        """创建后代得分矩阵"""
-        # 创建空矩阵
-        score_matrix = pd.DataFrame(index=cow_ids, columns=bull_ids)
-        
-        # 获取公牛得分字典
+        """创建后代得分矩阵（优化版）"""
+        import numpy as np
+
+        # 检查公牛数据
         if 'Index Score' not in bull_df.columns:
             raise ValueError("公牛数据缺少Index Score列")
-            
-        bull_scores = dict(zip(
-            bull_df['bull_id'].astype(str), 
+
+        # 预处理：获取公牛得分向量
+        bull_scores_dict = dict(zip(
+            bull_df['bull_id'].astype(str),
             bull_df['Index Score']
         ))
-        
-        # 计算每个配对的后代得分
+        bull_scores = np.array([bull_scores_dict[bid] for bid in bull_ids])
+
+        # 预处理：获取母牛得分向量
+        cow_scores = []
         for cow_id in cow_ids:
             cow_row = self.cow_data[self.cow_data['cow_id'].astype(str) == cow_id]
             if not cow_row.empty:
@@ -455,60 +488,145 @@ class MatrixRecommendationGenerator:
                 score_found = False
                 for col in self.cow_score_columns:
                     if col in cow_row.columns and pd.notna(cow_row.iloc[0][col]):
-                        cow_score = cow_row.iloc[0][col]
+                        cow_scores.append(cow_row.iloc[0][col])
                         score_found = True
                         break
-                        
+
                 if not score_found:
                     raise ValueError(f"母牛 {cow_id} 缺少得分数据")
-                
-                for bull_id in bull_ids:
-                    if bull_id not in bull_scores:
-                        # 跳过缺少数据的公牛（理论上不应该发生，因为已经过滤）
-                        logger.warning(f"公牛 {bull_id} 缺少得分数据，跳过")
-                        continue
-                    bull_score = bull_scores[bull_id]
-                    # 后代得分 = 双亲平均
-                    offspring_score = 0.5 * (cow_score + bull_score)
-                    score_matrix.loc[cow_id, bull_id] = round(offspring_score, 2)
-                    
+            else:
+                raise ValueError(f"找不到母牛 {cow_id} 的数据")
+
+        cow_scores = np.array(cow_scores)
+
+        # 向量化计算后代得分矩阵
+        # 使用广播创建矩阵：每个母牛得分与所有公牛得分的平均
+        cow_matrix = cow_scores.reshape(-1, 1)  # 列向量
+        bull_matrix = bull_scores.reshape(1, -1)  # 行向量
+
+        # 后代得分 = 双亲平均
+        offspring_scores = 0.5 * (cow_matrix + bull_matrix)
+
+        # 创建DataFrame并四舍五入
+        score_matrix = pd.DataFrame(
+            np.round(offspring_scores, 2),
+            index=cow_ids,
+            columns=bull_ids
+        )
+
         return score_matrix
         
     def _create_inbreeding_matrix(self, cow_ids: List[str], bull_ids: List[str]) -> pd.DataFrame:
-        """创建近交系数矩阵"""
-        inbreeding_matrix = pd.DataFrame(index=cow_ids, columns=bull_ids)
-        
-        # 调试：检查前几个配对
-        debug_count = 0
-        non_zero_count = 0
-        
+        """创建近交系数矩阵（优化版）"""
+        import numpy as np
+
+        # 如果没有近交数据，直接返回全0矩阵
+        if self.inbreeding_data is None:
+            logger.info("没有近交系数数据，使用默认值0")
+            return pd.DataFrame("0.000%", index=cow_ids, columns=bull_ids)
+
+        # 预处理：创建查找字典
+        inbreeding_dict = {}
+
+        # 找到实际的列名
+        cow_cols = ['母牛号', 'dam_id', 'cow_id']
+        bull_cols = ['原始备选公牛号', '备选公牛号', '公牛号', 'sire_id', 'bull_id']
+        coeff_cols = ['后代近交系数', '近交系数', 'inbreeding_coefficient']
+
+        cow_col = next((col for col in cow_cols if col in self.inbreeding_data.columns), None)
+        bull_col = next((col for col in bull_cols if col in self.inbreeding_data.columns), None)
+        coeff_col = next((col for col in coeff_cols if col in self.inbreeding_data.columns), None)
+
+        if cow_col and bull_col and coeff_col:
+            # 构建查找字典，一次遍历
+            for _, row in self.inbreeding_data.iterrows():
+                key = (str(row[cow_col]), str(row[bull_col]))
+                value = row[coeff_col]
+                if pd.notna(value):
+                    if isinstance(value, str) and '%' in value:
+                        value = float(value.replace('%', '')) / 100
+                    inbreeding_dict[key] = float(value)
+
+        # 使用向量化操作创建矩阵
+        result = np.zeros((len(cow_ids), len(bull_ids)))
+
         for i, cow_id in enumerate(cow_ids):
             for j, bull_id in enumerate(bull_ids):
-                coeff = self._get_inbreeding_coefficient(cow_id, bull_id)
-                # 转换为百分比形式
-                inbreeding_matrix.loc[cow_id, bull_id] = f"{coeff*100:.3f}%"
-                
-                # 调试信息
-                if debug_count < 5 and i < 2 and j < 2:
-                    logger.debug(f"配对 ({cow_id}, {bull_id}): 近交系数 = {coeff}")
-                    debug_count += 1
-                    
-                if coeff > 0:
-                    non_zero_count += 1
-                    
+                key = (str(cow_id), str(bull_id))
+                result[i, j] = inbreeding_dict.get(key, 0.0)
+
+        # 转换为DataFrame并格式化
+        inbreeding_matrix = pd.DataFrame(result, index=cow_ids, columns=bull_ids)
+
+        # 向量化格式化
+        formatted_matrix = inbreeding_matrix.applymap(lambda x: f"{x*100:.3f}%")
+
+        non_zero_count = (inbreeding_matrix > 0).sum().sum()
         logger.info(f"近交系数矩阵：非零值数量 = {non_zero_count}/{len(cow_ids)*len(bull_ids)}")
-                
-        return inbreeding_matrix
+
+        return formatted_matrix
         
     def _create_genetic_defect_matrix(self, cow_ids: List[str], bull_ids: List[str]) -> pd.DataFrame:
-        """创建隐性基因状态矩阵"""
-        genetic_matrix = pd.DataFrame(index=cow_ids, columns=bull_ids)
-        
+        """创建隐性基因状态矩阵（优化版）"""
+        import numpy as np
+
+        # 如果没有隐性基因数据，直接返回全"safe"矩阵
+        if self.genetic_defect_data is None:
+            logger.info("没有隐性基因数据，使用默认值safe")
+            return pd.DataFrame("safe", index=cow_ids, columns=bull_ids)
+
+        # 预处理：创建查找字典
+        cow_defects = {}
+        bull_defects = {}
+
+        # 找到实际的列名
+        id_cols = ['母牛号', '公牛号', 'animal_id', 'bull_id', 'cow_id']
+        defect_cols = [col for col in self.genetic_defect_data.columns if col not in id_cols]
+
+        id_col = next((col for col in id_cols if col in self.genetic_defect_data.columns), None)
+
+        if id_col and defect_cols:
+            # 构建查找字典
+            for _, row in self.genetic_defect_data.iterrows():
+                animal_id = str(row[id_col])
+                defects = []
+                for col in defect_cols:
+                    if pd.notna(row[col]) and str(row[col]).upper() == 'C':
+                        defects.append(col)
+
+                # 同时存储到母牛和公牛字典中
+                if animal_id in cow_ids:
+                    cow_defects[animal_id] = defects
+                if animal_id in bull_ids:
+                    bull_defects[animal_id] = defects
+
+        # 使用向量化操作创建矩阵
+        result = []
+
         for cow_id in cow_ids:
+            row_result = []
+            cow_carriers = cow_defects.get(str(cow_id), [])
+
             for bull_id in bull_ids:
-                status = self._check_genetic_defects(cow_id, bull_id)
-                genetic_matrix.loc[cow_id, bull_id] = status
-                
+                bull_carriers = bull_defects.get(str(bull_id), [])
+
+                # 检查是否有相同的隐性基因携带
+                if cow_carriers and bull_carriers:
+                    common = set(cow_carriers) & set(bull_carriers)
+                    if common:
+                        row_result.append("risk")
+                    else:
+                        row_result.append("safe")
+                else:
+                    row_result.append("safe")
+
+            result.append(row_result)
+
+        genetic_matrix = pd.DataFrame(result, index=cow_ids, columns=bull_ids)
+
+        risk_count = (genetic_matrix == "risk").sum().sum()
+        logger.info(f"隐性基因矩阵：风险配对数量 = {risk_count}/{len(cow_ids)*len(bull_ids)}")
+
         return genetic_matrix
         
     def _get_inbreeding_coefficient(self, cow_id: str, bull_id: str) -> float:
