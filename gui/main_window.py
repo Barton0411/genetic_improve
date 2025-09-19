@@ -1588,7 +1588,7 @@ class MainWindow(QMainWindow):
         # 延迟1秒启动，确保版本检查先执行
         QTimer.singleShot(1000, start_db_check)
 
-    def on_db_update_finished(self):
+    def on_db_update_finished(self, version_info: str = ""):
         """处理数据库更新完成的信号"""
         try:
             if hasattr(self, 'progress_dialog') and self.progress_dialog:
@@ -1596,8 +1596,21 @@ class MainWindow(QMainWindow):
                 self.progress_dialog = None
         except:
             pass
-        logging.info("数据库检查和更新完成")
-        QMessageBox.information(self, "更新完成", "本地数据库已成功检查和更新。")
+
+        # 解析版本信息
+        if version_info and '#' in version_info:
+            version, update_time = version_info.split('#', 1)
+            message = f"数据库版本已更新为 {version} ({update_time})"
+        else:
+            # 如果没有版本信息，使用默认消息
+            from core.data.update_manager import get_local_db_version
+            from datetime import datetime
+            version = get_local_db_version()
+            update_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            message = f"数据库版本已更新为 {version} ({update_time})"
+
+        logging.info(message)
+        QMessageBox.information(self, "更新完成", message)
 
     def on_db_update_error(self, error_message: str):
         """处理数据库更新错误的信号"""

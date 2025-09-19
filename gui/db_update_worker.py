@@ -7,15 +7,24 @@ import traceback
 class DBUpdateWorker(QObject):
     progress = pyqtSignal(int)      # 进度百分比
     message = pyqtSignal(str)       # 消息更新
-    finished = pyqtSignal()         # 处理完成
+    finished = pyqtSignal(str)      # 处理完成，返回版本信息
     error = pyqtSignal(str)         # 发生错误
 
     @pyqtSlot()
     def run(self):
         try:
             # 在这里可以添加更多的进度更新逻辑
+            from core.data.update_manager import get_local_db_version
+            from datetime import datetime
+
             run_update_process()
-            self.finished.emit()
+
+            # 获取更新后的版本号
+            current_version = get_local_db_version()
+            update_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            version_info = f"{current_version}#{update_time}"  # 用#分隔版本和时间
+
+            self.finished.emit(version_info)
         except Exception as e:
             # 记录详细错误信息到日志
             error_trace = traceback.format_exc()
