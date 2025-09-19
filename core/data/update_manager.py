@@ -203,7 +203,7 @@ def get_local_db_version():
 def get_local_db_version_with_time():
     """
     获取本地数据库的当前版本号和更新时间。
-    返回: (version, update_time) 元组，时间为本地时间
+    返回: (version, update_time) 元组，直接返回数据库中存储的时间
     """
     try:
         result = session.execute(
@@ -219,39 +219,14 @@ def get_local_db_version_with_time():
                 version = result[1]
                 update_time = result[2] if len(result) > 2 else None
 
-            # 格式化时间 - 将UTC时间转换为本地时间
+            # 格式化时间 - 直接使用数据库中的时间
             if update_time:
                 if isinstance(update_time, str):
-                    # 如果是字符串，尝试解析并转换
-                    try:
-                        # 解析UTC时间字符串
-                        from datetime import datetime, timezone
-                        if 'T' in update_time:
-                            # ISO格式
-                            utc_dt = datetime.fromisoformat(update_time.replace('Z', '+00:00'))
-                        else:
-                            # 标准格式 YYYY-MM-DD HH:MM:SS
-                            utc_dt = datetime.strptime(update_time, '%Y-%m-%d %H:%M:%S')
-                            utc_dt = utc_dt.replace(tzinfo=timezone.utc)
-
-                        # 转换为本地时间
-                        local_dt = utc_dt.astimezone()
-                        time_str = local_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    except:
-                        # 如果解析失败，直接返回原字符串
-                        time_str = update_time
+                    # 如果已经是字符串，直接返回
+                    time_str = update_time
                 else:
-                    # 如果是datetime对象
-                    from datetime import timezone
-                    if update_time.tzinfo is None:
-                        # 假设是UTC时间
-                        utc_dt = update_time.replace(tzinfo=timezone.utc)
-                    else:
-                        utc_dt = update_time
-
-                    # 转换为本地时间
-                    local_dt = utc_dt.astimezone()
-                    time_str = local_dt.strftime('%Y-%m-%d %H:%M:%S')
+                    # 如果是datetime对象，格式化为字符串
+                    time_str = update_time.strftime('%Y-%m-%d %H:%M:%S')
             else:
                 time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
