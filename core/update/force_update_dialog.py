@@ -32,7 +32,7 @@ class DownloadThread(QThread):
         try:
             self.progress.emit(0, "开始下载更新包...")
             
-            response = requests.get(self.url, stream=True)
+            response = requests.get(self.url, stream=True, proxies={'http': None, 'https': None})
             response.raise_for_status()
             
             total_size = int(response.headers.get('content-length', 0))
