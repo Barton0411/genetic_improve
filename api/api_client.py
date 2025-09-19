@@ -261,6 +261,37 @@ class APIClient:
         """清除令牌"""
         self.token = None
 
+    def upload_missing_bulls(self, bulls_data: list) -> bool:
+        """
+        上传缺失公牛记录到云端数据库
+
+        Args:
+            bulls_data: 缺失公牛数据列表
+
+        Returns:
+            bool: 是否上传成功
+        """
+        if not self.token:
+            print("未登录，无法上传缺失公牛数据")
+            return False
+
+        headers = {
+            'Authorization': f'Bearer {self.token}'
+        }
+
+        data = {
+            'bulls': bulls_data
+        }
+
+        success, response = self._make_request('POST', '/api/data/upload_missing_bulls', data, headers=headers)
+
+        if success and response.get('success'):
+            print(f"成功通过API上传 {len(bulls_data)} 条缺失公牛记录")
+            return True
+        else:
+            print(f"API上传缺失公牛失败: {response.get('message', '未知错误')}")
+            return False
+
 
 # 全局API客户端实例
 _global_api_client = None

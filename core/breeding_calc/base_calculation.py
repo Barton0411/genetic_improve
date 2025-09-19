@@ -107,7 +107,7 @@ class BaseCowCalculation:
 
     def process_missing_bulls(self, missing_bulls: list, source: str, username: str) -> bool:
         """
-        处理缺失的公牛信息并上传到云端数据库
+        处理缺失的公牛信息并通过API上传到云端数据库
 
         Args:
             missing_bulls: 缺失的公牛ID列表
@@ -121,23 +121,54 @@ class BaseCowCalculation:
             if not missing_bulls:
                 return True
 
-            missing_df = pd.DataFrame({
-                'bull': missing_bulls,
-                'source': source,
-                'time': datetime.datetime.now(),
-                'user': username
-            })
+            # 通过API上传缺失公牛信息
+            from api.api_client import APIClient
 
-            cloud_engine = create_engine(
-                f"mysql+pymysql://{CLOUD_DB_USER}:{CLOUD_DB_PASSWORD}"
-                f"@{CLOUD_DB_HOST}:{CLOUD_DB_PORT}/{CLOUD_DB_NAME}?charset=utf8mb4"
-            )
-            
-            missing_df.to_sql('miss_bull', cloud_engine, if_exists='append', index=False)
-            return True
-            
+            api_client = APIClient()
+
+            # 准备上传数据
+            bulls_data = []
+            for bull_id in missing_bulls:
+                bulls_data.append({
+                    'bull': bull_id,
+                    'source': source,
+                    'time': datetime.datetime.now().isoformat(),
+                    'user': username
+                })
+
+            # 调用API上传
+            success = api_client.upload_missing_bulls(bulls_data)
+
+            if success:
+                print(f"成功上传 {len(missing_bulls)} 条缺失公牛记录到云端")
+                return True
+            else:
+                print(f"上传缺失公牛信息到云端失败")
+                return False
+
         except Exception as e:
             print(f"处理缺失公牛信息失败: {e}")
+            # 如果API方式失败，尝试直接连接（仅用于开发环境）
+            if CLOUD_DB_PASSWORD:
+                try:
+                    missing_df = pd.DataFrame({
+                        'bull': missing_bulls,
+                        'source': source,
+                        'time': datetime.datetime.now(),
+                        'user': username
+                    })
+
+                    cloud_engine = create_engine(
+                        f"mysql+pymysql://{CLOUD_DB_USER}:{CLOUD_DB_PASSWORD}"
+                        f"@{CLOUD_DB_HOST}:{CLOUD_DB_PORT}/{CLOUD_DB_NAME}?charset=utf8mb4"
+                    )
+
+                    missing_df.to_sql('miss_bull', cloud_engine, if_exists='append', index=False)
+                    print(f"通过直接连接上传了 {len(missing_bulls)} 条缺失公牛记录")
+                    return True
+                except Exception as db_error:
+                    print(f"直接数据库连接也失败: {db_error}")
+
             return False
 
     def query_bull_traits(self, bull_id: str, selected_traits: list) -> Tuple[dict, bool]:
