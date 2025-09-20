@@ -4,6 +4,23 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-cn/1.0.0/)，本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [1.1.0.6] - 2025-09-20
+
+### 🐛 问题修复
+- 修复dam列数据格式问题，保持原始ID格式不变
+  - 问题：母亲号(dam)从Excel读取时前导零丢失（如'0960'变成960.0）
+  - 原因：读取Excel时未正确指定中文列名的dtype
+  - 解决：使用原始中文列名（"母亲号"）指定dtype为字符串
+- 修复NAAB编号处理时的TypeError
+  - 问题：invalid_naab_numbers列表包含float值导致join失败
+  - 解决：在join前将所有值转换为字符串
+
+### 🔧 优化改进
+- 优化ID列数据类型处理逻辑
+  - 读取时使用原始中文列名指定dtype
+  - 保存时确保cow_id、dam等ID列保持字符串格式
+- 保证ID数据的完整性，支持推送功能正常工作
+
 ## [1.1.0.1] - 2025-09-19
 
 ### 🐛 问题修复

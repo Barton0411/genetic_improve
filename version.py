@@ -3,10 +3,23 @@
 """
 
 # 版本号格式: 主版本号.次版本号.修订号.构建号 (xxx.xxx.xxx.xxx)
-VERSION = "1.1.0.5"
+VERSION = "1.1.0.6"
 
 # 版本历史
 VERSION_HISTORY = [
+    {
+        "version": "1.1.0.6",
+        "date": "2025-09-20",
+        "author": "Development Team",
+        "changes": [
+            "🐛 修复dam列数据格式问题，保持原始ID格式不变",
+            "📊 修复母亲号(dam)从原始Excel读取时前导零丢失问题",
+            "🔧 优化ID列数据类型处理，使用原始中文列名指定dtype",
+            "✅ 确保cow_id和dam列在处理后保持字符串格式",
+            "📝 修复NAAB编号处理时的TypeError问题",
+            "🎯 保证ID数据的完整性，支持推送功能正常工作"
+        ]
+    },
     {
         "version": "1.1.0.5",
         "date": "2025-09-19",

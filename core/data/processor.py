@@ -976,14 +976,121 @@ def preprocess_cow_data(cow_df, progress_callback=None):
         # 定义需要保留的列
         print("[DEBUG-5] 设置需要保留的列...")
         columns_to_keep = [
-            "cow_id", "breed", "sex", "sire", "mgs", "dam", "mmgs", 
-            "lac", "calving_date", "birth_date", "age",
-            "services_time", "DIM", "peak_milk", "milk_305", "repro_status", 
+            "cow_id", "breed", "sex", "sire", "dam", "mgs", "mgd", "mmgs",
+            "lac", "calving_date", "birth_date", "birth_date_dam", "birth_date_mgd", "age",
+            "services_time", "DIM", "peak_milk", "milk_305", "repro_status",
             "group", "是否在场"
         ]
 
+        # 先添加dam相关的派生列（移到前面，在调整列顺序之前）
+        print("[DEBUG-6] 添加dam相关派生列...")
+        try:
+            # 定义ID预处理函数
+            # 创建映射字典
+            print("  - 创建ID映射字典")
+            print("    说明：直接使用原始数据，不做任何格式转换")
+
+            # 创建简单的映射字典（数据本身就很标准，不需要处理）
+            birth_map = {}  # cow_id -> birth_date
+            dam_map = {}     # cow_id -> dam
+
+            for _, row in cow_df.iterrows():
+                # cow_id和dam都保持原样，直接使用
+                cow_id = row['cow_id']
+                if pd.isna(cow_id):
+                    continue
+
+                birth_date = row['birth_date']
+                dam = row['dam'] if pd.notna(row['dam']) else None
+
+                # 直接使用原始值作为key
+                birth_map[cow_id] = birth_date
+                dam_map[cow_id] = dam
+
+            print(f"  - 映射字典创建完成：基础记录 {len(set(birth_map.values()))} 条，总映射 {len(birth_map)} 条")
+
+            # 调试：显示映射内容
+            if len(birth_map) <= 20:  # 只在数据量小时显示
+                print("  - [DEBUG] 映射键值：")
+                for k in sorted(birth_map.keys()):
+                    print(f"      '{k}'")
+
+
+
+            # 定义查找函数
+            def find_birth_date(dam_id):
+                """查找dam的出生日期（直接查找，数据本身很标准）"""
+                if pd.isna(dam_id):
+                    return pd.NaT
+
+                # 直接查找，数据本身很标准
+                if dam_id in birth_map:
+                    return birth_map[dam_id]
+
+                return pd.NaT
+
+            def find_mgd(dam_id):
+                """查找dam的母亲（mgd）"""
+                if pd.isna(dam_id):
+                    return ''
+
+                # 直接查找
+                if dam_id in dam_map:
+                    return dam_map[dam_id]
+
+                return ''
+
+            # 打印示例（调试用）
+            print("  - 映射示例（前5个）：")
+            count = 0
+            for cow_id, birth_date in birth_map.items():
+                if count < 5:
+                    print(f"    cow_id='{cow_id}' -> birth_date={birth_date}")
+                    count += 1
+
+            # 1. 添加 birth_date_dam
+            print("  - 添加 birth_date_dam 列")
+            # 调试：打印dam列的值
+            if len(cow_df) <= 10:
+                print(f"    [DEBUG] dam列值: {cow_df['dam'].tolist()}")
+                print(f"    [DEBUG] 映射键: {list(birth_map.keys())}")
+            cow_df['birth_date_dam'] = cow_df['dam'].apply(find_birth_date)
+            dam_with_birth_date = cow_df['birth_date_dam'].notna().sum()
+            total_dams = cow_df['dam'].notna().sum()
+            print(f"    找到 {dam_with_birth_date}/{total_dams} 个dam的出生日期 ({dam_with_birth_date/total_dams*100:.1f}%)" if total_dams > 0 else "    没有dam数据")
+
+            # 2. 添加 mgd（外祖母）
+            print("  - 添加 mgd 列")
+            cow_df['mgd'] = cow_df['dam'].apply(find_mgd)
+            mgd_found = (cow_df['mgd'] != '').sum()
+            print(f"    找到 {mgd_found}/{total_dams} 个mgd（外祖母）" if total_dams > 0 else "    没有mgd数据")
+
+            # 3. 添加 birth_date_mgd
+            print("  - 添加 birth_date_mgd 列")
+            cow_df['birth_date_mgd'] = cow_df['mgd'].apply(find_birth_date)
+            mgd_with_birth_date = cow_df['birth_date_mgd'].notna().sum()
+            print(f"    找到 {mgd_with_birth_date} 个mgd的出生日期")
+
+            # 填充缺失值
+            print("  - 处理缺失值")
+            cow_df['birth_date_dam'] = cow_df['birth_date_dam'].fillna(pd.NaT)
+            cow_df['mgd'] = cow_df['mgd'].fillna('')
+            cow_df['birth_date_mgd'] = cow_df['birth_date_mgd'].fillna(pd.NaT)
+
+            print("  - dam相关列添加完成")
+        except Exception as e:
+            import logging
+            print(f"[DEBUG-ERROR] 添加dam相关列时出错: {e}")
+            logging.error(f"添加dam相关列时出错: {e}")
+            import traceback
+            print(traceback.format_exc())
+            # 确保新列存在
+            cow_df['birth_date_dam'] = pd.NaT
+            cow_df['mgd'] = ""
+            cow_df['birth_date_mgd'] = pd.NaT
+
         # 添加不存在的列并填充为空值
-        print("[DEBUG-6] 添加缺失列...")
+        print("[DEBUG-7] 添加其他缺失列...")
         missing_columns = [col for col in columns_to_keep if col not in cow_df.columns]
         for col in missing_columns:
             print(f"  - 添加缺失列: {col}")
@@ -991,7 +1098,7 @@ def preprocess_cow_data(cow_df, progress_callback=None):
 
         # 调整列的顺序
         try:
-            print("[DEBUG-7] 调整列顺序...")
+            print("[DEBUG-8] 调整列顺序...")
             cow_df = cow_df[columns_to_keep]
         except KeyError as ke:
             import logging
@@ -1030,23 +1137,10 @@ def preprocess_cow_data(cow_df, progress_callback=None):
                     # 确保此列为有效的数值类型
                     cow_df[column] = ""
 
-        # 对cow_id, sire, mgs, dam, mmgs列进行空格和小数点清除
-        print("[DEBUG-10] 清理ID列...")
-        columns_to_clean = ['cow_id', 'sire', 'mgs', 'dam', 'mmgs']
-        for column in columns_to_clean:
-            if column in cow_df.columns:
-                try:
-                    print(f"  - 清理ID列: {column}")
-                    # 将列转换为字符串类型
-                    cow_df[column] = cow_df[column].astype(str)
-                    # 去除空格、小数点并清理
-                    cow_df[column] = cow_df[column].str.replace(' ', '').str.replace('.', '', regex=False).str.strip()
-                except Exception as e:
-                    import logging
-                    print(f"[DEBUG-ERROR] 清理列 {column} 时出错: {e}")
-                    logging.error(f"清理列 {column} 时出错: {e}")
-                    # 确保此列为字符串类型
-                    cow_df[column] = cow_df[column].astype(str)
+        # 不对cow_id和dam进行任何处理，保持原始格式
+        print("[DEBUG-10] 跳过ID列清理，保持原始格式...")
+        # 只对sire, mgs, mmgs进行必要的NAAB格式处理（如果需要）
+        # cow_id和dam完全保持原样
 
         # 调试输出：查看清理后的cow_id和dam
         import logging
@@ -1055,14 +1149,16 @@ def preprocess_cow_data(cow_df, progress_callback=None):
             print(cow_df[['cow_id', 'dam']].head().to_string())
             logging.info(cow_df[['cow_id', 'dam']].head().to_string())
 
-        # 对calving_date和birth_date列转换为日期格式
+        # 对所有日期列转换为日期格式
         print("[DEBUG-12] 处理日期列...")
-        date_columns = ['calving_date', 'birth_date']
+        date_columns = ['calving_date', 'birth_date', 'birth_date_dam', 'birth_date_mgd']
         for column in date_columns:
             if column in cow_df.columns:
                 try:
                     print(f"  - 处理日期列: {column}")
-                    cow_df[column] = pd.to_datetime(cow_df[column], errors='coerce')
+                    # 如果已经是datetime类型，跳过
+                    if not pd.api.types.is_datetime64_any_dtype(cow_df[column]):
+                        cow_df[column] = pd.to_datetime(cow_df[column], errors='coerce')
                 except Exception as e:
                     import logging
                     print(f"[DEBUG-ERROR] 处理日期列 {column} 时出错: {e}")
@@ -1170,50 +1266,12 @@ def preprocess_cow_data(cow_df, progress_callback=None):
             logging.error(f"处理NAAB编号时出错: {e}")
 
         if invalid_naab_numbers:
-            invalid_numbers_str = '\n'.join(invalid_naab_numbers)
+            invalid_numbers_str = '\n'.join(str(num) for num in invalid_naab_numbers)
             print(f"[DEBUG-15] 发现 {len(invalid_naab_numbers)} 个无效的NAAB编号")
             if progress_callback:
                 progress_callback(f"NAAB公牛号的牛号部分有误,\n以下牛号HO之后的数字超过5位:\n\n{invalid_numbers_str}\n\n（正确案例:123HO12345）\n\n继续处理...")
 
-        # 添加新列：birth_date_dam, mgd, birth_date_mgd
-        print("[DEBUG-16] 添加派生列...")
-        try:
-            # 1. 添加 birth_date_dam
-            print("  - 添加 birth_date_dam 列")
-            # 创建一个映射字典：cow_id -> birth_date
-            cow_birth_date_map = cow_df.set_index('cow_id')['birth_date'].to_dict()
-            cow_df['birth_date_dam'] = cow_df['dam'].map(cow_birth_date_map)
-
-            # 2. 添加 mgd（外祖母）
-            print("  - 添加 mgd 列")
-            # 首先，需要获取母亲的母亲号（即外祖母的 cow_id）
-            # 创建一个映射字典：cow_id -> dam
-            cow_dam_map = cow_df.set_index('cow_id')['dam'].to_dict()
-            cow_df['mgd'] = cow_df['dam'].map(cow_dam_map)
-
-            # 3. 添加 birth_date_mgd
-            print("  - 添加 birth_date_mgd 列")
-            # 通过 mgd（外祖母的 cow_id）映射到 birth_date
-            cow_df['birth_date_mgd'] = cow_df['mgd'].map(cow_birth_date_map)
-
-            # 填充缺失值（如果需要）
-            print("  - 填充缺失值")
-            cow_df['birth_date_dam'] = cow_df['birth_date_dam'].fillna(pd.NaT)
-            cow_df['mgd'] = cow_df['mgd'].fillna('')
-            cow_df['birth_date_mgd'] = cow_df['birth_date_mgd'].fillna(pd.NaT)
-
-            # 对日期列进行格式化（可选）
-            print("  - 格式化日期列")
-            cow_df['birth_date_dam'] = cow_df['birth_date_dam'].dt.strftime('%Y-%m-%d')
-            cow_df['birth_date_mgd'] = cow_df['birth_date_mgd'].dt.strftime('%Y-%m-%d')
-        except Exception as e:
-            import logging
-            print(f"[DEBUG-ERROR] 添加新列时出错: {e}")
-            logging.error(f"添加新列时出错: {e}")
-            # 确保新列存在
-            cow_df['birth_date_dam'] = ""
-            cow_df['mgd'] = ""
-            cow_df['birth_date_mgd'] = ""
+        # 注意：dam相关列（birth_date_dam, mgd, birth_date_mgd）已在前面添加
 
         print("[DEBUG-17] 预处理完成，返回结果DataFrame，行数:", len(cow_df))
         return cow_df
@@ -1249,10 +1307,19 @@ def process_cow_data_file(input_file: Path, project_path: Path, progress_callbac
     
     # 读取文件
     try:
-        # 在读取时指定数据类型
+        # 在读取时指定数据类型，使用原始列名
         print("[DEBUG-FILE-3] 开始读取母牛数据文件...")
         logging.info("开始读取母牛数据文件...")
-        df = pd.read_excel(input_file, dtype={'cow_id': str, 'sire': str, 'mgs': str, 'dam': str, 'mmgs': str})
+        # 使用原始列名来指定dtype，确保前导零不会丢失
+        df = pd.read_excel(input_file, dtype={
+            '耳号': str,
+            '父亲号': str,
+            '母亲号': str,
+            '外祖父': str,
+            '外曾外祖父': str,
+            '祖父': str,
+            '与配冻精编号': str
+        })
         print(f"[DEBUG-FILE-4] 成功读取母牛数据文件，数据形状: {df.shape}")
         logging.info(f"成功读取母牛数据文件，数据形状: {df.shape}")
         logging.info(f"列名: {df.columns.tolist()}")
@@ -1277,13 +1344,33 @@ def process_cow_data_file(input_file: Path, project_path: Path, progress_callbac
         logging.error(traceback.format_exc())
         raise ValueError(f"预处理母牛数据失败: {e}")
 
+    # 保存前格式化日期列（确保日期格式正确）
+    print("[DEBUG-FILE-7] 格式化日期列为Excel格式")
+    date_columns_to_format = ['calving_date', 'birth_date', 'birth_date_dam', 'birth_date_mgd']
+    for col in date_columns_to_format:
+        if col in df_cleaned.columns:
+            # 保持为datetime类型，让pandas处理Excel格式
+            # 只需要确保NaT值被正确处理
+            df_cleaned[col] = pd.to_datetime(df_cleaned[col], errors='coerce')
+
+    # 确保所有ID列保持为字符串类型（保持原始格式）
+    print("[DEBUG-FILE-7.1] 确保ID列保持原始字符串格式")
+    id_columns = ['cow_id', 'dam', 'sire', 'mgs', 'mgd', 'mmgs']
+    for col in id_columns:
+        if col in df_cleaned.columns:
+            # 先转为字符串
+            df_cleaned[col] = df_cleaned[col].astype(str)
+            # 将 'nan' 或空字符串替换回 NaN
+            df_cleaned[col] = df_cleaned[col].replace(['nan', 'None', ''], pd.NA)
+            print(f"  {col}列类型: {df_cleaned[col].dtype}")
+
     # 保存标准化后的文件
     output_file = standardized_path / "processed_cow_data.xlsx"
     try:
-        print(f"[DEBUG-FILE-7] 开始保存标准化后的母牛数据到: {output_file}")
+        print(f"[DEBUG-FILE-8] 开始保存标准化后的母牛数据到: {output_file}")
         logging.info(f"开始保存标准化后的母牛数据到: {output_file}")
         df_cleaned.to_excel(output_file, index=False)
-        print("[DEBUG-FILE-8] 成功保存标准化后的母牛数据")
+        print("[DEBUG-FILE-9] 成功保存标准化后的母牛数据")
         logging.info("成功保存标准化后的母牛数据")
     except Exception as e:
         print(f"[DEBUG-FILE-ERROR] 保存母牛数据文件失败: {e}")
@@ -1298,7 +1385,7 @@ def process_cow_data_file(input_file: Path, project_path: Path, progress_callbac
         logging.error("标准化后的母牛数据文件未生成。")
         raise ValueError("标准化后的母牛数据文件未生成。")
 
-    print(f"[DEBUG-FILE-9] 母牛数据处理完成，输出文件: {output_file}")
+    print(f"[DEBUG-FILE-10] 母牛数据处理完成，输出文件: {output_file}")
     logging.info(f"母牛数据处理完成，输出文件: {output_file}")
     return output_file
 
