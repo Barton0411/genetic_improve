@@ -136,8 +136,7 @@ def get_chinese_font_prop(size=10, weight='normal'):
 from .models import InbreedingDetailModel, AbnormalDetailModel, StatisticsModel
 from gui.progress import ProgressDialog
 from core.data.update_manager import (
-    CLOUD_DB_HOST, CLOUD_DB_PORT, CLOUD_DB_USER,
-    CLOUD_DB_NAME, LOCAL_DB_PATH, get_pedigree_db
+    LOCAL_DB_PATH, get_pedigree_db
 )
 
 # 导入数据API客户端

@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 import re
 from typing import Dict, Set, List, Tuple, Optional
-from sqlalchemy import create_engine, text
+# Removed sqlalchemy dependency - using sqlite3 directly
 import time
 
 # 配置日志
@@ -27,7 +27,8 @@ class PedigreeDatabase:
         """
         self.db_path = db_path
         self.pedigree_cache_path = pedigree_cache_path or db_path.parent / 'pedigree_cache.pkl'
-        self.engine = create_engine(f'sqlite:///{db_path}')
+        # Store the database path instead of engine
+        self.db_connection = None
         
         # 系谱数据结构
         self.pedigree = {}  # 格式: {animal_id: {'sire': sire_id, 'dam': dam_id, 'type': type}}
@@ -128,7 +129,10 @@ class PedigreeDatabase:
         """加载NAAB号到REG号的映射"""
         try:
             query = "SELECT `BULL NAAB`, `BULL REG` FROM bull_library WHERE `BULL NAAB` IS NOT NULL AND `BULL REG` IS NOT NULL"
-            df = pd.read_sql(query, self.engine)
+            # Use sqlite3 directly
+            conn = sqlite3.connect(self.db_path)
+            df = pd.read_sql(query, conn)
+            conn.close()
             
             # 构建映射字典
             mapping = {}
@@ -202,7 +206,10 @@ class PedigreeDatabase:
             WHERE `BULL REG` IS NOT NULL
             """
             
-            df = pd.read_sql(query, self.engine)
+            # Use sqlite3 directly
+            conn = sqlite3.connect(self.db_path)
+            df = pd.read_sql(query, conn)
+            conn.close()
             
             total_bulls = len(df)
             logging.info(f"从数据库加载了{total_bulls}头公牛记录")

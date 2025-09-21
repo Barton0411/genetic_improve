@@ -7,17 +7,10 @@ import time
 import datetime
 import pandas as pd
 import numpy as np
-from sqlalchemy import create_engine, text
+# Removed sqlalchemy dependency
 from PyQt6.QtWidgets import QMainWindow
 
-from core.data.update_manager import (
-    LOCAL_DB_PATH,
-    CLOUD_DB_USER,
-    CLOUD_DB_PASSWORD,
-    CLOUD_DB_HOST,
-    CLOUD_DB_PORT,
-    CLOUD_DB_NAME
-)
+from core.data.update_manager import LOCAL_DB_PATH
 from core.data.uploader import (
     upload_and_standardize_cow_data,
     upload_and_standardize_genomic_data

@@ -5,13 +5,10 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QThread  # 修改这行，添加 QThread
 import pandas as pd
-from sqlalchemy import create_engine, text
+# Removed sqlalchemy dependency
 import datetime
 from core.breeding_calc.traits_calculation import TraitsCalculation
-from core.data.update_manager import (
-    CLOUD_DB_HOST, CLOUD_DB_PORT, CLOUD_DB_USER, 
-    CLOUD_DB_PASSWORD, CLOUD_DB_NAME, LOCAL_DB_PATH
-)
+from core.data.update_manager import LOCAL_DB_PATH
 from PyQt6.QtWidgets import QMainWindow  # 添加这行
 import numpy as np
 from pathlib import Path
