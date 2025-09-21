@@ -74,8 +74,13 @@ def upload_and_standardize_breeding_data(input_files: list[Path], project_path: 
 
     # 固定文件名为 'breeding_records.xlsx'
     target_file = raw_data_path / "breeding_records.xlsx"
-    shutil.copy2(source_file, target_file)
-    logging.info(f"已上传并重命名配种记录文件至: {target_file}")
+
+    # 检查源文件和目标文件是否相同
+    if source_file.resolve() == target_file.resolve():
+        logging.info(f"源文件已在目标位置，跳过复制: {target_file}")
+    else:
+        shutil.copy2(source_file, target_file)
+        logging.info(f"已上传并重命名配种记录文件至: {target_file}")
     print(f"[DEBUG-BREEDING-UPLOAD-5] 已上传配种记录文件至: {target_file}")
 
     # 处理配种记录，传入母牛数据用于父号匹配
@@ -193,17 +198,24 @@ def upload_and_standardize_cow_data(input_files: list[Path], project_path: Path,
 
     # 固定文件名为 'cow_data.xlsx'
     target_file = raw_data_path / "cow_data.xlsx"
-    try:
-        print(f"[DEBUG-UPLOAD-10] 开始复制文件: {source_file} -> {target_file}")
-        import shutil
-        shutil.copy2(source_file, target_file)
-        print(f"[DEBUG-UPLOAD-11] 已上传并重命名母牛数据文件至: {target_file}")
-        logging.info(f"已上传并重命名母牛数据文件至: {target_file}")
-    except Exception as e:
-        error_msg = f"复制文件时出错: {e}"
-        print(f"[DEBUG-UPLOAD-ERROR] {error_msg}")
-        logging.error(error_msg)
-        raise ValueError(error_msg)
+
+    # 检查源文件和目标文件是否相同
+    import os
+    if source_file.resolve() == target_file.resolve():
+        print(f"[DEBUG-UPLOAD-10] 源文件已在目标位置，跳过复制: {target_file}")
+        logging.info(f"源文件已在目标位置，跳过复制: {target_file}")
+    else:
+        try:
+            print(f"[DEBUG-UPLOAD-10] 开始复制文件: {source_file} -> {target_file}")
+            import shutil
+            shutil.copy2(source_file, target_file)
+            print(f"[DEBUG-UPLOAD-11] 已上传并重命名母牛数据文件至: {target_file}")
+            logging.info(f"已上传并重命名母牛数据文件至: {target_file}")
+        except Exception as e:
+            error_msg = f"复制文件时出错: {e}"
+            print(f"[DEBUG-UPLOAD-ERROR] {error_msg}")
+            logging.error(error_msg)
+            raise ValueError(error_msg)
 
     # 处理母牛数据
     try:
@@ -375,8 +387,13 @@ def upload_and_standardize_bull_data(input_files: list[Path], project_path: Path
 
     # 固定文件名为 'bull_data.xlsx'
     target_file = raw_data_path / "bull_data.xlsx"
-    shutil.copy2(source_file, target_file)
-    logging.info(f"已上传并重命名公牛数据文件至: {target_file}")
+
+    # 检查源文件和目标文件是否相同
+    if source_file.resolve() == target_file.resolve():
+        logging.info(f"源文件已在目标位置，跳过复制: {target_file}")
+    else:
+        shutil.copy2(source_file, target_file)
+        logging.info(f"已上传并重命名公牛数据文件至: {target_file}")
 
     # 处理公牛数据
     final_path = process_bull_data_file(
@@ -427,8 +444,13 @@ def upload_and_standardize_body_data(input_files: list[Path], project_path: Path
 
     # 固定文件名为 'body_conformation.xlsx'
     target_file = raw_data_path / "body_conformation.xlsx"
-    shutil.copy2(source_file, target_file)
-    logging.info(f"已上传并重命名体型外貌数据文件至: {target_file}")
+
+    # 检查源文件和目标文件是否相同
+    if source_file.resolve() == target_file.resolve():
+        logging.info(f"源文件已在目标位置，跳过复制: {target_file}")
+    else:
+        shutil.copy2(source_file, target_file)
+        logging.info(f"已上传并重命名体型外貌数据文件至: {target_file}")
 
     # 处理体型外貌数据
     final_path = process_body_conformation_file(
@@ -476,8 +498,13 @@ def upload_and_standardize_genomic_data(input_files: list[Path], project_path: P
         # 创建带有序号的文件名，例如 genomic_data_1.xlsx
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
         target_file = raw_data_path / f"genomic_data_{timestamp}_{idx}{source_file.suffix}"
-        shutil.copy2(source_file, target_file)
-        logging.info(f"已上传并重命名基因组检测数据文件至: {target_file}")
+
+        # 检查源文件和目标文件是否相同
+        if source_file.resolve() == target_file.resolve():
+            logging.info(f"源文件已在目标位置，跳过复制: {target_file}")
+        else:
+            shutil.copy2(source_file, target_file)
+            logging.info(f"已上传并重命名基因组检测数据文件至: {target_file}")
         renamed_files.append(target_file)
 
     # 创建一个包装函数来同时处理进度和消息

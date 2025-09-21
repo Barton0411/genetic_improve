@@ -8,6 +8,8 @@ from typing import Tuple, Optional
 from sqlalchemy import create_engine, text
 from PyQt6.QtWidgets import QMessageBox
 from sklearn.linear_model import LinearRegression
+from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill
 
 from .base_calculation import BaseCowCalculation
 
@@ -16,6 +18,7 @@ class TraitsCalculation(BaseCowCalculation):
         super().__init__()
         self.output_prefix = "processed_cow_data_key_traits"
         self.required_columns = ['cow_id', 'birth_date', 'birth_date_dam', 'birth_date_mgd']
+        self.yearly_filename = "sire_traits_mean_by_cow_birth_year.xlsx"  # 新的年度数据文件名
 
     def process_data(self, main_window, selected_traits: list, progress_callback=None, task_info_callback=None) -> Tuple[bool, str]:
         """执行关键性状计算的核心逻辑"""
@@ -83,10 +86,11 @@ class TraitsCalculation(BaseCowCalculation):
                 if progress_callback and i % 10 == 0:  # 每10个公牛更新一次进度
                     current_progress = 25 + int((i / total_bulls) * 20)
                     progress_callback(current_progress, f"正在处理公牛 {i}/{total_bulls}: {bull_id}")
-                    
+
                 traits_data = self.get_bull_traits(bull_id, selected_traits)
                 if traits_data:
-                    bull_traits[bull_id] = traits_data
+                    # 确保键是字符串类型，以便后续匹配
+                    bull_traits[str(bull_id)] = traits_data
 
             if progress_callback:
                 progress_callback(45, f"公牛性状数据处理完成，获取到 {len(bull_traits)} 个公牛的性状数据")
@@ -101,79 +105,113 @@ class TraitsCalculation(BaseCowCalculation):
             for col in ['sire', 'mgs', 'mmgs']:
                 for trait in selected_traits:
                     trait_col = f'{col}_{trait}'
-                    cow_df[trait_col] = cow_df[col].map(lambda x: bull_traits.get(x, {}).get(trait))
+                    # 确保类型匹配，将x转为字符串再查询
+                    cow_df[trait_col] = cow_df[col].map(lambda x: bull_traits.get(str(x), {}).get(trait) if pd.notna(x) else None)
                     identified_count = cow_df[trait_col].notna().sum()
                     print(f"{trait_col}: 找到 {identified_count} 条记录")
+
+                # 更新 identified 标记：如果公牛在 bull_traits 中找到，则标记为 True
+                cow_df[f"{col}_identified"] = cow_df[col].apply(
+                    lambda x: str(x) in bull_traits if pd.notna(x) else False
+                )
+                identified_bull_count = cow_df[f"{col}_identified"].sum()
+                print(f"{col}_identified: 标记了 {identified_bull_count} 头公牛被找到")
 
             if progress_callback:
                 progress_callback(60, "母牛数据中的公牛性状更新完成")
 
-            # 5. 保存详细结果
-            print("5. 保存详细计算结果...")
+            # 5. 先处理年度数据（需要先计算年度数据，用于填充预估值）
+            print("5. 处理年度数据...")
+            if task_info_callback:
+                task_info_callback("处理年度数据")
+            if progress_callback:
+                progress_callback(65, "正在处理年度数据...")
+
+            output_dir = project_path / "analysis_results"
+            output_dir.mkdir(exist_ok=True)
+            yearly_output_path = output_dir / self.yearly_filename
+
+            # 先临时保存一份未填充的数据用于计算年度数据
+            temp_detail_path = output_dir / "temp_detail.xlsx"
+            cow_df.to_excel(temp_detail_path, index=False)
+
+            if not self.process_yearly_data(temp_detail_path, yearly_output_path, selected_traits):
+                return False, "处理年度数据失败"
+
+            # 删除临时文件
+            temp_detail_path.unlink(missing_ok=True)
+
+            # 6. 填充预估值
+            print("6. 填充缺失公牛的预估值...")
+            if task_info_callback:
+                task_info_callback("填充缺失公牛预估值")
+            if progress_callback:
+                progress_callback(70, "正在填充缺失公牛的预估值...")
+
+            cow_df = self.fill_estimated_values(cow_df, yearly_output_path, selected_traits)
+
+            # 7. 保存详细结果（带格式）
+            print("7. 保存详细计算结果...")
             if task_info_callback:
                 task_info_callback("保存详细计算结果")
             if progress_callback:
-                progress_callback(65, "正在保存详细计算结果...")
-                
-            output_dir = project_path / "analysis_results"
-            output_dir.mkdir(exist_ok=True)
+                progress_callback(75, "正在保存详细计算结果...")
+
             detail_output_path = output_dir / f"{self.output_prefix}_detail.xlsx"
-            if not self.save_results_with_retry(cow_df, detail_output_path):
+            if not self.save_results_with_retry(cow_df, detail_output_path, apply_formatting=True):
                 return False, "保存详细结果失败"
 
             if progress_callback:
                 progress_callback(70, f"详细结果已保存到: {detail_output_path.name}")
 
-            # 6. 处理年度数据
-            print("6. 处理年度数据...")
-            if task_info_callback:
-                task_info_callback("处理年度数据")
             if progress_callback:
-                progress_callback(75, "正在处理年度数据...")
-                
-            yearly_output_path = output_dir / f"{self.output_prefix}_mean_by_year.xlsx"
-            if not self.process_yearly_data(detail_output_path, yearly_output_path, selected_traits):
-                return False, "处理年度数据失败"
+                progress_callback(80, f"详细结果已保存到: {detail_output_path.name}")
 
-            if progress_callback:
-                progress_callback(80, f"年度数据处理完成，保存到: {yearly_output_path.name}")
-
-            # 7. 计算性状得分
-            print("7. 计算性状得分...")
+            # 8. 计算性状得分
+            print("8. 计算性状得分...")
             if task_info_callback:
                 task_info_callback("计算性状得分")
             if progress_callback:
                 progress_callback(85, "正在计算性状得分...")
                 
             pedigree_output_path = output_dir / f"{self.output_prefix}_scores_pedigree.xlsx"
-            if not self.calculate_trait_scores(detail_output_path, yearly_output_path, pedigree_output_path):
+            if not self.calculate_trait_scores(detail_output_path, yearly_output_path, pedigree_output_path, apply_formatting=True):
                 return False, "计算性状得分失败"
 
             if progress_callback:
                 progress_callback(90, f"性状得分计算完成，保存到: {pedigree_output_path.name}")
 
-            # 8. 检查并处理基因组数据
-            print("8. 检查基因组数据...")
+            # 9. 检查并处理基因组数据
+            print("9. 检查基因组数据...")
             if task_info_callback:
                 task_info_callback("检查并处理基因组数据")
             if progress_callback:
                 progress_callback(95, "正在检查基因组数据...")
                 
             genomic_data_path = project_path / "standardized_data" / "processed_genomic_data.xlsx"
+            genomic_output_path = output_dir / f"{self.output_prefix}_scores_genomic.xlsx"
+
             if genomic_data_path.exists():
                 print("发现基因组数据，开始更新...")
                 if progress_callback:
                     progress_callback(97, "发现基因组数据，正在更新...")
-                genomic_output_path = output_dir / f"{self.output_prefix}_scores_genomic.xlsx"
-                if not self.update_genomic_data(pedigree_output_path, genomic_data_path, genomic_output_path):
+                if not self.update_genomic_data(pedigree_output_path, genomic_data_path, genomic_output_path, apply_formatting=True):
                     return False, "更新基因组数据失败"
                 print("基因组数据更新完成")
                 if progress_callback:
                     progress_callback(99, f"基因组数据更新完成，保存到: {genomic_output_path.name}")
             else:
-                print("未找到基因组数据文件，跳过基因组数据更新")
+                print("未找到基因组数据文件，创建基于系谱的基因组文件...")
                 if progress_callback:
-                    progress_callback(99, "未找到基因组数据文件，跳过基因组数据更新")
+                    progress_callback(97, "未找到基因组数据，创建占位文件...")
+
+                # 即使没有基因组数据，也创建genomic文件（内容与pedigree相同）
+                if not self.create_genomic_placeholder(pedigree_output_path, genomic_output_path, apply_formatting=True):
+                    return False, "创建基因组占位文件失败"
+
+                print("基因组占位文件已创建")
+                if progress_callback:
+                    progress_callback(99, f"基因组文件已创建（仅系谱数据）: {genomic_output_path.name}")
 
             if progress_callback:
                 progress_callback(100, "所有计算步骤已完成！")
@@ -223,25 +261,39 @@ class TraitsCalculation(BaseCowCalculation):
             results = {}
             for trait in selected_traits:
                 trait_col = f'sire_{trait}'
-                
+
                 if trait_col not in df.columns:
                     # 使用默认值
                     all_years = pd.DataFrame({'birth_year': range(min_year, max_year + 1)})
                     all_years['mean'] = default_values[trait]
                     all_years['interpolated'] = True
                 else:
-                    # 计算年度均值
-                    yearly_means = df.groupby('birth_year').agg({
-                        trait_col: ['count', 'mean']
-                    }).reset_index()
-                    yearly_means.columns = ['birth_year', 'count', 'mean']
-                    
-                    # 处理数据
-                    valid_years = yearly_means[yearly_means['count'] >= 10]
-                    all_years = self.process_trait_yearly_data(
-                        valid_years, min_year, max_year, default_values[trait]
-                    )
-                
+                    # 仅使用 sire_identified 为 True 的记录来计算年度平均值
+                    if 'sire_identified' in df.columns:
+                        df_identified = df[df['sire_identified'] == True]
+                        print(f"处理性状 {trait}: 总记录 {len(df)} 条，其中 identified {len(df_identified)} 条")
+                    else:
+                        # 如果没有 identified 列，使用有数据的记录
+                        df_identified = df[df[trait_col].notna()]
+                        print(f"处理性状 {trait}: 使用有数据的记录 {len(df_identified)} 条")
+
+                    if len(df_identified) == 0:
+                        # 如果没有 identified 记录，使用默认值
+                        all_years = pd.DataFrame({'birth_year': range(min_year, max_year + 1)})
+                        all_years['mean'] = default_values[trait]
+                        all_years['interpolated'] = True
+                    else:
+                        # 计算年度均值（仅使用 identified 记录）
+                        yearly_means = df_identified.groupby('birth_year').agg({
+                            trait_col: ['count', 'mean']
+                        }).reset_index()
+                        yearly_means.columns = ['birth_year', 'count', 'mean']
+
+                        # 处理数据：传递所有年度数据，让process_trait_yearly_data决定哪些需要插值
+                        all_years = self.process_trait_yearly_data(
+                            yearly_means, min_year, max_year, default_values[trait]
+                        )
+
                 results[trait] = all_years
             
             # 保存结果
@@ -253,43 +305,80 @@ class TraitsCalculation(BaseCowCalculation):
             print(f"详细错误信息: {traceback.format_exc()}")
             return False
 
-    def process_trait_yearly_data(self, valid_years: pd.DataFrame, min_year: int, 
+    def process_trait_yearly_data(self, yearly_data: pd.DataFrame, min_year: int,
                                 max_year: int, default_value: float) -> pd.DataFrame:
-        """处理单个性状的年度数据"""
+        """处理单个性状的年度数据
+
+        Args:
+            yearly_data: 包含birth_year, count, mean列的DataFrame
+            min_year: 最小年份
+            max_year: 最大年份
+            default_value: 默认值
+
+        Returns:
+            包含所有年份数据的DataFrame，保留实际值，仅对缺失或样本量<10的年份插值
+        """
+        # 创建完整年份范围的DataFrame
+        all_years = pd.DataFrame({'birth_year': range(min_year, max_year + 1)})
+        all_years['count'] = 0
+        all_years['mean'] = np.nan
+        all_years['interpolated'] = False
+
+        # 填充实际数据
+        for _, row in yearly_data.iterrows():
+            year_idx = all_years[all_years['birth_year'] == row['birth_year']].index
+            if len(year_idx) > 0:
+                all_years.loc[year_idx[0], 'count'] = row['count']
+                all_years.loc[year_idx[0], 'mean'] = row['mean']
+
+        # 找出需要插值的年份（没有数据或样本量<10）
+        needs_interpolation = (all_years['count'] < 10) | all_years['mean'].isna()
+
+        # 找出有效的年份（样本量>=10）
+        valid_years = all_years[all_years['count'] >= 10].copy()
+
         if len(valid_years) > 1:
-            # 有多个有效年份，进行回归
+            # 有多个有效年份，使用线性回归进行插值
             X = valid_years['birth_year'].values.reshape(-1, 1)
             y = valid_years['mean'].values
             reg = LinearRegression().fit(X, y)
-            
-            all_years = pd.DataFrame({'birth_year': range(min_year, max_year + 1)})
-            all_years['mean'] = reg.predict(all_years['birth_year'].values.reshape(-1, 1))
-            all_years['interpolated'] = ~all_years['birth_year'].isin(valid_years['birth_year'])
-            
+
+            # 仅对需要插值的年份应用回归模型
+            for idx in all_years[needs_interpolation].index:
+                year = all_years.loc[idx, 'birth_year']
+                all_years.loc[idx, 'mean'] = reg.predict([[year]])[0]
+                all_years.loc[idx, 'interpolated'] = True
+
         elif len(valid_years) == 1:
-            # 只有一个有效年份
+            # 只有一个有效年份，使用简单插值
             valid_year = valid_years['birth_year'].iloc[0]
             valid_mean = valid_years['mean'].iloc[0]
-            
-            all_years = pd.DataFrame({'birth_year': range(min_year, max_year + 1)})
+
+            # 计算斜率
             if valid_year == min_year:
-                slope = default_value - valid_mean
+                slope = (default_value - valid_mean) / max(1, max_year - min_year)
+            elif valid_year == max_year:
+                slope = (valid_mean - default_value) / max(1, max_year - min_year)
             else:
-                slope = (valid_mean - default_value) / (valid_year - min_year)
-            
-            all_years['mean'] = all_years['birth_year'].apply(
-                lambda x: valid_mean + slope * (x - valid_year) if x > valid_year
-                else np.interp(x, [min_year, valid_year], [default_value, valid_mean])
-            )
-            all_years['interpolated'] = ~all_years['birth_year'].isin([valid_year])
-            
+                # 中间年份，向两边延伸
+                slope = (default_value - valid_mean) / max(abs(valid_year - min_year), abs(max_year - valid_year))
+
+            # 仅对需要插值的年份应用
+            for idx in all_years[needs_interpolation].index:
+                year = all_years.loc[idx, 'birth_year']
+                if year < valid_year:
+                    all_years.loc[idx, 'mean'] = np.interp(year, [min_year, valid_year], [default_value, valid_mean])
+                else:
+                    all_years.loc[idx, 'mean'] = valid_mean + slope * (year - valid_year)
+                all_years.loc[idx, 'interpolated'] = True
+
         else:
-            # 没有有效年份
-            all_years = pd.DataFrame({'birth_year': range(min_year, max_year + 1)})
-            all_years['mean'] = default_value
-            all_years['interpolated'] = True
-            
-        return all_years
+            # 没有有效年份（所有样本量都<10），所有年份使用默认值
+            all_years.loc[needs_interpolation, 'mean'] = default_value
+            all_years.loc[needs_interpolation, 'interpolated'] = True
+
+        # 保留count列用于显示数据质量
+        return all_years[['birth_year', 'mean', 'count', 'interpolated']]
 
     def get_default_values(self, selected_traits: list) -> dict:
         """获取默认值（从999HO99999）"""
@@ -324,8 +413,8 @@ class TraitsCalculation(BaseCowCalculation):
             print(f"保存年度结果失败: {e}")
             return False
 
-    def calculate_trait_scores(self, detail_path: Path, yearly_path: Path, 
-                             output_path: Path) -> bool:
+    def calculate_trait_scores(self, detail_path: Path, yearly_path: Path,
+                             output_path: Path, apply_formatting: bool = False) -> bool:
         """计算性状得分"""
         try:
             df = pd.read_excel(detail_path)
@@ -357,14 +446,36 @@ class TraitsCalculation(BaseCowCalculation):
                 'default': 0.125
             }
             
-            # 计算得分
+            # 计算得分并保留source信息
             for trait in yearly_data.keys():
                 score_column = f'{trait}_score'
                 df[score_column] = self.calculate_single_trait_score(
                     df, trait, yearly_data[trait], default_values[trait], weights
                 )
+
+                # 复制source列（如果存在）
+                for bull_type in ['sire', 'mgs', 'mmgs']:
+                    source_col = f'{bull_type}_{trait}_source'
+                    if source_col not in df.columns:
+                        # 如果source列不存在，根据是否有值来判断
+                        trait_col = f'{bull_type}_{trait}'
+                        if trait_col in df.columns:
+                            # 确定年份列
+                            if bull_type == 'sire':
+                                year_col = 'birth_year'
+                            elif bull_type == 'mgs':
+                                year_col = 'dam_birth_year'
+                            else:
+                                year_col = 'mgd_birth_year'
+
+                            # 根据数据情况设置source值
+                            df[source_col] = df.apply(
+                                lambda row: 1 if pd.notna(row[trait_col]) else
+                                           (2 if year_col in df.columns and pd.notna(row.get(year_col)) else 3),
+                                axis=1
+                            )
             
-            return self.save_results_with_retry(df, output_path)
+            return self.save_results_with_retry(df, output_path, apply_formatting=apply_formatting)
             
         except Exception as e:
             print(f"计算性状得分失败: {e}")
@@ -399,33 +510,27 @@ class TraitsCalculation(BaseCowCalculation):
         
         return trait_score
 
-    def calculate_bull_contribution(self, df: pd.DataFrame, trait_col: str, 
-                                  year_col: str, yearly_data: pd.DataFrame, 
+    def calculate_bull_contribution(self, df: pd.DataFrame, trait_col: str,
+                                  year_col: str, yearly_data: pd.DataFrame,
                                   default_value: float, weight: float) -> pd.Series:
-        """计算单个公牛的贡献"""
+        """计算单个公牛的贡献
+
+        注意：此方法假设数据已经通过fill_estimated_values填充了所有缺失值，
+        所以可以直接使用trait_col中的值进行计算。
+        """
         contribution = pd.Series(0.0, index=df.index)
-        
-        mask = pd.isna(df[trait_col])
-        if year_col in df.columns:
-            mask_with_year = mask & pd.notna(df[year_col])
-            years = df.loc[mask_with_year, year_col].astype(int)
-            valid_years = years[years.isin(yearly_data.index)]
-            
-            contribution.loc[valid_years.index] = (
-                weight * yearly_data.loc[valid_years, 'mean'].values
-            )
-            
-            # 对于有年份但无对应年度数据的情况使用默认值
-            contribution.loc[mask] = weight * default_value
+
+        # 检查trait_col是否存在
+        if trait_col not in df.columns:
+            # 如果列不存在，使用默认值（这种情况应该很少发生）
+            contribution[:] = weight * default_value
         else:
-            contribution.loc[mask] = weight * default_value
-        
-        # 对于有性状值的情况直接使用实际值
-        contribution.loc[~mask] = weight * df.loc[~mask, trait_col]
-        
+            # 直接使用列中的值（已包含真实值和预估值）
+            contribution = weight * df[trait_col].fillna(default_value)
+
         return contribution
 
-    def update_genomic_data(self, pedigree_path: Path, genomic_path: Path, output_path: Path) -> bool:
+    def update_genomic_data(self, pedigree_path: Path, genomic_path: Path, output_path: Path, apply_formatting: bool = False) -> bool:
         """用基因组数据更新关键性状得分"""
         try:
             # 1. 读取系谱数据文件
@@ -499,15 +604,7 @@ class TraitsCalculation(BaseCowCalculation):
             )
             
             # 6. 保存结果
-            try:
-                df_pedigree.to_excel(output_path, index=False)
-                return True
-            except PermissionError:
-                print(f"文件 {output_path} 被占用")
-                return False
-            except Exception as e:
-                print(f"保存基因组数据更新结果失败: {e}")
-                return False
+            return self.save_results_with_retry(df_pedigree, output_path, apply_formatting=apply_formatting)
                 
         except Exception as e:
             print(f"更新基因组数据时发生错误: {e}")
@@ -552,4 +649,196 @@ class TraitsCalculation(BaseCowCalculation):
                 
         except Exception as e:
             print(f"获取公牛 {bull_id} 的性状数据时发生错误: {e}")
-            return None      
+            return None
+
+    def create_genomic_placeholder(self, pedigree_path: Path, output_path: Path, apply_formatting: bool = False) -> bool:
+        """当没有基因组数据时，创建基因组占位文件
+
+        Args:
+            pedigree_path: 系谱数据文件路径
+            output_path: 输出文件路径
+            apply_formatting: 是否应用格式化
+
+        Returns:
+            bool: 是否成功创建
+        """
+        try:
+            # 读取系谱数据
+            df_pedigree = pd.read_excel(pedigree_path)
+
+            # 如果没有source列，添加它们
+            score_columns = [col for col in df_pedigree.columns if col.endswith('_score')]
+            for col in score_columns:
+                source_col = f"{col}_source"
+                if source_col not in df_pedigree.columns:
+                    df_pedigree[source_col] = "P"  # 全部标记为系谱来源
+
+            # 添加或更新基因组性状计数列（没有基因组数据，所以都是0）
+            df_pedigree['genomic_traits_count'] = 0
+
+            # 保存结果
+            return self.save_results_with_retry(df_pedigree, output_path, apply_formatting=apply_formatting)
+
+        except Exception as e:
+            print(f"创建基因组占位文件时发生错误: {e}")
+            return False
+
+    def fill_estimated_values(self, cow_df, yearly_data_path, selected_traits):
+        """填充缺失公牛的预估值"""
+        try:
+            # 首先确保年份列存在
+            if 'birth_year' not in cow_df.columns and 'birth_date' in cow_df.columns:
+                cow_df['birth_year'] = pd.to_datetime(cow_df['birth_date'], errors='coerce').dt.year
+
+            if 'dam_birth_year' not in cow_df.columns and 'birth_date_dam' in cow_df.columns:
+                cow_df['dam_birth_year'] = pd.to_datetime(cow_df['birth_date_dam'], errors='coerce').dt.year
+
+            if 'mgd_birth_year' not in cow_df.columns and 'birth_date_mgd' in cow_df.columns:
+                cow_df['mgd_birth_year'] = pd.to_datetime(cow_df['birth_date_mgd'], errors='coerce').dt.year
+
+            # 读取年度数据
+            yearly_data_dict = {}
+            with pd.ExcelFile(yearly_data_path) as xlsx:
+                for trait in selected_traits:
+                    if trait in xlsx.sheet_names:
+                        yearly_data_dict[trait] = pd.read_excel(xlsx, sheet_name=trait, index_col='birth_year')
+
+            # 获取默认值（999HO99999的值）
+            default_values = self.get_default_values(selected_traits)
+
+            # 为每个公牛类型和性状创建标记列
+            bull_types = ['sire', 'mgs', 'mmgs']
+
+            for bull_type in bull_types:
+                # 确定使用哪个年份列
+                if bull_type == 'sire':
+                    year_col = 'birth_year'
+                elif bull_type == 'mgs':
+                    year_col = 'dam_birth_year'
+                else:  # mmgs
+                    year_col = 'mgd_birth_year'
+
+                # 获取identified列
+                identified_col = f'{bull_type}_identified'
+
+                for trait in selected_traits:
+                    trait_col = f'{bull_type}_{trait}'
+                    source_col = f'{bull_type}_{trait}_source'
+
+                    # 初始化source列，默认为1（真实数据）
+                    cow_df[source_col] = 1
+
+                    # 处理未识别的公牛
+                    if identified_col in cow_df.columns:
+                        unidentified_mask = cow_df[identified_col] == False
+
+                        for idx in cow_df[unidentified_mask].index:
+                            # 检查是否有对应的年份数据
+                            if pd.notna(cow_df.loc[idx, year_col]) and trait in yearly_data_dict:
+                                year = int(cow_df.loc[idx, year_col])
+                                if year in yearly_data_dict[trait].index:
+                                    # 使用年份预估值
+                                    cow_df.loc[idx, trait_col] = yearly_data_dict[trait].loc[year, 'mean']
+                                    cow_df.loc[idx, source_col] = 2  # 年份预估
+                                else:
+                                    # 使用默认值
+                                    cow_df.loc[idx, trait_col] = default_values[trait]
+                                    cow_df.loc[idx, source_col] = 3  # 默认预估
+                            else:
+                                # 没有年份信息，使用默认值
+                                cow_df.loc[idx, trait_col] = default_values[trait]
+                                cow_df.loc[idx, source_col] = 3  # 默认预估
+
+            return cow_df
+
+        except Exception as e:
+            print(f"填充预估值时发生错误: {e}")
+            return cow_df
+
+    def save_with_formatting(self, df, output_path):
+        """保存Excel文件并应用格式化（红色字体和黑底黄字）"""
+        try:
+            # 先保存基础数据
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Sheet1')
+                workbook = writer.book
+                worksheet = writer.sheets['Sheet1']
+
+                # 定义格式
+                red_font = Font(color="FF0000")  # 红色
+                yellow_font = Font(color="FFFF00")  # 亮黄色
+                gray_fill = PatternFill(start_color="808080", end_color="808080", fill_type="solid")  # 深灰色背景
+
+                # 获取列索引映射
+                col_map = {col: idx + 1 for idx, col in enumerate(df.columns)}
+
+                # 遍历所有数据行应用格式
+                for row_idx in range(len(df)):
+                    for col_name in df.columns:
+                        # 检查是否是需要格式化的列
+                        if '_source' in col_name:
+                            continue  # 跳过source列本身
+
+                        # 获取对应的source列名
+                        source_col = None
+                        for prefix in ['sire_', 'mgs_', 'mmgs_']:
+                            if col_name.startswith(prefix) and not col_name.endswith('_identified'):
+                                source_col = col_name + '_source'
+                                break
+
+                        if source_col and source_col in df.columns:
+                            source_value = df.iloc[row_idx][source_col]
+                            cell = worksheet.cell(row=row_idx + 2, column=col_map[col_name])  # +2因为有标题行
+
+                            if source_value == 2:
+                                # 年份预估值 - 红色字体
+                                cell.font = red_font
+                            elif source_value == 3:
+                                # 默认预估值 - 灰底黄字
+                                cell.font = yellow_font
+                                cell.fill = gray_fill
+
+            print(f"文件已保存并格式化: {output_path}")
+            return True
+
+        except Exception as e:
+            print(f"保存格式化文件时发生错误: {e}")
+            return False
+
+    def save_results_with_retry(self, df: pd.DataFrame, output_path: Path, apply_formatting: bool = False) -> bool:
+        """
+        保存结果，如果文件被占用则提供重试选项
+
+        Args:
+            df: 要保存的数据
+            output_path: 保存路径
+            apply_formatting: 是否应用格式化（颜色标记）
+
+        Returns:
+            bool: 是否保存成功
+        """
+        while True:
+            try:
+                if apply_formatting and any(col.endswith('_source') for col in df.columns):
+                    # 使用save_with_formatting应用格式
+                    return self.save_with_formatting(df, output_path)
+                else:
+                    df.to_excel(output_path, index=False)
+                    return True
+            except PermissionError:
+                from PyQt6.QtWidgets import QMessageBox
+                reply = QMessageBox.question(
+                    None,
+                    "文件被占用",
+                    f"文件 {output_path.name} 正在被其他程序使用。\n"
+                    "请关闭该文件后点击'重试'继续，或点击'取消'停止操作。",
+                    QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Retry
+                )
+
+                if reply == QMessageBox.StandardButton.Cancel:
+                    print(f"用户取消了保存操作: {output_path}")
+                    return False
+            except Exception as e:
+                print(f"保存文件失败: {e}")
+                return False      

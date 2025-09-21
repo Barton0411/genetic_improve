@@ -6,6 +6,8 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Optional
 from sqlalchemy import create_engine, text
+from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill
 
 from core.breeding_calc.traits_calculation import TraitsCalculation
 
@@ -268,9 +270,9 @@ class IndexCalculation(BaseCowCalculation):
             df = df.sort_values(f'{weight_name}_index', ascending=False)
             df['ranking'] = range(1, len(df) + 1)
 
-            # 6. 保存结果
+            # 6. 保存结果（应用格式化）
             output_path = project_path / "analysis_results" / f"{self.output_prefix}_cow_index_scores.xlsx"
-            if not self.save_results_with_retry(df, output_path):
+            if not self.save_results_with_retry(df, output_path, apply_formatting=True):
                 return False, "保存结果失败"
 
             return True, "计算完成"
@@ -427,5 +429,170 @@ class IndexCalculation(BaseCowCalculation):
         
         existing_traits = [col[:-6] for col in df.columns if col.endswith('_score')]
         missing_traits = [trait for trait in selected_traits if trait not in existing_traits]
-        
-        return df, len(missing_traits) == 0    
+
+        return df, len(missing_traits) == 0
+
+    def save_with_formatting(self, df, output_path):
+        """保存Excel文件并应用格式化（红色字体和灰底黄字）"""
+        try:
+            # 检查是否需要加载detail文件来获取原始source值
+            need_detail = False
+            for col in df.columns:
+                if col.endswith('_score_source'):
+                    # 检查source值是否是P/G格式
+                    sample_val = df[col].iloc[0] if len(df) > 0 else None
+                    if sample_val in ['P', 'G']:
+                        need_detail = True
+                        break
+
+            # 如果需要，加载detail文件
+            original_sources = {}
+            if need_detail:
+                # 尝试找到detail文件
+                detail_path = output_path.parent / "processed_cow_data_key_traits_detail.xlsx"
+                if detail_path.exists():
+                    detail_df = pd.read_excel(detail_path)
+                    # 只保留需要的列
+                    if 'cow_id' in detail_df.columns:
+                        original_sources['cow_id'] = detail_df['cow_id']
+                        for col in detail_df.columns:
+                            if col.endswith('_source') and (col.startswith('sire_') or
+                                                            col.startswith('mgs_') or
+                                                            col.startswith('mmgs_')):
+                                original_sources[col] = detail_df[col]
+
+            # 先保存基础数据
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Sheet1')
+                workbook = writer.book
+                worksheet = writer.sheets['Sheet1']
+
+                # 定义格式
+                red_font = Font(color="FF0000")  # 红色
+                yellow_font = Font(color="FFFF00")  # 亮黄色
+                gray_fill = PatternFill(start_color="808080", end_color="808080", fill_type="solid")  # 深灰色背景
+
+                # 获取列索引映射
+                col_map = {col: idx + 1 for idx, col in enumerate(df.columns)}
+
+                # 如果有原始source数据，创建cow_id到索引的映射
+                cow_id_map = {}
+                if original_sources and 'cow_id' in original_sources:
+                    for idx, cow_id in enumerate(original_sources['cow_id']):
+                        cow_id_map[cow_id] = idx
+
+                # 遍历所有数据行应用格式
+                for row_idx in range(len(df)):
+                    cow_id = df.iloc[row_idx]['cow_id'] if 'cow_id' in df.columns else None
+
+                    for col_name in df.columns:
+                        # 检查是否是需要格式化的列
+                        # 1. _score列（如NM$_score）
+                        # 2. sire_*、mgs_*、mmgs_*列（如sire_NM$）
+                        needs_format = False
+                        trait = None
+                        source_value = None
+
+                        if '_score' in col_name and not col_name.endswith('_source'):
+                            # 处理_score列
+                            needs_format = True
+                            trait = col_name.replace('_score', '')
+
+                            # 如果有原始source数据
+                            if cow_id and cow_id in cow_id_map:
+                                detail_idx = cow_id_map[cow_id]
+                                # 收集所有相关的source值，使用最大值（最差的数据质量）
+                                source_values = []
+                                for prefix in ['sire_', 'mgs_', 'mmgs_']:
+                                    source_col = f'{prefix}{trait}_source'
+                                    if source_col in original_sources:
+                                        val = original_sources[source_col].iloc[detail_idx]
+                                        if pd.notna(val):
+                                            source_values.append(val)
+
+                                # 使用最大的source值（表示最差的数据质量）
+                                if source_values:
+                                    source_value = max(source_values)
+
+                            # 如果没有找到原始source，尝试使用数字source列（如果存在）
+                            if source_value is None:
+                                direct_source_col = col_name + '_source'
+                                if direct_source_col in df.columns:
+                                    val = df.iloc[row_idx][direct_source_col]
+                                    # 如果是数字，直接使用
+                                    if isinstance(val, (int, float)) and not pd.isna(val):
+                                        source_value = val
+
+                        elif (col_name.startswith('sire_') or col_name.startswith('mgs_') or
+                              col_name.startswith('mmgs_')) and not col_name.endswith('_source'):
+                            # 处理sire_*、mgs_*、mmgs_*列
+                            needs_format = True
+                            # 直接查找对应的source列
+                            source_col = col_name + '_source'
+
+                            # 先尝试从当前dataframe中查找
+                            if source_col in df.columns:
+                                source_value = df.iloc[row_idx][source_col]
+                            # 如果没有，尝试从original_sources中查找
+                            elif cow_id and cow_id in cow_id_map and source_col in original_sources:
+                                detail_idx = cow_id_map[cow_id]
+                                source_value = original_sources[source_col].iloc[detail_idx]
+
+                        # 应用格式
+                        if needs_format and source_value is not None:
+                            if source_value == 2:
+                                # 年份预估值 - 红色字体
+                                cell = worksheet.cell(row=row_idx + 2, column=col_map[col_name])
+                                cell.font = red_font
+                            elif source_value == 3:
+                                # 默认预估值 - 灰底黄字
+                                cell = worksheet.cell(row=row_idx + 2, column=col_map[col_name])
+                                cell.font = yellow_font
+                                cell.fill = gray_fill
+                            # source_value == 1 时不需要格式化（真实数据）
+
+            print(f"文件已保存并格式化: {output_path}")
+            return True
+
+        except Exception as e:
+            print(f"保存格式化文件时发生错误: {e}")
+            return False
+
+    def save_results_with_retry(self, df: pd.DataFrame, output_path: Path, apply_formatting: bool = False) -> bool:
+        """
+        保存结果，如果文件被占用则提供重试选项
+
+        Args:
+            df: 要保存的数据
+            output_path: 保存路径
+            apply_formatting: 是否应用格式化（颜色标记）
+
+        Returns:
+            bool: 是否保存成功
+        """
+        from PyQt6.QtWidgets import QMessageBox
+
+        while True:
+            try:
+                if apply_formatting and any('_source' in col for col in df.columns):
+                    # 使用save_with_formatting应用格式
+                    return self.save_with_formatting(df, output_path)
+                else:
+                    df.to_excel(output_path, index=False)
+                    return True
+            except PermissionError:
+                reply = QMessageBox.question(
+                    None,
+                    "文件被占用",
+                    f"文件 {output_path.name} 正在被其他程序使用。\n"
+                    "请关闭该文件后点击'重试'继续，或点击'取消'停止操作。",
+                    QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Retry
+                )
+
+                if reply == QMessageBox.StandardButton.Cancel:
+                    print(f"用户取消了保存操作: {output_path}")
+                    return False
+            except Exception as e:
+                print(f"保存文件失败: {e}")
+                return False    

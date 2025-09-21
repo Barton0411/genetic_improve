@@ -16,6 +16,7 @@ import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine, text
 import datetime
+from pathlib import Path
 from sklearn.linear_model import LinearRegression
 
 from core.breeding_calc.traits_calculation import TraitsCalculation
@@ -286,11 +287,80 @@ class KeyTraitsPage(QWidget):
             parent = parent.parent()
         return parent
 
-    def save_results_with_retry(self, df, output_path):
-        """尝试保存结果，如果文件被占用提示用户并重试"""
+    def save_with_formatting(self, df, output_path):
+        """保存Excel文件并应用格式化
+
+        Args:
+            df: DataFrame
+            output_path: 输出路径
+        """
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill
+
+        # 创建一个副本，用于移除source列
+        df_to_save = df.copy()
+
+        # 记录source列的信息
+        source_info = {}
+        for bull_type in ['sire', 'mgs', 'mmgs']:
+            source_col = f"{bull_type}_source"
+            if source_col in df_to_save.columns:
+                source_info[bull_type] = df_to_save[source_col].to_list()
+                # 删除source列（用户不需要看到）
+                df_to_save = df_to_save.drop(columns=[source_col])
+
+        # 用pandas写入基础数据
+        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+            df_to_save.to_excel(writer, index=False, sheet_name='Sheet1')
+            workbook = writer.book
+            worksheet = writer.sheets['Sheet1']
+
+            # 查找所有需要格式化的列
+            traits_cols = []
+
+            for col_idx, col_name in enumerate(df_to_save.columns, 1):
+                # 查找性状列
+                for bull_type in ['sire', 'mgs', 'mmgs']:
+                    if col_name.startswith(f"{bull_type}_") and not col_name.endswith('_identified'):
+                        traits_cols.append((col_idx, col_name, bull_type))
+
+            # 应用格式化
+            red_font = Font(color="FF0000")  # 红色字体
+            yellow_font = Font(color="FFFF00")  # 亮黄色字体
+            black_fill = PatternFill(start_color="000000", end_color="000000", fill_type="solid")  # 黑色背景
+
+            # 遍历数据行（从第2行开始，第1行是标题）
+            for row_idx in range(2, len(df_to_save) + 2):
+                data_idx = row_idx - 2  # DataFrame中的索引
+
+                for col_idx, col_name, bull_type in traits_cols:
+                    if bull_type in source_info and data_idx < len(source_info[bull_type]):
+                        source_value = source_info[bull_type][data_idx]
+                        cell = worksheet.cell(row=row_idx, column=col_idx)
+
+                        if source_value == 2:
+                            # 年份预估值 - 红色字体
+                            cell.font = red_font
+                        elif source_value == 3:
+                            # 默认值 - 黑底黄字
+                            cell.font = yellow_font
+                            cell.fill = black_fill
+
+    def save_results_with_retry(self, df, output_path, apply_formatting=True):
+        """尝试保存结果，如果文件被占用提示用户并重试
+
+        Args:
+            df: 要保存的DataFrame
+            output_path: 输出路径
+            apply_formatting: 是否应用格式化（颜色标记）
+        """
         while True:
             try:
-                df.to_excel(output_path, index=False)
+                if apply_formatting and any(col.endswith('_source') for col in df.columns):
+                    # 使用ExcelWriter应用格式
+                    self.save_with_formatting(df, output_path)
+                else:
+                    df.to_excel(output_path, index=False)
                 print(f"结果已保存到: {output_path}")
                 return True
             except PermissionError:
@@ -300,14 +370,115 @@ class KeyTraitsPage(QWidget):
                     f"文件 {output_path.name} 正在被其他程序使用。\n请关闭该文件后点击'重试'继续，或点击'取消'停止操作。",
                     QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Cancel
                 )
+                if reply == QMessageBox.StandardButton.Cancel:
+                    return False
         
-    def process_cow_key_traits_by_year(self, detail_path, progress_callback=None):
-        """处理年度关键性状数据"""
+    def fill_estimated_values(self, cow_df, yearly_data_dict, selected_traits, engine):
+        """
+        填充预估值到缺失的育种值字段
+
+        Args:
+            cow_df: 母牛数据DataFrame
+            yearly_data_dict: 年度平均值字典 {trait: DataFrame}
+            selected_traits: 选中的性状列表
+            engine: 数据库引擎
+
+        Returns:
+            处理后的DataFrame，包含预估值和标记
+        """
+        print("开始填充预估值...")
+
+        # 1. 转换年度数据格式
+        yearly_data = {}
+        if isinstance(yearly_data_dict, dict):
+            for trait in selected_traits:
+                if trait in yearly_data_dict:
+                    df_trait = yearly_data_dict[trait]
+                    # 创建年份到平均值的映射
+                    yearly_data[trait] = df_trait.set_index('birth_year')['mean'].to_dict()
+            print(f"成功处理年度数据，包含 {len(yearly_data)} 个性状")
+        else:
+            print("年度数据格式错误")
+            return cow_df
+
+        # 2. 获取默认值（从999HO99999）
+        default_values = {}
+        with engine.connect() as conn:
+            default_bull = conn.execute(
+                text("SELECT * FROM bull_library WHERE `BULL NAAB`='999HO99999'")
+            ).fetchone()
+            if default_bull:
+                default_bull_dict = dict(default_bull._mapping)
+                for trait in selected_traits:
+                    default_values[trait] = default_bull_dict.get(trait, 0)
+            else:
+                print("警告: 未找到默认公牛999HO99999")
+                for trait in selected_traits:
+                    default_values[trait] = 0
+
+        # 3. 确保有birth_year, dam_birth_year, mgd_birth_year列
+        if 'birth_year' not in cow_df.columns:
+            cow_df['birth_year'] = pd.to_datetime(cow_df['birth_date']).dt.year
+        if 'dam_birth_year' not in cow_df.columns:
+            cow_df['dam_birth_year'] = pd.to_datetime(cow_df['birth_date_dam']).dt.year
+        if 'mgd_birth_year' not in cow_df.columns:
+            cow_df['mgd_birth_year'] = pd.to_datetime(cow_df['birth_date_mgd']).dt.year
+
+        # 4. 为每个缺失的育种值填充预估值，并创建来源标记
+        for bull_type, year_col in [('sire', 'birth_year'),
+                                     ('mgs', 'dam_birth_year'),
+                                     ('mmgs', 'mgd_birth_year')]:
+            # 创建来源标记列（1=真实值，2=年份预估，3=默认值）
+            cow_df[f"{bull_type}_source"] = 1  # 默认为真实值
+
+            # 只处理identified=False的记录
+            if f"{bull_type}_identified" in cow_df.columns:
+                mask_not_identified = cow_df[f"{bull_type}_identified"] == False
+
+                for trait in selected_traits:
+                    trait_col = f"{bull_type}_{trait}"
+                    if trait_col in cow_df.columns:
+                        # 找到需要填充的行（identified=False且值为空）
+                        mask_need_fill = mask_not_identified & cow_df[trait_col].isna()
+
+                        # 对需要填充的行进行处理
+                        for idx in cow_df[mask_need_fill].index:
+                            year = cow_df.loc[idx, year_col]
+
+                            if pd.notna(year) and trait in yearly_data:
+                                year = int(year)
+                                if year in yearly_data[trait]:
+                                    # 使用年份预估值
+                                    cow_df.loc[idx, trait_col] = yearly_data[trait][year]
+                                    cow_df.loc[idx, f"{bull_type}_source"] = 2
+                                else:
+                                    # 年份不在数据中，使用默认值
+                                    cow_df.loc[idx, trait_col] = default_values[trait]
+                                    cow_df.loc[idx, f"{bull_type}_source"] = 3
+                            else:
+                                # 没有年份信息，使用默认值
+                                cow_df.loc[idx, trait_col] = default_values[trait]
+                                cow_df.loc[idx, f"{bull_type}_source"] = 3
+
+        print("预估值填充完成")
+        return cow_df
+
+    def process_cow_key_traits_by_year(self, data_source, output_path=None, progress_callback=None):
+        """处理年度关键性状数据
+
+        Args:
+            data_source: DataFrame或文件路径
+            output_path: 输出文件路径（可选）
+            progress_callback: 进度回调函数
+        """
         print("开始处理年度关键性状数据...")
-        
+
         try:
-            # 1. 读取详细数据文件
-            df = pd.read_excel(detail_path)
+            # 1. 读取数据
+            if isinstance(data_source, pd.DataFrame):
+                df = data_source.copy()
+            else:
+                df = pd.read_excel(data_source)
             
             # 2. 获取出生年份范围
             min_year = df['birth_year'].min()
@@ -351,8 +522,15 @@ class KeyTraitsPage(QWidget):
                     all_years['mean'] = default_values[trait]
                     all_years['interpolated'] = True
                 else:
-                    # 原有的计算逻辑
-                    yearly_means = df.groupby('birth_year').agg({
+                    # 只统计identified=true的记录来计算遗传趋势
+                    # 确保sire_identified列存在
+                    if 'sire_identified' in df.columns:
+                        df_identified = df[df['sire_identified'] == True]
+                    else:
+                        # 如果没有identified列，使用所有非空数据
+                        df_identified = df[df[trait_col].notna()]
+
+                    yearly_means = df_identified.groupby('birth_year').agg({
                         trait_col: ['count', 'mean']
                     }).reset_index()
                     yearly_means.columns = ['birth_year', 'count', 'mean']
@@ -412,7 +590,13 @@ class KeyTraitsPage(QWidget):
                 results[trait] = all_years
             
             # 6. 尝试保存所有结果到Excel
-            output_path = detail_path.parent / 'processed_cow_data_key_traits_mean_by_year.xlsx'
+            if output_path is None:
+                # 如果没有提供输出路径，不保存
+                return results
+
+            # 确保output_path是Path对象
+            if not isinstance(output_path, Path):
+                output_path = Path(output_path)
             while True:
                 try:
                     with pd.ExcelWriter(output_path) as writer:
@@ -430,11 +614,11 @@ class KeyTraitsPage(QWidget):
                     if reply == QMessageBox.StandardButton.Cancel:
                         return False
             
-            return True
-            
+            return results  # 返回结果字典，供后续使用
+
         except Exception as e:
             print(f"处理年度关键性状数据时发生错误: {str(e)}")
-            raise
+            return False
 
     def perform_cow_traits_calculation(self, main_window, progress_callback=None, task_info_callback=None):
         """执行关键性状计算的核心逻辑"""
@@ -544,16 +728,26 @@ class KeyTraitsPage(QWidget):
                 cow_df[f"{bull_type}_identified"] = cow_df[bull_type].apply(
                     lambda x: str(x) in bull_traits if pd.notna(x) else False
                 )
-                    
+
+            # 5.5 先计算并保存年度平均值（供预估使用）
+            print("计算年度平均值用于预估...")
+            yearly_output_path = main_window.selected_project_path / "analysis_results" / "sire_traits_mean_by_cow_birth_year.xlsx"
+            yearly_data_dict = self.process_cow_key_traits_by_year(cow_df, yearly_output_path)
+            if yearly_data_dict is False:
+                return False, "用户取消了年度数据保存操作"
+
+            # 5.6 使用年度平均值填充缺失的育种值
+            print("填充预估值...")
+            cow_df = self.fill_estimated_values(cow_df, yearly_data_dict, selected_traits, engine)
+
             # 6. 保存详细结果
             detail_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_detail.xlsx"
             if not self.save_results_with_retry(cow_df, detail_output_path):
                 return False, "用户取消了保存操作"
             
-            # 7. 处理年度平均值和回归分析
-            yearly_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_mean_by_year.xlsx"
-            if not self.process_cow_key_traits_by_year(detail_output_path):
-                return False, "用户取消了年度数据保存操作"
+            # 7. 处理年度平均值和回归分析（第二次调用，从文件读取）
+            yearly_output_path = main_window.selected_project_path / "analysis_results" / "sire_traits_mean_by_cow_birth_year.xlsx"
+            # 注意：这里不需要再次处理，因为已经在5.5步骤处理过了
 
             # 8. 计算关键性状得分
             pedigree_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pidgree.xlsx"

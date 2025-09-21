@@ -434,7 +434,7 @@ class PPTGenerator:
             # 5. 加载合并的母牛性状数据
             merged_file_names = [
                 "processed_cow_data_key_traits_scores_genomic.xlsx",
-                "processed_cow_data_key_traits_mean_by_year.xlsx",
+                "sire_traits_mean_by_cow_birth_year.xlsx",
                 "母牛关键性状合并.xlsx",
                 "merged_cow_traits.xlsx"
             ]

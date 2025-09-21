@@ -38,9 +38,10 @@ from core.data.uploader import (
 from gui.worker import CowDataWorker, GenomicDataWorker, BreedingDataWorker
 from gui.progress import ProgressDialog
 from gui.db_update_worker import DBUpdateWorker
-from core.breeding_calc.bull_traits_calc import BullKeyTraitsPage  
+from core.breeding_calc.bull_traits_calc import BullKeyTraitsPage
 from core.breeding_calc.index_page import IndexCalculationPage
-from core.breeding_calc.mated_bull_traits_calc import MatedBullKeyTraitsPage  
+from core.breeding_calc.mated_bull_traits_calc import MatedBullKeyTraitsPage
+from core.api.mating_result_pusher import MatingResultPusher  
 # from gui.matching_worker import MatchingWorker  # DEPRECATED - 使用 CycleBasedMatcher 替代
 from gui.recommendation_worker import RecommendationWorker
 
@@ -1775,7 +1776,30 @@ class MainWindow(QMainWindow):
         clear_mating_btn = QPushButton("清空选配")
         generate_recommendations_btn = QPushButton("执行个体选配")
         # start_mating_btn = QPushButton("开始选配")  # 隐藏开始选配按钮
-        
+
+        # 添加推送结果按钮
+        self.push_result_btn = QPushButton("📤 推送结果")
+        self.push_result_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 4px;
+                min-width: 120px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton:disabled {
+                background-color: #95a5a6;
+            }
+        """)
+        self.push_result_btn.clicked.connect(self.on_push_mating_results)
+        self.push_result_btn.setEnabled(False)  # 初始禁用，选配完成后启用
+
         clear_mating_btn.setStyleSheet(button_style)
         generate_recommendations_btn.setStyleSheet("""
             QPushButton {
@@ -1793,7 +1817,7 @@ class MainWindow(QMainWindow):
             }
         """)
         # start_mating_btn.setStyleSheet(button_style)  # 隐藏开始选配按钮
-        
+
         clear_mating_btn.clicked.connect(self.on_clear_mating)
         generate_recommendations_btn.clicked.connect(self.on_execute_complete_mating)
         # start_mating_btn.clicked.connect(self.on_start_mating)  # 隐藏开始选配按钮
@@ -1816,6 +1840,7 @@ class MainWindow(QMainWindow):
         
         mating_button_layout.addWidget(clear_mating_btn)
         mating_button_layout.addWidget(generate_recommendations_btn)
+        mating_button_layout.addWidget(self.push_result_btn)  # 添加推送按钮
         # mating_button_layout.addWidget(allocate_mating_btn)  # 注释掉，使用一键完成
         # mating_button_layout.addWidget(start_mating_btn)  # 隐藏开始选配按钮
         mating_button_layout.addStretch()
@@ -2755,9 +2780,111 @@ class MainWindow(QMainWindow):
         # 显示对话框（模态）
         self.mating_dialog.exec()
 
+    def on_push_mating_results(self):
+        """推送选配结果"""
+        if not self.selected_project_path:
+            QMessageBox.warning(self, "警告", "请先选择项目")
+            return
+
+        try:
+            # 创建推送器
+            pusher = MatingResultPusher(self.selected_project_path)
+
+            # 准备推送数据
+            push_data = pusher.prepare_push_data()
+            if not push_data:
+                # 检查是否是因为缺少farm_info.json
+                farm_info_path = self.selected_project_path / "farm_info.json"
+                if not farm_info_path.exists():
+                    QMessageBox.warning(
+                        self,
+                        "缺少牧场信息",
+                        f"请先创建牧场信息文件：\n{farm_info_path}\n\n"
+                        f"文件格式示例：\n"
+                        f'{{\n'
+                        f'  "farm_code": "10001"\n'
+                        f'}}'
+                    )
+                else:
+                    QMessageBox.warning(self, "警告", "无法准备推送数据，请检查选配结果文件和牧场信息")
+                return
+
+            # 显示确认对话框，展示将要推送的数据
+            from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox, QLabel
+
+            confirm_dialog = QDialog(self)
+            confirm_dialog.setWindowTitle("确认推送数据")
+            confirm_dialog.setMinimumSize(600, 500)
+
+            layout = QVBoxLayout()
+
+            # 显示牧场信息
+            info_label = QLabel(f"""
+<b>牧场信息：</b><br>
+牧场编号：{push_data.get('farm_code', '未设置')}<br>
+<br>
+<b>选配信息：</b><br>
+母牛总数：{len(push_data.get('records', []))} 头<br>
+            """)
+            layout.addWidget(info_label)
+
+            # 显示详细数据（JSON格式）
+            detail_label = QLabel("<b>推送数据预览（JSON格式）：</b>")
+            layout.addWidget(detail_label)
+
+            text_edit = QTextEdit()
+            text_edit.setReadOnly(True)
+            import json
+            text_edit.setText(json.dumps(push_data, ensure_ascii=False, indent=2))
+            layout.addWidget(text_edit)
+
+            # 按钮
+            buttons = QDialogButtonBox(
+                QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+            )
+            buttons.accepted.connect(confirm_dialog.accept)
+            buttons.rejected.connect(confirm_dialog.reject)
+            layout.addWidget(buttons)
+
+            confirm_dialog.setLayout(layout)
+
+            # 显示对话框
+            if confirm_dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+
+            # 执行推送（当前保存到本地）
+            success = pusher.push_to_api()  # 暂时不传入URL，保存到本地
+
+            if success:
+                QMessageBox.information(
+                    self,
+                    "推送成功",
+                    f"✅ 选配结果推送成功！\n\n"
+                    f"测试模式：数据已保存到项目文件夹\n"
+                    f"文件：api_push_data.json\n\n"
+                    f"未来将推送到真实API服务器"
+                )
+            else:
+                QMessageBox.critical(
+                    self,
+                    "推送失败",
+                    "❌ 推送失败，请查看日志文件"
+                )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "错误",
+                f"推送过程中发生错误：\n{str(e)}"
+            )
+
     def on_mating_completed(self, result: dict):
         """选配完成的处理"""
         if result['success']:
+            # 启用推送按钮
+            if hasattr(self, 'push_result_btn'):
+                self.push_result_btn.setEnabled(True)
+
             # 构建成功消息
             message = f"""个体选配完成！
 
