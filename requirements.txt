@@ -6,7 +6,7 @@
 PyQt6>=6.4.0
 
 # 数据库连接 - 阿里云PolarDB支持
-# sqlalchemy>=2.0.0  # v1.1.0.1已移除 - 使用pymysql直接连接避免事务冲突
+sqlalchemy>=2.0.0  # 恢复sqlalchemy依赖以支持现有代码
 pymysql>=1.0.0  # 直接使用PyMySQL操作数据库
 
 # 安全加密 - 配置信息加密存储
