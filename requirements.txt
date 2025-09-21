@@ -40,6 +40,7 @@ scipy>=1.10.0
 
 # HTTP请求 - 版本检查和云端API
 requests>=2.31.0
+certifi>=2023.0.0  # SSL证书验证（Mac平台必需）
 
 # API服务框架 - 认证API服务器
 fastapi>=0.104.0

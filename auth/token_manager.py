@@ -40,13 +40,23 @@ class TokenManager:
         Returns:
             加密密钥
         """
-        try:
-            # 尝试从系统密钥环获取
-            key_str = keyring.get_password(self.app_name, "encryption_key")
-            if key_str:
-                return base64.b64decode(key_str.encode())
-        except Exception as e:
-            logger.warning(f"无法从系统密钥环获取密钥: {e}")
+        # 检查是否是Mac打包应用，如果是则跳过keyring
+        import sys
+        import platform
+
+        skip_keyring = False
+        if platform.system() == 'Darwin' and getattr(sys, 'frozen', False):
+            skip_keyring = True
+            logger.info("Mac打包应用，跳过Keychain访问")
+
+        if not skip_keyring:
+            try:
+                # 尝试从系统密钥环获取
+                key_str = keyring.get_password(self.app_name, "encryption_key")
+                if key_str:
+                    return base64.b64decode(key_str.encode())
+            except Exception as e:
+                logger.warning(f"无法从系统密钥环获取密钥: {e}")
 
         # 降级到本地文件存储
         key_file = self.data_dir / '.token_key'
@@ -61,13 +71,14 @@ class TokenManager:
         # 生成新密钥
         key = Fernet.generate_key()
 
-        # 尝试保存到系统密钥环
-        try:
-            key_str = base64.b64encode(key).decode()
-            keyring.set_password(self.app_name, "encryption_key", key_str)
-            logger.info("密钥已保存到系统密钥环")
-        except Exception as e:
-            logger.warning(f"无法保存密钥到系统密钥环: {e}")
+        # 尝试保存到系统密钥环（Mac打包应用跳过）
+        if not skip_keyring:
+            try:
+                key_str = base64.b64encode(key).decode()
+                keyring.set_password(self.app_name, "encryption_key", key_str)
+                logger.info("密钥已保存到系统密钥环")
+            except Exception as e:
+                logger.warning(f"无法保存密钥到系统密钥环: {e}")
 
             # 降级到本地文件
             try:

@@ -28,19 +28,33 @@ class APIClient:
         # 尝试从token manager恢复令牌
         self._restore_token_from_manager()
 
-        # 设置请求会话
-        self.session = requests.Session()
+        # 设置请求会话（Mac平台特殊处理）
+        import platform
+        if platform.system() == 'Darwin':
+            # Mac平台使用特殊的session配置
+            try:
+                from auth.mac_security_fix import get_mac_safe_session, fix_mac_network_issues
+                fix_mac_network_issues()  # 应用Mac网络修复
+                self.session = get_mac_safe_session()
+                logger.info("使用Mac安全会话配置")
+            except Exception as e:
+                logger.warning(f"无法加载Mac安全配置: {e}，使用默认配置")
+                self.session = requests.Session()
+        else:
+            self.session = requests.Session()
+
         self.session.headers.update({
             'Content-Type': 'application/json',
             'User-Agent': 'GeneticImprove-Client/2.0'
         })
 
         # 禁用代理，确保直接连接服务器
-        self.session.trust_env = False  # 不使用系统代理设置
-        self.session.proxies = {
-            'http': None,
-            'https': None
-        }
+        if platform.system() != 'Darwin':  # 非Mac平台
+            self.session.trust_env = False  # 不使用系统代理设置
+            self.session.proxies = {
+                'http': None,
+                'https': None
+            }
 
     def _load_config(self, config_file: Optional[str] = None):
         """加载配置文件"""
