@@ -116,16 +116,13 @@ def initialize_local_db():
             LOCAL_DB_DIR.mkdir(parents=True)
             logging.info(f"已创建本地数据库目录: {LOCAL_DB_DIR}")
 
-        # 创建版本信息文件
+        # 不再创建初始版本文件，让下载过程创建正确的版本
+        # 这样可以确保版本号与OSS一致
         version_file = LOCAL_DB_PATH.parent / "bull_library_version.json"
-        if not version_file.exists():
-            version_info = {
-                "version": 0,
-                "update_time": datetime.datetime.now().isoformat()
-            }
-            with open(version_file, 'w') as f:
-                json.dump(version_info, f)
-            logging.info("本地数据库版本信息已初始化")
+        if version_file.exists():
+            logging.info(f"本地数据库版本文件已存在: {version_file}")
+        else:
+            logging.info("本地数据库版本文件不存在，将在下载时创建")
 
         logging.info("本地数据库已初始化。")
 
@@ -180,15 +177,18 @@ def get_local_db_version_with_time():
         if version_file.exists():
             with open(version_file, 'r') as f:
                 version_info = json.load(f)
-                version = version_info.get('version', 0)
+                version = version_info.get('version', None)
+
+                # 处理版本号为0的情况，返回None
+                if version == 0 or version == '0':
+                    logging.warning("版本号为0，需要重新下载数据库")
+                    return None, None
+
                 update_time = version_info.get('update_time', 'Unknown')
                 return version, update_time
         else:
-            # 如果文件不存在，检查 SQLite 数据库是否存在
-            if LOCAL_DB_PATH.exists():
-                # 数据库存在但没有版本文件，创建一个默认的
-                set_local_db_version(0)
-                return 0, datetime.datetime.now().isoformat()
+            # 如果文件不存在，返回None
+            logging.info("版本文件不存在")
             return None, None
     except Exception as e:
         logging.error(f"获取本地数据库版本和时间失败: {e}")

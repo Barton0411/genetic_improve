@@ -21,35 +21,23 @@ class DBUpdateWorker(QObject):
             # 传递进度回调函数到更新过程
             run_update_process(progress_callback=progress_callback)
 
-            # 获取云端数据库的版本号和更新时间
+            # 获取本地数据库的版本号和更新时间（从OSS下载的版本）
             try:
-                from api.data_client import get_cloud_db_version_with_time
-                cloud_version, cloud_update_time = get_cloud_db_version_with_time()
-
-                if cloud_version and cloud_update_time:
-                    version_info = f"{cloud_version}#{cloud_update_time}"  # 用#分隔版本和时间
-                    import logging
-                    logging.info(f"获取到云端数据库版本: {cloud_version}, 更新时间: {cloud_update_time}")
-                else:
-                    # 如果云端获取失败，尝试获取本地版本作为备用
-                    from core.data.update_manager import get_local_db_version_with_time
-                    local_version, local_update_time = get_local_db_version_with_time()
-                    if local_version and local_update_time:
-                        version_info = f"{local_version}#{local_update_time}"
-                        import logging
-                        logging.warning(f"无法获取云端版本，使用本地版本: {local_version}")
-                    else:
-                        version_info = ""
-            except Exception as e:
-                # 如果获取云端版本失败，使用本地版本
-                import logging
-                logging.error(f"获取云端数据库版本失败: {e}")
                 from core.data.update_manager import get_local_db_version_with_time
                 local_version, local_update_time = get_local_db_version_with_time()
+
                 if local_version and local_update_time:
-                    version_info = f"{local_version}#{local_update_time}"
+                    version_info = f"{local_version}#{local_update_time}"  # 用#分隔版本和时间
+                    import logging
+                    logging.info(f"数据库版本: {local_version}, 更新时间: {local_update_time}")
                 else:
                     version_info = ""
+                    import logging
+                    logging.warning("无法获取数据库版本信息")
+            except Exception as e:
+                import logging
+                logging.error(f"获取数据库版本失败: {e}")
+                version_info = ""
 
             self.finished.emit(version_info)
         except Exception as e:

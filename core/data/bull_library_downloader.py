@@ -76,7 +76,14 @@ def get_local_db_version(local_db_path: Path) -> Optional[str]:
         if version_file.exists():
             with open(version_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return data.get('version')
+                version = data.get('version')
+
+                # 处理旧格式（版本号为0），返回None以触发重新下载
+                if version == 0 or version == '0':
+                    logger.info("检测到旧版本文件（版本号为0），将重新下载")
+                    return None
+
+                return version
         return None
     except Exception as e:
         logger.warning(f"读取本地版本失败: {e}")
@@ -91,14 +98,22 @@ def save_local_db_version(local_db_path: Path, version: str):
         version: 版本号
     """
     try:
+        import datetime
+
         # 版本文件和数据库文件在同一目录
         version_file = local_db_path.parent / "bull_library_version.json"
 
         # 确保目录存在
         version_file.parent.mkdir(parents=True, exist_ok=True)
 
+        # 保存版本号和更新时间，与update_manager.py保持一致
+        version_info = {
+            'version': version,
+            'update_time': datetime.datetime.now().isoformat()
+        }
+
         with open(version_file, 'w', encoding='utf-8') as f:
-            json.dump({'version': version}, f, ensure_ascii=False, indent=2)
+            json.dump(version_info, f, ensure_ascii=False, indent=2)
 
         logger.info(f"保存本地版本: {version} 到 {version_file}")
     except Exception as e:
@@ -145,6 +160,9 @@ def download_bull_library(
         if progress_callback:
             progress_callback(5, "正在检查数据库版本...")
 
+        # 保存OSS版本，供后续使用
+        oss_version_to_save = None
+
         # 检查是否需要下载
         if not force_download:
             # 检查本地版本（即使数据库文件不存在也要检查版本）
@@ -155,6 +173,7 @@ def download_bull_library(
                 if local_version:
                     # 检查OSS版本
                     oss_version = check_oss_version()
+                    oss_version_to_save = oss_version  # 保存供后续使用
 
                     if oss_version and oss_version == local_version:
                         # 验证数据库完整性
@@ -176,8 +195,11 @@ def download_bull_library(
                         except Exception as e:
                             logger.warning(f"数据库验证失败: {e}")
 
-                    if oss_version:
-                        logger.info(f"发现新版本: {oss_version} (当前: {local_version})")
+                    if oss_version and oss_version != local_version:
+                        logger.info(f"发现新版本: {oss_version} (当前: {local_version})，开始更新...")
+                        if progress_callback:
+                            progress_callback(5, f"发现新版本 {oss_version}，开始更新...")
+                        # 继续执行下载流程
                 else:
                     logger.info("数据库存在但没有版本信息，将重新下载")
             else:
@@ -186,6 +208,10 @@ def download_bull_library(
                     logger.warning(f"版本文件存在(v{local_version})但数据库文件丢失，将重新下载")
                 else:
                     logger.info("首次下载数据库")
+
+        # 如果之前没有获取版本（比如强制下载或首次下载），现在获取
+        if not oss_version_to_save:
+            oss_version_to_save = check_oss_version()
 
         logger.info(f"开始下载bull_library数据库到: {local_db_path}")
 
@@ -199,10 +225,12 @@ def download_bull_library(
         success, msg = download_from_oss(local_db_path, progress_callback)
 
         if success:
-            # 保存版本信息
-            oss_version = check_oss_version()
-            if oss_version:
-                save_local_db_version(local_db_path, oss_version)
+            # 保存版本信息（使用之前获取的版本）
+            if oss_version_to_save:
+                save_local_db_version(local_db_path, oss_version_to_save)
+                logger.info(f"版本信息已保存: {oss_version_to_save}")
+            else:
+                logger.warning("无法获取OSS版本信息，版本文件未更新")
             return True, msg
         else:
             logger.error(f"OSS下载失败: {msg}")
