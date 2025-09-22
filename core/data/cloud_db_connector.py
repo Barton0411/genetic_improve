@@ -10,6 +10,8 @@ import pandas as pd
 from pathlib import Path
 import logging
 from typing import Optional, Tuple
+import requests
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +115,56 @@ def get_cloud_connector() -> CloudDBConnector:
         _connector = CloudDBConnector()
     return _connector
 
+def download_from_oss(local_path: Path) -> Tuple[bool, str]:
+    """
+    从OSS下载数据库文件
+
+    Args:
+        local_path: 本地保存路径
+
+    Returns:
+        Tuple[bool, str]: (成功标志, 消息)
+    """
+    try:
+        # OSS数据库URL
+        oss_url = "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/bull_library/bull_library.db"
+
+        logger.info(f"从OSS下载数据库: {oss_url}")
+
+        # 下载文件
+        response = requests.get(oss_url, stream=True, timeout=180)
+        response.raise_for_status()
+
+        total_size = int(response.headers.get('content-length', 0))
+        logger.info(f"文件大小: {total_size / 1024 / 1024:.1f} MB")
+
+        # 确保目录存在
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # 写入文件
+        downloaded = 0
+        with open(local_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if downloaded % (10 * 1024 * 1024) == 0:  # 每10MB记录一次
+                        logger.info(f"已下载 {downloaded//1024//1024}MB / {total_size//1024//1024}MB")
+
+        # 验证数据库
+        conn = sqlite3.connect(local_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM bull_library")
+        count = cursor.fetchone()[0]
+        conn.close()
+
+        logger.info(f"成功从OSS下载数据库，包含{count}条记录")
+        return True, f"数据库下载成功，包含{count}条记录"
+
+    except Exception as e:
+        logger.error(f"从OSS下载失败: {e}")
+        return False, f"从OSS下载失败: {e}"
+
 def ensure_database_ready() -> Tuple[bool, str]:
     """
     确保数据库准备就绪
@@ -128,6 +180,16 @@ def ensure_database_ready() -> Tuple[bool, str]:
         logger.info(f"使用本地缓存，包含 {count} 条记录")
         return True, f"本地缓存可用 ({count} 条记录)"
 
-    # 同步云数据库
-    logger.info("本地缓存不存在或无效，开始同步云数据库...")
+    logger.info("本地缓存不存在或无效，尝试获取数据库...")
+
+    # 优先尝试从OSS下载（速度更快，更稳定）
+    try:
+        success, msg = download_from_oss(connector.local_cache_path)
+        if success:
+            return success, msg
+    except Exception as e:
+        logger.warning(f"OSS下载失败: {e}")
+
+    # 备用方案：同步云数据库
+    logger.info("尝试从云数据库同步...")
     return connector.sync_bull_library()

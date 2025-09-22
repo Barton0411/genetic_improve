@@ -117,7 +117,7 @@ def initialize_local_db():
             logging.info(f"已创建本地数据库目录: {LOCAL_DB_DIR}")
 
         # 创建版本信息文件
-        version_file = LOCAL_DB_DIR / "db_version.json"
+        version_file = LOCAL_DB_PATH.parent / "bull_library_version.json"
         if not version_file.exists():
             version_info = {
                 "version": 0,
@@ -139,7 +139,7 @@ def get_local_db_version():
     从 JSON 文件读取，而不是数据库
     """
     try:
-        version_file = LOCAL_DB_DIR / "db_version.json"
+        version_file = LOCAL_DB_PATH.parent / "bull_library_version.json"
         if version_file.exists():
             with open(version_file, 'r') as f:
                 version_info = json.load(f)
@@ -159,7 +159,7 @@ def set_local_db_version(version: int):
     保存到 JSON 文件
     """
     try:
-        version_file = LOCAL_DB_DIR / "db_version.json"
+        version_file = LOCAL_DB_PATH.parent / "bull_library_version.json"
         version_info = {
             "version": version,
             "update_time": datetime.datetime.now().isoformat()
@@ -176,7 +176,7 @@ def get_local_db_version_with_time():
     获取本地数据库的版本号和更新时间
     """
     try:
-        version_file = LOCAL_DB_DIR / "db_version.json"
+        version_file = LOCAL_DB_PATH.parent / "bull_library_version.json"
         if version_file.exists():
             with open(version_file, 'r') as f:
                 version_info = json.load(f)

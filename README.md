@@ -1,6 +1,6 @@
 # 伊利奶牛选配系统
 
-[![Version](https://img.shields.io/badge/version-1.2.0.1-blue)](https://github.com/Barton0411/genetic_improve)
+[![Version](https://img.shields.io/badge/version-1.2.0.2-blue)](https://github.com/Barton0411/genetic_improve)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-yellow)](https://www.python.org/)
 

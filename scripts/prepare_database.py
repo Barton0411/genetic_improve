@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def download_database(target_path: Path) -> bool:
     """下载数据库文件"""
     # 优先从OSS下载
-    oss_url = "https://genetic-improve.oss-cn-beijing.aliyuncs.com/databases/bull_library.db"
+    oss_url = "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/bull_library/bull_library.db"
 
     try:
         logger.info(f"正在从OSS下载数据库: {oss_url}")
@@ -44,26 +44,9 @@ def download_database(target_path: Path) -> bool:
     except Exception as e:
         logger.warning(f"从OSS下载失败: {e}")
 
-        # 备用方案：尝试从API下载
-        try:
-            url = "https://api.genepop.com/api/data/bull_library"
-            logger.info(f"尝试从API下载: {url}")
-
-            response = requests.get(url, stream=True, timeout=120)
-            response.raise_for_status()
-
-            # 写入文件
-            with open(target_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-
-            logger.info(f"数据库下载成功: {target_path}")
-            return True
-
-        except Exception as e:
-            logger.error(f"所有下载源都失败: {e}")
-            return False
+        # OSS下载失败，不再尝试API
+        logger.error(f"OSS下载失败，无备用方案")
+        return False
 
 def create_empty_database(target_path: Path) -> bool:
     """创建空数据库作为备用"""

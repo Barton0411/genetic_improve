@@ -1557,7 +1557,8 @@ class MainWindow(QMainWindow):
             self.progress_dialog = ProgressDialog(self)
             self.progress_dialog.setWindowTitle("数据库更新")
             self.progress_dialog.title_label.setText("正在检查和更新本地数据库...")
-            self.progress_dialog.progress_bar.setRange(0, 0)  # 不显示具体进度
+            self.progress_dialog.progress_bar.setRange(0, 100)  # 显示0-100%进度
+            self.progress_dialog.progress_bar.setValue(0)
             # Make sure the dialog is non-modal
             self.progress_dialog.setWindowModality(Qt.WindowModality.NonModal)
             self.progress_dialog.show()
@@ -1573,6 +1574,8 @@ class MainWindow(QMainWindow):
 
         # 连接信号与槽
         self.db_update_thread.started.connect(self.db_update_worker.run)
+        self.db_update_worker.progress.connect(self.on_db_update_progress)
+        self.db_update_worker.message.connect(self.on_db_update_message)
         self.db_update_worker.finished.connect(self.on_db_update_finished)
         self.db_update_worker.error.connect(self.on_db_update_error)
         self.db_update_worker.finished.connect(self.db_update_thread.quit)
@@ -1588,6 +1591,18 @@ class MainWindow(QMainWindow):
         
         # 延迟1秒启动，确保版本检查先执行
         QTimer.singleShot(1000, start_db_check)
+
+    def on_db_update_progress(self, progress: int):
+        """处理数据库更新进度"""
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.progress_bar.setValue(progress)
+            # 在标题栏显示百分比
+            self.progress_dialog.setWindowTitle(f"数据库更新 - {progress}%")
+
+    def on_db_update_message(self, message: str):
+        """处理数据库更新消息"""
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.title_label.setText(message)
 
     def on_db_update_finished(self, version_info: str = ""):
         """处理数据库更新完成的信号"""

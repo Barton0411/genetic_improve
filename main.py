@@ -12,20 +12,26 @@ def lazy_import():
     from gui.splash_screen import VideoSplashScreen
 
 def main():
-    # 设置日志记录到用户目录，避免权限问题
+    # 设置日志记录
     import logging
     from pathlib import Path
-    
-    # 获取用户AppData目录（Windows）或用户主目录（Mac/Linux）
+
+    # 项目根目录
+    project_root = Path(__file__).parent
+
+    # 日志文件放在项目的logs目录
+    logs_dir = project_root / 'logs'
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_file = logs_dir / 'app_debug.log'
+
+    # 用户配置目录（用于存储token、settings等敏感信息）
     if os.name == 'nt':  # Windows
         app_data_dir = Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'GeneticImprove'
     else:  # Mac/Linux
         app_data_dir = Path.home() / '.genetic_improve'
-    
-    # 确保目录存在
+
+    # 确保用户配置目录存在
     app_data_dir.mkdir(parents=True, exist_ok=True)
-    
-    log_file = app_data_dir / 'app_debug.log'
     
     try:
         logging.basicConfig(

@@ -59,9 +59,76 @@ def check_bundled_database() -> Optional[Path]:
         logger.warning(f"检查预装数据库时出错: {e}")
         return None
 
+def get_local_db_version(local_db_path: Path) -> Optional[str]:
+    """
+    获取本地数据库版本
+
+    Args:
+        local_db_path: 数据库文件路径
+
+    Returns:
+        Optional[str]: 版本号，如果不存在则返回None
+    """
+    try:
+        # 版本文件和数据库文件在同一目录
+        version_file = local_db_path.parent / "bull_library_version.json"
+
+        if version_file.exists():
+            with open(version_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get('version')
+        return None
+    except Exception as e:
+        logger.warning(f"读取本地版本失败: {e}")
+        return None
+
+def save_local_db_version(local_db_path: Path, version: str):
+    """
+    保存本地数据库版本
+
+    Args:
+        local_db_path: 数据库文件路径
+        version: 版本号
+    """
+    try:
+        # 版本文件和数据库文件在同一目录
+        version_file = local_db_path.parent / "bull_library_version.json"
+
+        # 确保目录存在
+        version_file.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(version_file, 'w', encoding='utf-8') as f:
+            json.dump({'version': version}, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"保存本地版本: {version} 到 {version_file}")
+    except Exception as e:
+        logger.error(f"保存本地版本失败: {e}")
+
+def check_oss_version() -> Optional[str]:
+    """
+    检查OSS上的数据库版本
+
+    Returns:
+        Optional[str]: OSS上的版本号，如果获取失败则返回None
+    """
+    try:
+        version_url = "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/bull_library/bull_library_version.json"
+        response = requests.get(version_url, timeout=10)
+        response.raise_for_status()
+
+        data = response.json()
+        version = data.get('version')
+        logger.info(f"OSS数据库版本: {version}")
+        return version
+
+    except Exception as e:
+        logger.warning(f"获取OSS版本失败: {e}")
+        return None
+
 def download_bull_library(
     local_db_path: Path,
-    progress_callback: Optional[Callable] = None
+    progress_callback: Optional[Callable] = None,
+    force_download: bool = False
 ) -> Tuple[bool, str]:
     """
     下载bull_library数据库
@@ -69,63 +136,77 @@ def download_bull_library(
     Args:
         local_db_path: 本地数据库路径
         progress_callback: 进度回调函数 (progress: int, message: str)
+        force_download: 是否强制下载（忽略版本检查）
 
     Returns:
         Tuple[bool, str]: (成功标志, 消息)
     """
     try:
-        # 检查数据库是否已存在
-        if local_db_path.exists():
-            # 检查是否有bull_library表
-            conn = sqlite3.connect(local_db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='bull_library'")
-            if cursor.fetchone():
-                conn.close()
-                logger.info("bull_library表已存在，跳过下载")
-                return True, "数据库已存在"
-            conn.close()
+        if progress_callback:
+            progress_callback(5, "正在检查数据库版本...")
+
+        # 检查是否需要下载
+        if not force_download:
+            # 检查本地版本（即使数据库文件不存在也要检查版本）
+            local_version = get_local_db_version(local_db_path)
+
+            # 如果数据库文件存在
+            if local_db_path.exists():
+                if local_version:
+                    # 检查OSS版本
+                    oss_version = check_oss_version()
+
+                    if oss_version and oss_version == local_version:
+                        # 验证数据库完整性
+                        try:
+                            conn = sqlite3.connect(local_db_path)
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='bull_library'")
+                            if cursor.fetchone():
+                                cursor.execute("SELECT COUNT(*) FROM bull_library")
+                                count = cursor.fetchone()[0]
+                                conn.close()
+
+                                if count > 0:
+                                    logger.info(f"数据库已是最新版本 {local_version}，包含{count}条记录")
+                                    if progress_callback:
+                                        progress_callback(100, f"数据库已是最新版本 ({count:,}条记录)")
+                                    return True, f"数据库已是最新版本 {local_version}"
+                            conn.close()
+                        except Exception as e:
+                            logger.warning(f"数据库验证失败: {e}")
+
+                    if oss_version:
+                        logger.info(f"发现新版本: {oss_version} (当前: {local_version})")
+                else:
+                    logger.info("数据库存在但没有版本信息，将重新下载")
+            else:
+                # 数据库文件不存在
+                if local_version:
+                    logger.warning(f"版本文件存在(v{local_version})但数据库文件丢失，将重新下载")
+                else:
+                    logger.info("首次下载数据库")
 
         logger.info(f"开始下载bull_library数据库到: {local_db_path}")
 
         if progress_callback:
-            progress_callback(10, "正在连接服务器...")
+            progress_callback(10, "正在连接数据库服务器...")
 
-        # 尝试从API下载
-        try:
-            from api.data_client import get_data_client
-            client = get_data_client()
-
-            if progress_callback:
-                progress_callback(20, "正在下载公牛数据...")
-
-            # 获取数据库版本信息
-            success, version, message = client.get_database_version()
-            if success:
-                logger.info(f"服务器数据库版本: {version}")
-
-            if progress_callback:
-                progress_callback(30, "正在下载bull_library数据...")
-
-            # 下载bull_library数据
-            success, file_path = client.download_bull_library(str(local_db_path))
-
-            if success:
-                if progress_callback:
-                    progress_callback(90, "数据下载完成")
-                logger.info("bull_library数据库下载成功")
-                return True, "数据库下载成功"
-            else:
-                logger.warning("API下载失败，尝试备用方案")
-
-        except Exception as e:
-            logger.warning(f"API下载失败: {e}，尝试备用方案")
-
-        # 备用方案：从OSS直接下载
+        # 从OSS下载
         if progress_callback:
-            progress_callback(40, "使用备用源下载...")
+            progress_callback(20, "正在准备下载数据库...")
 
-        return download_from_oss(local_db_path, progress_callback)
+        success, msg = download_from_oss(local_db_path, progress_callback)
+
+        if success:
+            # 保存版本信息
+            oss_version = check_oss_version()
+            if oss_version:
+                save_local_db_version(local_db_path, oss_version)
+            return True, msg
+        else:
+            logger.error(f"OSS下载失败: {msg}")
+            return False, msg
 
     except Exception as e:
         error_msg = f"下载bull_library失败: {e}"
@@ -137,7 +218,7 @@ def download_from_oss(
     progress_callback: Optional[Callable] = None
 ) -> Tuple[bool, str]:
     """
-    从备用源下载数据库
+    从OSS下载数据库
 
     Args:
         local_db_path: 本地数据库路径
@@ -146,56 +227,66 @@ def download_from_oss(
     Returns:
         Tuple[bool, str]: (成功标志, 消息)
     """
-    # 使用域名作为备用源
-    backup_urls = [
-        "https://api.genepop.com/api/data/bull_library",
-    ]
+    # OSS地址
+    oss_url = "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/bull_library/bull_library.db"
 
-    for url in backup_urls:
-        try:
-            logger.info(f"尝试从备用源下载: {url}")
+    try:
+        logger.info(f"从OSS下载: {oss_url}")
 
-            if progress_callback:
-                progress_callback(50, f"正在从备用源下载...")
+        if progress_callback:
+            progress_callback(30, "正在连接OSS服务器...")
 
-            response = requests.get(url, stream=True, timeout=60)
-            response.raise_for_status()
+        # 使用较长的超时时间，因为文件较大（132MB）
+        response = requests.get(oss_url, stream=True, timeout=180)
+        response.raise_for_status()
 
-            # 获取文件大小
-            total_size = int(response.headers.get('content-length', 0))
+        # 获取文件大小
+        total_size = int(response.headers.get('content-length', 0))
+        logger.info(f"文件大小: {total_size / 1024 / 1024:.1f} MB")
 
-            # 确保目录存在
-            local_db_path.parent.mkdir(parents=True, exist_ok=True)
+        # 确保目录存在
+        local_db_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # 下载并写入文件
-            downloaded = 0
-            with open(local_db_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if progress_callback and total_size > 0:
-                            progress = 50 + int((downloaded / total_size) * 40)
-                            progress_callback(progress, f"已下载 {downloaded//1024//1024}MB / {total_size//1024//1024}MB")
+        # 下载并写入文件，使用更大的块大小
+        downloaded = 0
+        with open(local_db_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback and total_size > 0:
+                        # 计算下载进度（30%开始，90%结束，留畀10%给验证）
+                        progress = 30 + int((downloaded / total_size) * 60)
+                        # 显示详细进度信息
+                        mb_downloaded = downloaded / 1024 / 1024
+                        mb_total = total_size / 1024 / 1024
+                        progress_callback(progress, f"正在下载数据库... {mb_downloaded:.1f}MB / {mb_total:.1f}MB")
 
-            # 验证数据库
-            conn = sqlite3.connect(local_db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM bull_library")
-            count = cursor.fetchone()[0]
+        # 验证数据库
+        if progress_callback:
+            progress_callback(92, "正在验证数据库完整性...")
+
+        conn = sqlite3.connect(local_db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='bull_library'")
+        if not cursor.fetchone():
             conn.close()
+            logger.error("下载的数据库缺少bull_library表")
+            return False, "下载的数据库格式错误"
 
-            if progress_callback:
-                progress_callback(100, "下载完成")
+        cursor.execute("SELECT COUNT(*) FROM bull_library")
+        count = cursor.fetchone()[0]
+        conn.close()
 
-            logger.info(f"成功从备用源下载数据库，包含{count}条记录")
-            return True, f"数据库下载成功，包含{count}条记录"
+        if progress_callback:
+            progress_callback(100, f"数据库下载完成（{count:,}条记录）")
 
-        except Exception as e:
-            logger.error(f"从{url}下载失败: {e}")
-            continue
+        logger.info(f"成功从OSS下载数据库，包含{count}条记录")
+        return True, f"数据库下载成功，包含{count}条记录"
 
-    return False, "所有下载源都失败了"
+    except Exception as e:
+        logger.error(f"从OSS下载失败: {e}")
+        return False, f"下载失败: {e}"
 
 def ensure_bull_library_exists(
     local_db_path: Path,

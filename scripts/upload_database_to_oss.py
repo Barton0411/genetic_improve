@@ -49,7 +49,7 @@ def upload_database():
         bucket = oss2.Bucket(auth, OSS_ENDPOINT, OSS_BUCKET_NAME)
 
         # OSS路径
-        oss_key = "databases/bull_library.db"
+        oss_key = "releases/bull_library/bull_library.db"
 
         print(f"正在上传到OSS: {oss_key}")
 
@@ -97,6 +97,17 @@ def upload_database():
         # 设置文件为公共读
         bucket.put_object_acl(oss_key, oss2.OBJECT_ACL_PUBLIC_READ)
         print("已设置为公共读权限")
+
+        # 上传版本文件
+        print("\n上传版本文件...")
+        version_file = project_root / "data" / "databases" / "bull_library_version.json"
+        if version_file.exists():
+            version_key = "releases/bull_library/bull_library_version.json"
+            bucket.put_object_from_file(version_key, str(version_file))
+            bucket.put_object_acl(version_key, oss2.OBJECT_ACL_PUBLIC_READ)
+            print(f"✅ 版本文件已上传: {OSS_BASE_URL}/{version_key}")
+        else:
+            print("⚠️ 版本文件不存在")
 
         return True
 

@@ -13,8 +13,13 @@ class DBUpdateWorker(QObject):
     @pyqtSlot()
     def run(self):
         try:
-            # 在这里可以添加更多的进度更新逻辑
-            run_update_process()
+            # 定义进度回调函数
+            def progress_callback(progress, message):
+                self.progress.emit(progress)
+                self.message.emit(message)
+
+            # 传递进度回调函数到更新过程
+            run_update_process(progress_callback=progress_callback)
 
             # 获取云端数据库的版本号和更新时间
             try:
