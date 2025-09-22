@@ -84,26 +84,31 @@ def main():
             logging.info("Splash screen closed")
             
             # 登录成功后立即检查版本更新（在创建主窗口之前）
-            logging.info("第一步：检查应用版本更新...")
-            try:
-                # 确保当前目录在Python路径中
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-                if current_dir not in sys.path:
-                    sys.path.insert(0, current_dir)
-                
-                from core.update.version_manager import check_and_handle_updates
-                should_exit = check_and_handle_updates()
-                if should_exit:
-                    logging.info("检测到强制更新，应用即将退出")
-                    # 强制更新时立即退出
-                    sys.exit(0)
-                else:
-                    logging.info("应用版本检查完成，现在创建主窗口...")
-            except Exception as e:
-                logging.warning(f"应用版本检查失败: {e}")
-                import traceback
-                logging.error(f"应用版本检查错误详情: {traceback.format_exc()}")
-                logging.info("应用版本检查失败，但继续创建主窗口...")
+            # 如果用户是 cs，跳过版本检查
+            username = login_dialog.username
+            if username == "cs":
+                logging.info("用户 cs 登录，跳过版本检查")
+            else:
+                logging.info("第一步：检查应用版本更新...")
+                try:
+                    # 确保当前目录在Python路径中
+                    current_dir = os.path.dirname(os.path.abspath(__file__))
+                    if current_dir not in sys.path:
+                        sys.path.insert(0, current_dir)
+
+                    from core.update.version_manager import check_and_handle_updates
+                    should_exit = check_and_handle_updates(username=username)
+                    if should_exit:
+                        logging.info("检测到强制更新，应用即将退出")
+                        # 强制更新时立即退出
+                        sys.exit(0)
+                    else:
+                        logging.info("应用版本检查完成，现在创建主窗口...")
+                except Exception as e:
+                    logging.warning(f"应用版本检查失败: {e}")
+                    import traceback
+                    logging.error(f"应用版本检查错误详情: {traceback.format_exc()}")
+                    logging.info("应用版本检查失败，但继续创建主窗口...")
             
             # 先测试是否能创建简单窗口
             logging.info("Testing simple window creation...")

@@ -480,38 +480,47 @@ class UpdateDialog(QDialog):
             return "win"
 
 
-def check_and_handle_updates(server_url: str = "https://genetic-improve.oss-cn-beijing.aliyuncs.com") -> bool:
+def check_and_handle_updates(server_url: str = "https://genetic-improve.oss-cn-beijing.aliyuncs.com", username: str = None) -> bool:
     """
     检查并处理更新
-    
+
     Args:
         server_url: 服务器URL
-        
+        username: 当前登录的用户名
+
     Returns:
         是否需要退出程序进行更新
     """
     logger.info("==================== 开始版本更新检查 ====================")
+
+    # 特殊用户跳过版本检查
+    if username == "cs":
+        logger.info(f"用户 '{username}' 具有版本检查豁免权限，跳过版本检查")
+        logger.info("==================== 版本更新检查结束（豁免用户） ====================")
+        return False
+
     try:
         logger.info(f"初始化版本管理器，服务器URL: {server_url}")
         manager = VersionManager(server_url)
-        
+
         logger.info(f"当前版本: {manager.current_version}")
         logger.info(f"检测到平台: {manager.platform_info}")
-        
+
         # 检查更新
         logger.info("正在检查更新...")
         has_update, version_info, is_force_update = manager.check_for_updates()
-        
+
         logger.info(f"更新检查结果: has_update={has_update}, is_force_update={is_force_update}")
-        
+
         if not has_update:
             logger.info("当前已是最新版本")
             logger.info("==================== 版本更新检查结束（无需更新） ====================")
             return False
-        
+
         latest_version_for_log = version_info.get('data', {}).get('version') or version_info.get('version', '未知')
         logger.info(f"发现新版本: {latest_version_for_log}，强制更新: {is_force_update}")
-        
+
+        # 对于强制更新，cs 用户也可以跳过
         if is_force_update:
             logger.info("准备显示强制更新对话框")
             # 强制更新 - 显示强制更新对话框
