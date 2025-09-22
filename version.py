@@ -3,7 +3,7 @@
 """
 
 # 版本号格式: 主版本号.次版本号.修订号.构建号 (xxx.xxx.xxx.xxx)
-VERSION = "1.1.2.0"
+VERSION = "1.1.0.0"
 
 # 版本历史
 VERSION_HISTORY = [

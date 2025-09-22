@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 import pandas as pd
-from sqlalchemy import create_engine, text
+import sqlite3
 from core.data.update_manager import LOCAL_DB_PATH
 from core.breeding_calc.cow_traits_calc import TRAITS_TRANSLATION
 from gui.progress import ProgressDialog
@@ -212,15 +212,37 @@ class MatedBullKeyTraitsPage(QWidget):
             progress_dialog.set_task_info("获取公牛性状数据")
             progress_dialog.update_progress(30)
             
-            engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
             selected_traits = self.get_selected_traits()
-            
+
             if not selected_traits:
                 progress_dialog.close()
                 QMessageBox.warning(self, "警告", "请至少选择一个性状")
                 return
 
-            with engine.connect() as conn:
+            # 检查数据库文件是否存在
+            import os
+            if not os.path.exists(LOCAL_DB_PATH):
+                progress_dialog.close()
+                QMessageBox.critical(self, "错误",
+                    f"本地数据库不存在，请先更新数据库。\n"
+                    f"数据库路径: {LOCAL_DB_PATH}\n"
+                    f"请点击菜单栏的'数据库更新'来下载数据库。")
+                return
+
+            # 使用sqlite3直接连接
+            conn = sqlite3.connect(LOCAL_DB_PATH)
+            try:
+                # 检查bull_library表是否存在
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='bull_library'")
+                if not cursor.fetchone():
+                    conn.close()
+                    progress_dialog.close()
+                    QMessageBox.critical(self, "错误",
+                        "数据库中缺少bull_library表。\n"
+                        "请点击菜单栏的'数据库更新'来更新数据库。")
+                    return
+
                 traits_data = []
                 
                 # 处理短ID公牛
@@ -232,12 +254,13 @@ class MatedBullKeyTraitsPage(QWidget):
                     param_names = [f':id{i}' for i in range(len(short_ids))]
                     params_dict = {f'id{i}': id_val for i, id_val in enumerate(short_ids)}
                     
-                    naab_query = text(
-                        f"""SELECT `BULL NAAB` as bull_id, {
+                    # 构建查询语句
+                    placeholders = ','.join(['?' for _ in short_ids])
+                    naab_query = f"""SELECT `BULL NAAB` as bull_id, {
                         ','.join(f'`{trait}`' for trait in selected_traits)
-                        } FROM bull_library WHERE `BULL NAAB` IN ({','.join(param_names)})"""
-                    )
-                    naab_df = pd.read_sql(naab_query, conn, params=params_dict)
+                        } FROM bull_library WHERE `BULL NAAB` IN ({placeholders})"""
+
+                    naab_df = pd.read_sql(naab_query, conn, params=list(short_ids))
                     traits_data.append(naab_df)
                     print(f"获取到 {len(naab_df)} 个短ID公牛的性状数据")
                 
@@ -250,12 +273,13 @@ class MatedBullKeyTraitsPage(QWidget):
                     param_names = [f':id{i}' for i in range(len(long_ids))]
                     params_dict = {f'id{i}': id_val for i, id_val in enumerate(long_ids)}
                     
-                    reg_query = text(
-                        f"""SELECT `BULL REG` as bull_id, {
+                    # 构建查询语句
+                    placeholders = ','.join(['?' for _ in long_ids])
+                    reg_query = f"""SELECT `BULL REG` as bull_id, {
                         ','.join(f'`{trait}`' for trait in selected_traits)
-                        } FROM bull_library WHERE `BULL REG` IN ({','.join(param_names)})"""
-                    )
-                    reg_df = pd.read_sql(reg_query, conn, params=params_dict)
+                        } FROM bull_library WHERE `BULL REG` IN ({placeholders})"""
+
+                    reg_df = pd.read_sql(reg_query, conn, params=list(long_ids))
                     traits_data.append(reg_df)
                     print(f"获取到 {len(reg_df)} 个长ID公牛的性状数据")
 
@@ -263,6 +287,8 @@ class MatedBullKeyTraitsPage(QWidget):
                     bull_traits_df = pd.concat(traits_data, ignore_index=True)
                 else:
                     bull_traits_df = pd.DataFrame(columns=['bull_id'] + selected_traits)
+            finally:
+                conn.close()
 
             # 4. 通过merge一次性关联数据
             progress_dialog.set_task_info("合并数据")
