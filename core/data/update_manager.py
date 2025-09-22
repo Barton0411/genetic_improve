@@ -206,6 +206,17 @@ def run_update_process(force_update: bool = False, progress_callback: Optional[C
         # 初始化本地数据库
         initialize_local_db()
 
+        # 首先确保bull_library数据库存在
+        from core.data.bull_library_downloader import ensure_bull_library_exists
+        if progress_callback:
+            progress_callback(10, "检查bull_library数据库...")
+
+        if not ensure_bull_library_exists(LOCAL_DB_PATH, progress_callback):
+            logging.error("无法获取bull_library数据库")
+            # 不返回False，继续尝试更新系谱库
+        else:
+            logging.info("bull_library数据库已就绪")
+
         # 获取系谱库（会自动更新）
         pedigree_db = get_pedigree_db(force_update=force_update, progress_callback=progress_callback)
 

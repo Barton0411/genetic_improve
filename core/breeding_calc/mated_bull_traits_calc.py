@@ -219,15 +219,21 @@ class MatedBullKeyTraitsPage(QWidget):
                 QMessageBox.warning(self, "警告", "请至少选择一个性状")
                 return
 
-            # 检查数据库文件是否存在
+            # 检查数据库文件是否存在，如果不存在则自动下载
             import os
             if not os.path.exists(LOCAL_DB_PATH):
-                progress_dialog.close()
-                QMessageBox.critical(self, "错误",
-                    f"本地数据库不存在，请先更新数据库。\n"
-                    f"数据库路径: {LOCAL_DB_PATH}\n"
-                    f"请点击菜单栏的'数据库更新'来下载数据库。")
-                return
+                progress_dialog.set_task_info("数据库不存在，正在自动下载...")
+                progress_dialog.update_progress(15)
+
+                from core.data.bull_library_downloader import ensure_bull_library_exists
+                if not ensure_bull_library_exists(LOCAL_DB_PATH):
+                    progress_dialog.close()
+                    QMessageBox.critical(self, "错误",
+                        f"无法自动下载数据库。\n"
+                        f"请检查网络连接后重试。")
+                    return
+
+                progress_dialog.set_task_info("数据库下载完成")
 
             # 使用sqlite3直接连接
             conn = sqlite3.connect(LOCAL_DB_PATH)

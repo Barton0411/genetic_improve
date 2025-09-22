@@ -153,6 +153,36 @@ class DataAPIClient:
             logger.error(f"上传缺失公牛记录失败: {e}")
             return False, str(e)
 
+    def download_bull_library(self, save_path: str) -> Tuple[bool, str]:
+        """
+        下载bull_library数据库文件
+
+        Args:
+            save_path: 保存路径
+
+        Returns:
+            Tuple[bool, str]: (成功标志, 消息或文件路径)
+        """
+        try:
+            response = self.session.get(
+                f"{self.base_url}:8082/api/data/bull_library",
+                stream=True,
+                timeout=120
+            )
+            response.raise_for_status()
+
+            # 保存文件
+            with open(save_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+            return True, save_path
+
+        except Exception as e:
+            logger.error(f"下载bull_library失败: {e}")
+            return False, str(e)
+
     def sync_bull_library(self) -> Tuple[bool, Optional[Dict], str]:
         """
         同步公牛库数据（替代check_and_update_database）
