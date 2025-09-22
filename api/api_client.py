@@ -9,6 +9,7 @@ import logging
 from typing import Tuple, Optional, Dict, Any
 from pathlib import Path
 import os
+import platform
 
 logger = logging.getLogger(__name__)
 
@@ -59,39 +60,72 @@ class APIClient:
     def _load_config(self, config_file: Optional[str] = None):
         """加载配置文件"""
         if config_file is None:
+            # 尝试多个位置查找配置文件
+            import sys
+            possible_paths = []
+
+            # 1. 项目根目录（开发环境）
             project_root = Path(__file__).parent.parent
-            config_file = project_root / "config" / "api_config.json"
+            possible_paths.append(project_root / "config" / "api_config.json")
+
+            # 2. 打包应用的资源目录（Mac .app）
+            if getattr(sys, 'frozen', False):
+                # 打包应用
+                if platform.system() == 'Darwin':
+                    # Mac应用包
+                    app_path = Path(sys.executable).parent.parent / "Resources"
+                    possible_paths.append(app_path / "config" / "api_config.json")
+                    # 也尝试MacOS目录
+                    app_path2 = Path(sys.executable).parent
+                    possible_paths.append(app_path2 / "config" / "api_config.json")
+                else:
+                    # Windows应用
+                    app_path = Path(sys.executable).parent
+                    possible_paths.append(app_path / "config" / "api_config.json")
+
+            # 查找第一个存在的配置文件
+            config_file = None
+            for path in possible_paths:
+                if path.exists():
+                    config_file = path
+                    logger.info(f"找到配置文件: {config_file}")
+                    break
+
+            if config_file is None:
+                logger.warning(f"在以下位置都未找到配置文件: {possible_paths}")
 
         try:
-            if Path(config_file).exists():
+            if config_file and Path(config_file).exists():
                 with open(config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
 
                 current_env = config.get('current_environment', 'production')
                 env_config = config.get('environments', {}).get(current_env, {})
 
-                self.base_url = env_config.get('api_base_url', 'https://api.genepop.com').rstrip('/')
+                self.base_url = env_config.get('api_base_url', 'http://39.96.189.27').rstrip('/')
                 self.timeout = env_config.get('timeout', 15)
                 self.retry_attempts = env_config.get('retry_attempts', 3)
 
                 # 加载安全配置
                 security_config = config.get('security', {})
-                self.verify_ssl = security_config.get('verify_ssl', True)
+                self.verify_ssl = security_config.get('verify_ssl', False)
 
                 logger.info(f"已加载API配置 - 环境: {current_env}, URL: {self.base_url}, SSL验证: {self.verify_ssl}")
             else:
-                # 默认配置
-                self.base_url = "https://api.genepop.com"
+                # 默认配置 - 使用可靠的HTTP连接
+                self.base_url = "http://39.96.189.27"
                 self.timeout = 15
                 self.retry_attempts = 3
-                self.verify_ssl = True
-                logger.warning("未找到配置文件，使用默认配置")
+                self.verify_ssl = False
+                logger.warning("未找到配置文件，使用默认配置（HTTP）")
 
         except Exception as e:
             logger.error(f"加载配置文件失败: {e}，使用默认配置")
-            self.base_url = "https://api.genepop.com"
+            # 使用可靠的HTTP连接作为默认
+            self.base_url = "http://39.96.189.27"
             self.timeout = 15
             self.retry_attempts = 3
+            self.verify_ssl = False
 
     def _restore_token_from_manager(self):
         """从token manager恢复令牌"""
