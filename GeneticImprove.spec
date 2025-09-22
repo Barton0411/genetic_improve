@@ -16,8 +16,12 @@ a = Analysis(
         # 添加其他必要的数据文件夹
         ('core', 'core'),
         ('version.py', '.'),
-        # 添加图标文件  
+        # 添加图标文件
         ('icon.ico', '_internal'),
+        # 添加预装数据库文件
+        ('data/databases/bull_library.db', 'data/databases'),
+        # 添加配置文件
+        ('config', 'config'),
     ],
     hiddenimports=[
         # PyQt6 相关模块
@@ -120,12 +124,12 @@ app = BUNDLE(
     name='伊利奶牛选配.app',
     icon=icon_path,
     bundle_identifier='com.yili.breeding.app',
-    version='1.1.0.0',
+    version='1.2.0.1',
     info_plist={
         'CFBundleName': '伊利奶牛选配',
         'CFBundleDisplayName': '伊利奶牛选配',
-        'CFBundleVersion': '1.1.0.0',
-        'CFBundleShortVersionString': '1.1.0.0',
+        'CFBundleVersion': '1.2.0.1',
+        'CFBundleShortVersionString': '1.2.0.1',
         'CFBundleIdentifier': 'com.yili.breeding.app',
         'CFBundleInfoDictionaryVersion': '6.0',
         'CFBundlePackageType': 'APPL',

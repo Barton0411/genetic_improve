@@ -10,8 +10,54 @@ from pathlib import Path
 from typing import Optional, Callable, Tuple
 import json
 import pandas as pd
+import sys
+import os
 
 logger = logging.getLogger(__name__)
+
+def check_bundled_database() -> Optional[Path]:
+    """
+    检查是否存在打包的预装数据库
+
+    Returns:
+        Path: 预装数据库路径，如果不存在则返回None
+    """
+    try:
+        # 检查是否是打包的应用
+        if getattr(sys, 'frozen', False):
+            # 打包应用的基础路径
+            if sys.platform == 'darwin':
+                # macOS .app bundle
+                base_path = Path(sys._MEIPASS)
+            else:
+                # Windows
+                base_path = Path(sys.executable).parent
+
+            # 尝试多个可能的位置
+            possible_paths = [
+                base_path / 'data' / 'databases' / 'bull_library.db',
+                base_path / '_internal' / 'data' / 'databases' / 'bull_library.db',
+                base_path / 'bull_library.db',
+            ]
+        else:
+            # 开发环境
+            base_path = Path(__file__).parent.parent.parent
+            possible_paths = [
+                base_path / 'data' / 'databases' / 'bull_library.db',
+            ]
+
+        # 检查每个可能的路径
+        for db_path in possible_paths:
+            if db_path.exists():
+                logger.info(f"找到预装数据库: {db_path}")
+                return db_path
+
+        logger.debug("未找到预装数据库")
+        return None
+
+    except Exception as e:
+        logger.warning(f"检查预装数据库时出错: {e}")
+        return None
 
 def download_bull_library(
     local_db_path: Path,
@@ -168,11 +214,27 @@ def ensure_bull_library_exists(
     try:
         # 检查文件是否存在
         if not local_db_path.exists():
-            logger.info("bull_library.db不存在，开始自动下载")
-            success, msg = download_bull_library(local_db_path, progress_callback)
-            if not success:
-                logger.error(f"自动下载失败: {msg}")
-                return False
+            # 首先尝试从打包的应用中复制数据库
+            bundled_db = check_bundled_database()
+            if bundled_db and bundled_db.exists():
+                logger.info(f"发现预装数据库: {bundled_db}")
+                try:
+                    import shutil
+                    local_db_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(bundled_db, local_db_path)
+                    logger.info(f"成功复制预装数据库到: {local_db_path}")
+                    if progress_callback:
+                        progress_callback(100, "使用预装数据库")
+                except Exception as e:
+                    logger.warning(f"复制预装数据库失败: {e}")
+
+            # 如果复制失败或没有预装数据库，则下载
+            if not local_db_path.exists():
+                logger.info("bull_library.db不存在，开始自动下载")
+                success, msg = download_bull_library(local_db_path, progress_callback)
+                if not success:
+                    logger.error(f"自动下载失败: {msg}")
+                    return False
 
         # 验证数据库完整性
         conn = sqlite3.connect(local_db_path)

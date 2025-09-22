@@ -17,7 +17,7 @@ a = Analysis(
         # 添加其他必要的数据文件夹
         ('core', 'core'),
         ('version.py', '.'),
-        # 添加图标文件  
+        # 添加图标文件
         ('icon.ico', '.'),
         # 添加配置文件
         ('config', 'config'),
@@ -25,6 +25,8 @@ a = Analysis(
         ('templates', 'templates'),
         # 添加阿里云登录模块
         ('aliyun_login_module', 'aliyun_login_module'),
+        # 添加预装数据库文件
+        ('data/databases/bull_library.db', 'data/databases'),
         # 添加其他必要资源
         ('startup.mp4', '.'),
         ('homepage.jpg', '.'),
