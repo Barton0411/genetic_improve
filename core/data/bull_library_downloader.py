@@ -230,38 +230,90 @@ def download_from_oss(
     # OSS地址
     oss_url = "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/bull_library/bull_library.db"
 
-    try:
-        logger.info(f"从OSS下载: {oss_url}")
+    import time
+    max_retries = 3  # 最大重试次数
+    retry_count = 0
 
-        if progress_callback:
-            progress_callback(30, "正在连接OSS服务器...")
+    while retry_count < max_retries:
+        try:
+            if retry_count > 0:
+                logger.info(f"第{retry_count}次重试下载...")
+                if progress_callback:
+                    progress_callback(25, f"第{retry_count}次重试连接...")
+                time.sleep(2)  # 等待2秒再重试
 
-        # 使用较长的超时时间，因为文件较大（132MB）
-        response = requests.get(oss_url, stream=True, timeout=180)
-        response.raise_for_status()
+            logger.info(f"从OSS下载: {oss_url}")
+
+            if progress_callback:
+                progress_callback(30, "正在连接OSS服务器...")
+
+            # 使用较长的超时时间，因为文件较大（132MB）
+            # 连接超时30秒，读取超时300秒
+            response = requests.get(oss_url, stream=True, timeout=(30, 300))
+            response.raise_for_status()
 
         # 获取文件大小
         total_size = int(response.headers.get('content-length', 0))
         logger.info(f"文件大小: {total_size / 1024 / 1024:.1f} MB")
 
-        # 确保目录存在
-        local_db_path.parent.mkdir(parents=True, exist_ok=True)
+            # 确保目录存在
+            local_db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # 下载并写入文件，使用更大的块大小
-        downloaded = 0
-        with open(local_db_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if progress_callback and total_size > 0:
-                        # 计算下载进度（30%开始，90%结束，留畀10%给验证）
-                        progress = 30 + int((downloaded / total_size) * 60)
-                        # 显示详细进度信息
-                        mb_downloaded = downloaded / 1024 / 1024
-                        mb_total = total_size / 1024 / 1024
-                        progress_callback(progress, f"正在下载数据库... {mb_downloaded:.1f}MB / {mb_total:.1f}MB")
+            # 下载并写入文件，使用更大的块大小
+            downloaded = 0
+            last_update_time = time.time()
 
+            # 如果文件已经部分下载，删除并重新下载（避免损坏文件）
+            if local_db_path.exists():
+                local_db_path.unlink()
+
+            with open(local_db_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+
+                        # 每秒更新一次进度，避免频繁更新UI
+                        current_time = time.time()
+                        if progress_callback and total_size > 0 and (current_time - last_update_time) > 0.5:
+                            # 计算下载进度（30%开始，90%结束，留畀10%给验证）
+                            progress = 30 + int((downloaded / total_size) * 60)
+                            # 显示详细进度信息
+                            mb_downloaded = downloaded / 1024 / 1024
+                            mb_total = total_size / 1024 / 1024
+                            progress_callback(progress, f"正在下载数据库... {mb_downloaded:.1f}MB / {mb_total:.1f}MB")
+                            last_update_time = current_time
+
+            # 下载成功，跳出重试循环
+            break
+
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            retry_count += 1
+            error_msg = f"网络连接错误: {e}"
+            logger.warning(f"{error_msg}，重试{retry_count}/{max_retries}")
+
+            # 如果还有重试机会，继续循环
+            if retry_count < max_retries:
+                continue
+            else:
+                # 没有重试机会了
+                return False, f"下载失败（网络连接问题）: {e}"
+
+        except requests.exceptions.HTTPError as e:
+            # HTTP错误一般不重试
+            logger.error(f"HTTP错误: {e}")
+            return False, f"下载失败（HTTP错误）: {e}"
+
+        except Exception as e:
+            # 其他错误
+            logger.error(f"下载过程出错: {e}")
+            return False, f"下载失败: {e}"
+
+    # 如果所有重试都失败
+    if retry_count >= max_retries:
+        return False, f"OSS数据库下载失败，已重试{max_retries}次"
+
+    try:
         # 验证数据库
         if progress_callback:
             progress_callback(92, "正在验证数据库完整性...")
@@ -272,11 +324,21 @@ def download_from_oss(
         if not cursor.fetchone():
             conn.close()
             logger.error("下载的数据库缺少bull_library表")
+            # 删除损坏的数据库文件
+            if local_db_path.exists():
+                local_db_path.unlink()
             return False, "下载的数据库格式错误"
 
         cursor.execute("SELECT COUNT(*) FROM bull_library")
         count = cursor.fetchone()[0]
         conn.close()
+
+        if count == 0:
+            logger.error("数据库为空")
+            # 删除空数据库
+            if local_db_path.exists():
+                local_db_path.unlink()
+            return False, "下载的数据库为空"
 
         if progress_callback:
             progress_callback(100, f"数据库下载完成（{count:,}条记录）")
@@ -285,8 +347,11 @@ def download_from_oss(
         return True, f"数据库下载成功，包含{count}条记录"
 
     except Exception as e:
-        logger.error(f"从OSS下载失败: {e}")
-        return False, f"下载失败: {e}"
+        logger.error(f"验证数据库时出错: {e}")
+        # 删除可能损坏的数据库文件
+        if local_db_path.exists():
+            local_db_path.unlink()
+        return False, f"数据库验证失败: {e}"
 
 def ensure_bull_library_exists(
     local_db_path: Path,

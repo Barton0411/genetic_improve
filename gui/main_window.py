@@ -1643,27 +1643,56 @@ class MainWindow(QMainWindow):
                 self.progress_dialog = None
         except:
             pass
-        
+
+        # 记录详细错误到日志
+        logging.error(f"数据库更新错误详情: {error_message}")
+
         # 判断错误类型并给出友好提示
+        is_critical = False  # 是否是关键错误
         friendly_message = "数据库更新失败"
-        
-        if "Can't connect to MySQL server" in error_message:
+
+        # 检查是否是OSS下载失败
+        if "下载失败" in error_message or "OSS" in error_message or "genetic-improve.oss" in error_message:
+            is_critical = True
+            friendly_message = "数据库下载失败\n\n数据库是程序运行的必要组件，必须下载成功才能继续。\n\n可能的原因：\n1. 网络连接不稳定\n2. 下载过程被中断\n3. 服务器暂时不可用\n\n请检查网络连接后重试。"
+        elif "Can't connect to MySQL server" in error_message:
             friendly_message = "无法连接到数据库服务器，请检查您的网络连接。\n\n程序将使用本地数据库继续运行。"
         elif "nodename nor servname provided" in error_message:
             friendly_message = "网络连接异常，无法解析服务器地址。\n\n程序将使用本地数据库继续运行。"
         elif "timed out" in error_message.lower():
-            friendly_message = "连接超时，请检查网络连接。\n\n程序将使用本地数据库继续运行。"
+            is_critical = True  # 超时也可能是下载过程中断
+            friendly_message = "连接超时\n\n数据库下载超时，请检查网络连接稳定性。\n\n数据库文件较大（132MB），需要稳定的网络连接。"
         elif "Access denied" in error_message:
             friendly_message = "数据库访问被拒绝。\n\n请联系管理员检查权限设置。"
         else:
             # 对于其他错误，只显示简短信息
             friendly_message = "数据库同步失败。\n\n程序将使用本地数据库继续运行。"
-        
-        # 记录详细错误到日志
-        logging.error(f"数据库更新错误详情: {error_message}")
-        
-        # 显示友好的错误提示
-        QMessageBox.warning(self, "数据库同步提示", friendly_message)
+
+        # 显示错误对话框，如果是关键错误，提供重试选项
+        if is_critical:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("数据库更新失败")
+            msg_box.setIcon(QMessageBox.Icon.Critical)
+            msg_box.setText(friendly_message)
+
+            # 添加重试和退出按钮
+            retry_button = msg_box.addButton("重试", QMessageBox.ButtonRole.AcceptRole)
+            exit_button = msg_box.addButton("退出程序", QMessageBox.ButtonRole.RejectRole)
+
+            msg_box.exec()
+
+            if msg_box.clickedButton() == retry_button:
+                # 重试数据库更新
+                logging.info("用户选择重试数据库更新")
+                QTimer.singleShot(500, self.check_and_update_database)
+            else:
+                # 退出程序
+                logging.info("用户选择退出程序")
+                QMessageBox.information(self, "退出程序", "由于数据库是必要组件，程序将退出。\n\n请修复网络问题后重新启动程序。")
+                QApplication.quit()
+        else:
+            # 非关键错误，只显示警告
+            QMessageBox.warning(self, "数据库同步提示", friendly_message)
 
     def show_sub_nav_menu(self, pos, sub_items):
         """显示子导航菜单"""
