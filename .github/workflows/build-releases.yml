@@ -44,7 +44,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pyinstaller
-    
+
+    - name: Prepare database file
+      run: |
+        python scripts/prepare_database.py
+
     - name: Generate changelog
       run: |
         python auto_generate_changelog.py
@@ -189,7 +193,11 @@ jobs:
         pip install pyinstaller
         # 安装创建DMG的工具
         brew install create-dmg
-    
+
+    - name: Prepare database file
+      run: |
+        python3 scripts/prepare_database.py
+
     - name: Generate changelog
       run: |
         python3 auto_generate_changelog.py

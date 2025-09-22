@@ -24,7 +24,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pyinstaller
-    
+
+    - name: Prepare database file
+      run: |
+        python scripts/prepare_database.py
+
     - name: Build executable with PyInstaller (Folder Mode)
       run: |
         # 使用文件夹模式，启动更快
@@ -33,6 +37,7 @@ jobs:
           --add-data="config;config" `
           --add-data="templates;templates" `
           --add-data="docs;docs" `
+          --add-data="data/databases/bull_library.db;data/databases" `
           --add-data="*.mp4;." `
           --add-data="*.jpg;." `
           --add-data="*.ico;." `
