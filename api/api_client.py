@@ -121,13 +121,24 @@ class APIClient:
         """
         url = f"{self.base_url}{endpoint}"
 
+        # 详细日志记录
+        logger.info(f"Making {method} request to: {url}")
+        logger.debug(f"SSL verification: {self.verify_ssl}")
+        logger.debug(f"Timeout: {self.timeout}s")
+        if data:
+            # 不记录密码等敏感信息
+            safe_data = {k: '***' if 'password' in k.lower() else v for k, v in data.items()}
+            logger.debug(f"Request data: {safe_data}")
+
         try:
             # 合并请求头
             req_headers = self.session.headers.copy()
             if headers:
                 req_headers.update(headers)
+            logger.debug(f"Request headers: {req_headers}")
 
             # 发送请求（使用SSL验证配置）
+            logger.info(f"Sending {method} request...")
             if method.upper() == 'GET':
                 response = self.session.get(url, timeout=self.timeout, headers=req_headers, verify=self.verify_ssl)
             elif method.upper() == 'POST':
@@ -135,20 +146,28 @@ class APIClient:
             else:
                 raise ValueError(f"不支持的HTTP方法: {method}")
 
+            logger.info(f"Response status code: {response.status_code}")
+            logger.debug(f"Response headers: {response.headers}")
+
             # 检查HTTP状态码
             response.raise_for_status()
 
             # 解析JSON响应
             result = response.json()
+            logger.debug(f"Response data: {result}")
 
             return True, result
 
-        except requests.exceptions.ConnectionError:
+        except requests.exceptions.ConnectionError as e:
             logger.error(f"网络连接失败: {url}")
+            logger.error(f"ConnectionError details: {str(e)}")
+            import traceback
+            logger.debug(f"Traceback: {traceback.format_exc()}")
             return False, {"success": False, "message": "网络连接失败，请检查网络后重试"}
 
-        except requests.exceptions.Timeout:
+        except requests.exceptions.Timeout as e:
             logger.error(f"请求超时: {url}")
+            logger.error(f"Timeout details: {str(e)}")
             return False, {"success": False, "message": "请求超时，请稍后重试"}
 
         except requests.exceptions.HTTPError as e:
