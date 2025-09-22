@@ -1612,6 +1612,11 @@ class MainWindow(QMainWindow):
                 # 最后备用消息
                 message = "本地数据库已成功检查和更新。"
 
+        # 如果是 cs 用户，显示数据库存储位置
+        if hasattr(self, 'username') and self.username == "cs":
+            from core.data.update_manager import LOCAL_DB_PATH
+            message += f"\n\n数据库本地存储位置：\n{LOCAL_DB_PATH}"
+
         logging.info(message)
         QMessageBox.information(self, "更新完成", message)
 

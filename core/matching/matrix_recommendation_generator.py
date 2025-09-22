@@ -37,7 +37,11 @@ class MatrixRecommendationGenerator:
             # 加载母牛数据
             cow_file = self.project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
             if not cow_file.exists():
-                error_msg = f"未找到母牛指数数据文件: {cow_file}"
+                error_msg = (
+                    f"缺少母牛指数数据文件：processed_index_cow_index_scores.xlsx\n"
+                    f"文件路径：{cow_file}\n"
+                    f"解决方法：请先执行「母牛育种指数计算」功能"
+                )
                 logger.error(error_msg)
                 self.last_error = error_msg
                 return False
@@ -52,7 +56,13 @@ class MatrixRecommendationGenerator:
             )]
             
             if not score_cols:
-                logger.error("母牛数据中缺少育种指数得分列（如 *_index 或 *Index*），请先进行母牛育种指数计算")
+                error_msg = (
+                    f"母牛数据文件缺少育种指数得分列\n"
+                    f"需要包含：*_index 或 *Index* 列名\n"
+                    f"解决方法：请重新执行「母牛育种指数计算」功能"
+                )
+                logger.error(error_msg)
+                self.last_error = error_msg
                 return False
             
             # 记录找到的得分列
@@ -64,7 +74,11 @@ class MatrixRecommendationGenerator:
             # 加载公牛数据
             bull_file = self.project_path / "standardized_data" / "processed_bull_data.xlsx"
             if not bull_file.exists():
-                error_msg = f"未找到公牛数据文件: {bull_file}"
+                error_msg = (
+                    f"缺少公牛数据文件：processed_bull_data.xlsx\n"
+                    f"文件路径：{bull_file}\n"
+                    f"请先上传公牛库存文件（冻精库存表）"
+                )
                 logger.error(error_msg)
                 self.last_error = error_msg
                 return False
@@ -100,9 +114,13 @@ class MatrixRecommendationGenerator:
         try:
             # 尝试查找备选公牛近交系数文件
             possible_files = list(self.project_path.glob("**/备选公牛_近交系数及隐性基因分析结果_*.xlsx"))
-            
+
             if not possible_files:
-                error_msg = f"未找到备选公牛近交系数及隐性基因分析结果文件，请先进行「备选公牛近交和隐性基因分析」"
+                error_msg = (
+                    f"缺少文件：备选公牛_近交系数及隐性基因分析结果_*.xlsx\n"
+                    f"搜索路径：{self.project_path}\n"
+                    f"解决方法：请先执行「备选公牛近交和隐性基因分析」功能"
+                )
                 logger.error(error_msg)
                 self.last_error = error_msg
                 return False
@@ -156,166 +174,99 @@ class MatrixRecommendationGenerator:
             return False
             
     def _load_bull_traits(self):
-        """加载公牛性状数据"""
+        """加载公牛性状数据 - 只从用户的育种指数文件加载"""
         try:
-            # 优先尝试从项目的公牛指数计算结果文件加载
+            # 尝试从项目的公牛指数计算结果文件加载
             bull_scores_file = self.project_path / "analysis_results" / "processed_index_bull_scores.xlsx"
-            if bull_scores_file.exists():
-                bull_scores_df = pd.read_excel(bull_scores_file)
-                
-                # 查找指数列（类似母牛的处理方式）
-                index_cols = [col for col in bull_scores_df.columns if '_index' in col.lower() or 'index' in col.lower()]
-                score_cols = [col for col in index_cols if not any(
-                    exclude in col.lower() for exclude in ['date', 'time', 'id', 'name', 'type']
-                )]
-                
-                if score_cols:
-                    # 使用找到的第一个指数列
-                    score_col = score_cols[0]
-                    logger.info(f"使用公牛指数列: {score_col}")
-                    
-                    # 合并到公牛数据
-                    self.bull_data = self.bull_data.merge(
-                        bull_scores_df[['bull_id', score_col]].rename(columns={score_col: 'Index Score'}),
-                        on='bull_id',
-                        how='left'
-                    )
-                    
-                    # 检查是否有缺失值
-                    missing_bulls = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
-                    if missing_bulls:
-                        logger.warning(f"以下公牛在指数文件中缺少数据，将尝试从数据库获取: {missing_bulls}")
-                        # 记录但继续处理
-                        self.skipped_bulls.extend(missing_bulls)
 
-                    # 如果至少有一部分公牛有数据，继续处理
-                    if self.bull_data['Index Score'].notna().any():
-                        logger.info(f"从公牛指数文件加载了 {self.bull_data['Index Score'].notna().sum()} 头公牛数据")
-                        # 继续尝试从数据库补充缺失的数据
-                    else:
-                        logger.warning("公牛指数文件中所有公牛都缺少数据，尝试从数据库获取")
-                else:
-                    logger.warning("公牛指数文件中未找到指数列")
-            
-            # 如果文件不存在或数据不完整，尝试从数据库获取
-            from sqlalchemy import create_engine, text
-            import os
-            
-            # 查找数据库文件
-            db_path = self.project_path.parent.parent.parent / "local_bull_library.db"
-            if not db_path.exists():
-                # 尝试其他可能的路径
-                db_path = Path("/Users/Shared/Files From d.localized/projects/mating/genetic_improve/local_bull_library.db")
-            
-            if db_path.exists():
-                engine = create_engine(f'sqlite:///{db_path}')
-                
-                # 查询公牛性状
-                query = """
-                SELECT `BULL NAAB` as bull_id, `NM$`, `TPI`, `MILK`, `FAT`, `FAT %`, 
-                       `PROT`, `PROT%`, `PL`, `DPR`, `UDC`, `FLC`, `RFI`
-                FROM bull_library
-                """
-                
-                with engine.connect() as conn:
-                    bull_traits = pd.read_sql(text(query), conn)
-                    
-                # 合并到公牛数据中
-                if not bull_traits.empty:
-                    # 计算综合指数得分（使用TPI或NM$作为主要指标）
-                    bull_traits['Index Score'] = bull_traits[['TPI', 'NM$']].max(axis=1)
-                    
-                    # 合并数据
-                    self.bull_data = self.bull_data.merge(
-                        bull_traits[['bull_id', 'Index Score', 'TPI', 'NM$']], 
-                        on='bull_id', 
-                        how='left'
-                    )
-                    
-                    # 补充缺失数据的公牛性状
-                    missing_bulls = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
-                    if missing_bulls:
-                        # 只为缺失的公牛补充数据
-                        missing_traits = bull_traits[bull_traits['bull_id'].isin(missing_bulls)]
-                        if not missing_traits.empty:
-                            missing_traits['Index Score'] = missing_traits[['TPI', 'NM$']].max(axis=1)
-                            # 更新缺失的数据
-                            for _, bull in missing_traits.iterrows():
-                                self.bull_data.loc[self.bull_data['bull_id'] == bull['bull_id'], 'Index Score'] = bull['Index Score']
-                    
-                    engine.dispose()
-                    
-                    # 最终检查
-                    final_missing = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
-                    if final_missing:
-                        # 记录被跳过的公牛
-                        self.skipped_bulls = list(set(self.skipped_bulls + final_missing))
-
-                        valid_count = self.bull_data['Index Score'].notna().sum()
-                        if valid_count > 0:
-                            # 有部分公牛有数据，允许继续
-                            warning_msg = f"以下 {len(final_missing)} 头公牛缺少性状数据，将被跳过选配: {final_missing[:5]}{'...' if len(final_missing) > 5 else ''}"
-                            logger.warning(warning_msg)
-                            self.last_error = f"警告: {warning_msg}\n但有 {valid_count} 头公牛可用于选配"
-                            logger.info(f"使用 {valid_count} 头公牛的数据进行选配")
-                            return True
-                        else:
-                            # 没有任何公牛有数据
-                            error_msg = f"所有公牛都缺少性状数据，无法进行选配。\n缺失的公牛: {final_missing[:10]}...（共{len(final_missing)}头）\n请先进行公牛育种指数计算或更新公牛数据库"
-                            logger.error(error_msg)
-                            self.last_error = error_msg
-                            return False
-                    
-                    logger.info("成功从数据库补充公牛性状数据")
-                    return True
-                else:
-                    engine.dispose()
-                    # 检查是否已经有数据
-                    if 'Index Score' in self.bull_data.columns and self.bull_data['Index Score'].notna().any():
-                        logger.info("使用已有的公牛指数数据")
-                        return True
-                    else:
-                        error_msg = "公牛数据库中没有性状数据，请先进行公牛育种指数计算"
-                        logger.error(error_msg)
-                        self.last_error = error_msg
-                        return False
-            else:
-                # 检查是否已经从文件加载了数据
-                if 'Index Score' in self.bull_data.columns and self.bull_data['Index Score'].notna().all():
-                    logger.info("使用公牛指数文件数据")
-                    return True
-                else:
-                    # 即使没有数据库，如果有部分公牛有数据也允许继续
-                    if 'Index Score' in self.bull_data.columns and self.bull_data['Index Score'].notna().any():
-                        valid_count = self.bull_data['Index Score'].notna().sum()
-                        missing_bulls = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
-
-                        # 记录被跳过的公牛
-                        self.skipped_bulls = list(set(self.skipped_bulls + missing_bulls))
-
-                        if missing_bulls:
-                            warning_msg = f"以下 {len(missing_bulls)} 头公牛缺少指数数据，将被跳过选配: {missing_bulls[:5]}{'...' if len(missing_bulls) > 5 else ''}"
-                            logger.warning(warning_msg)
-                            self.last_error = f"警告: {warning_msg}\n但有 {valid_count} 头公牛可用于选配"
-
-                        logger.info(f"使用 {valid_count} 头公牛的指数数据进行选配")
-                        return True
-                    else:
-                        error_msg = "所有公牛都缺少指数数据，无法进行选配。请先进行公牛育种指数计算"
-                        logger.error(error_msg)
-                        self.last_error = error_msg
-                        return False
-                
-        except Exception as e:
-            logger.error(f"加载公牛性状失败: {e}")
-            # 检查是否已经有数据
-            if 'Index Score' in self.bull_data.columns and self.bull_data['Index Score'].notna().any():
-                logger.info("使用已有的公牛指数数据")
-                return True
-            else:
-                logger.error("请先进行公牛育种指数计算")
+            if not bull_scores_file.exists():
+                error_msg = (
+                    f"缺少公牛育种指数文件\n"
+                    f"文件路径：{bull_scores_file}\n"
+                    f"解决方法：请先执行「公牛育种指数计算」功能"
+                )
+                logger.error(error_msg)
+                self.last_error = error_msg
                 return False
 
+            bull_scores_df = pd.read_excel(bull_scores_file)
+
+            # 查找指数列（类似母牛的处理方式）
+            index_cols = [col for col in bull_scores_df.columns if '_index' in col.lower() or 'index' in col.lower()]
+            score_cols = [col for col in index_cols if not any(
+                exclude in col.lower() for exclude in ['date', 'time', 'id', 'name', 'type']
+            )]
+
+            if not score_cols:
+                error_msg = (
+                    f"公牛育种指数文件缺少指数列\n"
+                    f"文件：{bull_scores_file}\n"
+                    f"需要包含：*_index 或 *Index* 列（如 NM$权重_index）\n"
+                    f"解决方法：请重新执行「公牛育种指数计算」功能"
+                )
+                logger.error(error_msg)
+                self.last_error = error_msg
+                return False
+
+            # 使用找到的第一个指数列
+            score_col = score_cols[0]
+            logger.info(f"使用公牛指数列: {score_col}")
+
+            # 合并到公牛数据
+            self.bull_data = self.bull_data.merge(
+                bull_scores_df[['bull_id', score_col]].rename(columns={score_col: 'Index Score'}),
+                on='bull_id',
+                how='left'
+            )
+
+            # 检查是否有缺失值
+            missing_bulls = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
+
+            if missing_bulls:
+                if self.skip_missing_bulls_flag:
+                    # 允许跳过缺失的公牛
+                    self.skipped_bulls = list(set(self.skipped_bulls + missing_bulls))
+                    valid_count = self.bull_data['Index Score'].notna().sum()
+                    if valid_count > 0:
+                        warning_msg = f"以下 {len(missing_bulls)} 头公牛缺少育种指数，将被跳过: {missing_bulls[:5]}{'...' if len(missing_bulls) > 5 else ''}"
+                        logger.warning(warning_msg)
+                        self.last_error = f"警告: {warning_msg}\n但有 {valid_count} 头公牛可用于选配"
+                        logger.info(f"从公牛指数文件加载了 {valid_count} 头公牛数据")
+                        return True
+                    else:
+                        error_msg = (
+                            f"所有公牛都缺少育种指数数据\n"
+                            f"解决方法：请先执行「公牛育种指数计算」功能"
+                        )
+                        logger.error(error_msg)
+                        self.last_error = error_msg
+                        return False
+                else:
+                    # 不允许跳过，返回错误
+                    error_msg = (
+                        f"以下公牛缺少育种指数数据: {missing_bulls[:10]}{'...' if len(missing_bulls) > 10 else ''}\n"
+                        f"解决方法：\n"
+                        f"1. 执行「公牛育种指数计算」功能为这些公牛生成育种指数\n"
+                        f"2. 或选择「跳过缺失数据的公牛」选项继续选配"
+                    )
+                    logger.error(error_msg)
+                    self.last_error = error_msg
+                    return False
+
+            # 所有公牛都有数据
+            logger.info(f"成功加载了所有 {len(self.bull_data)} 头公牛的育种指数数据")
+            return True
+
+        except Exception as e:
+            error_msg = (
+                f"加载公牛育种指数失败: {e}\n"
+                f"文件：{self.project_path}/analysis_results/processed_index_bull_scores.xlsx\n"
+                f"解决方法：请先执行「公牛育种指数计算」功能\n"
+                f"注意：需要包含用户自定义的育种指数列（如 NM$权重_index）"
+            )
+            logger.error(error_msg)
+            self.last_error = error_msg
+            return False
     def _check_bull_data_quality(self):
         """检查公牛数据质量并生成汇总报告"""
         if self.bull_data.empty:

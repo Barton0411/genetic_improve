@@ -49,7 +49,7 @@ sudo journalctl -u genetic-data-api -f
 | 项目信息 | 详情 |
 |---------|------|
 | **项目名称** | 伊利奶牛选配系统 (Genetic Improve) |
-| **当前版本** | v1.1.2.0 (2025-09-21) |
+| **当前版本** | v1.2.0.1 (2025-09-22) |
 | **开发路径** | `/Users/bozhenwang/projects/mating/genetic_improve` |
 | **Git仓库** | `https://github.com/Barton0411/genetic_improve.git` |
 | **技术栈** | PyQt6 + FastAPI + MySQL |

@@ -39,7 +39,10 @@ def get_project_root() -> Path:
 
 # 获取本地数据库路径
 LOCAL_DB_DIR = Path.home() / ".genetic_improve"
-LOCAL_DB_PATH = LOCAL_DB_DIR / "local_bull_library.db"
+# 优先使用云数据库同步的本地缓存
+LOCAL_DB_CACHE_PATH = LOCAL_DB_DIR / "bull_library_cache.db"
+# 如果缓存存在就使用缓存，否则用原路径
+LOCAL_DB_PATH = LOCAL_DB_CACHE_PATH if LOCAL_DB_CACHE_PATH.exists() else LOCAL_DB_DIR / "local_bull_library.db"
 
 # 系谱缓存路径
 PEDIGREE_CACHE_PATH = LOCAL_DB_DIR / "pedigree_cache.pkl"

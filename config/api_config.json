@@ -19,7 +19,7 @@
       "description": "生产环境(域名)"
     }
   },
-  "current_environment": "production",
+  "current_environment": "production_domain",
   "logging": {
     "level": "INFO",
     "log_api_requests": false,

@@ -165,7 +165,7 @@ class DataAPIClient:
         """
         try:
             response = self.session.get(
-                f"{self.base_url}:8082/api/data/bull_library",
+                f"{self.base_url}/api/data/bull_library",
                 stream=True,
                 timeout=120
             )

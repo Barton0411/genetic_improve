@@ -54,9 +54,9 @@ def download_bull_library(
                 progress_callback(20, "正在下载公牛数据...")
 
             # 获取数据库版本信息
-            success, response = client.get_database_version()
+            success, version, message = client.get_database_version()
             if success:
-                logger.info(f"服务器数据库版本: {response}")
+                logger.info(f"服务器数据库版本: {version}")
 
             if progress_callback:
                 progress_callback(30, "正在下载bull_library数据...")
@@ -91,7 +91,7 @@ def download_from_oss(
     progress_callback: Optional[Callable] = None
 ) -> Tuple[bool, str]:
     """
-    从OSS备用源下载数据库
+    从备用源下载数据库
 
     Args:
         local_db_path: 本地数据库路径
@@ -100,12 +100,12 @@ def download_from_oss(
     Returns:
         Tuple[bool, str]: (成功标志, 消息)
     """
-    oss_urls = [
-        "https://genetic-improve.oss-cn-beijing.aliyuncs.com/data/bull_library.db",
-        "http://39.96.189.27:8082/api/data/bull_library",
+    # 使用域名作为备用源
+    backup_urls = [
+        "https://api.genepop.com/api/data/bull_library",
     ]
 
-    for url in oss_urls:
+    for url in backup_urls:
         try:
             logger.info(f"尝试从备用源下载: {url}")
 

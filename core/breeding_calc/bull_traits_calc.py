@@ -5,10 +5,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 import pandas as pd
-from sqlalchemy import create_engine, text
+import sqlite3
 import datetime
 from core.breeding_calc.traits_calculation import TraitsCalculation
 from core.data.update_manager import LOCAL_DB_PATH
+from core.data.bull_library_downloader import ensure_bull_library_exists
 
 # 复用已有的性状翻译字典
 from core.breeding_calc.cow_traits_calc import TRAITS_TRANSLATION
@@ -173,12 +174,15 @@ class BullKeyTraitsPage(QWidget):
                 QMessageBox.warning(self, "警告", "请至少选择一个性状")
                 return
 
-            # 连接本地数据库
-            try:
-                engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
-            except Exception as e:
-                QMessageBox.critical(self, "错误", f"连接本地数据库失败：{str(e)}")
-                return
+            # 检查数据库是否存在，如果不存在则自动下载
+            import os
+            if not os.path.exists(LOCAL_DB_PATH):
+                QMessageBox.information(self, "提示", "数据库不存在，正在自动下载...")
+                if not ensure_bull_library_exists(LOCAL_DB_PATH):
+                    QMessageBox.critical(self, "错误",
+                        "无法自动下载数据库。\n"
+                        "请检查网络连接后重试。")
+                    return
 
             # 处理每个公牛的性状数据
             missing_bulls = []
@@ -190,24 +194,31 @@ class BullKeyTraitsPage(QWidget):
                     continue
 
                 try:
-                    with engine.connect() as conn:
+                    conn = sqlite3.connect(LOCAL_DB_PATH)
+                    try:
+                        cursor = conn.cursor()
                         # 先尝试用 BULL NAAB 查询
-                        result = conn.execute(
-                            text("SELECT * FROM bull_library WHERE `BULL NAAB`=:bull_id"),
-                            {"bull_id": bull_id}
-                        ).fetchone()
-                        
+                        cursor.execute(
+                            "SELECT * FROM bull_library WHERE `BULL NAAB`=?",
+                            (bull_id,)
+                        )
+                        result = cursor.fetchone()
+
                         if not result:
                             # 如果找不到，再尝试用 BULL REG 查询
-                            result = conn.execute(
-                                text("SELECT * FROM bull_library WHERE `BULL REG`=:bull_id"),
-                                {"bull_id": bull_id}
-                            ).fetchone()
+                            cursor.execute(
+                                "SELECT * FROM bull_library WHERE `BULL REG`=?",
+                                (bull_id,)
+                            )
+                            result = cursor.fetchone()
 
                         if result:
+                            # 获取列名
+                            column_names = [description[0] for description in cursor.description]
+                            result_dict = dict(zip(column_names, result))
+
                             # 提取性状数据
                             bull_data = dict(row)  # 保留原始数据
-                            result_dict = dict(result._mapping)
                             for trait in selected_traits:
                                 bull_data[trait] = result_dict.get(trait)
                             trait_data.append(bull_data)
@@ -218,10 +229,15 @@ class BullKeyTraitsPage(QWidget):
                             for trait in selected_traits:
                                 bull_data[trait] = None
                             trait_data.append(bull_data)
-                            
+                    finally:
+                        conn.close()
                 except Exception as e:
                     QMessageBox.critical(self, "错误", f"查询公牛 {bull_id} 的性状数据时发生错误：{str(e)}")
-                    return
+                    # 对于查询失败的公牛，保留原始数据，性状值设为空
+                    bull_data = dict(row)
+                    for trait in selected_traits:
+                        bull_data[trait] = None
+                    trait_data.append(bull_data)
 
             # 如果有缺失的公牛，上传到云端数据库并提示用户
             if missing_bulls:
