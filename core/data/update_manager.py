@@ -209,16 +209,18 @@ def run_update_process(force_update: bool = False, progress_callback: Optional[C
         # 初始化本地数据库
         initialize_local_db()
 
-        # 首先确保bull_library数据库存在
-        from core.data.bull_library_downloader import ensure_bull_library_exists
+        # 检查并更新bull_library数据库（会自动检查版本并更新）
+        from core.data.bull_library_downloader import download_bull_library
         if progress_callback:
-            progress_callback(10, "检查bull_library数据库...")
+            progress_callback(10, "检查bull_library数据库版本...")
 
-        if not ensure_bull_library_exists(LOCAL_DB_PATH, progress_callback):
-            logging.error("无法获取bull_library数据库")
-            # 不返回False，继续尝试更新系谱库
+        # 使用download_bull_library替代ensure_bull_library_exists，以支持版本检查和自动更新
+        success, msg = download_bull_library(LOCAL_DB_PATH, progress_callback, force_download=force_update)
+        if success:
+            logging.info(f"bull_library数据库已就绪: {msg}")
         else:
-            logging.info("bull_library数据库已就绪")
+            logging.error(f"bull_library数据库更新失败: {msg}")
+            # 不返回False，继续尝试更新系谱库
 
         # 获取系谱库（会自动更新）
         pedigree_db = get_pedigree_db(force_update=force_update, progress_callback=progress_callback)
