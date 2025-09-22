@@ -252,9 +252,9 @@ def download_from_oss(
             response = requests.get(oss_url, stream=True, timeout=(30, 300))
             response.raise_for_status()
 
-        # 获取文件大小
-        total_size = int(response.headers.get('content-length', 0))
-        logger.info(f"文件大小: {total_size / 1024 / 1024:.1f} MB")
+            # 获取文件大小
+            total_size = int(response.headers.get('content-length', 0))
+            logger.info(f"文件大小: {total_size / 1024 / 1024:.1f} MB")
 
             # 确保目录存在
             local_db_path.parent.mkdir(parents=True, exist_ok=True)
