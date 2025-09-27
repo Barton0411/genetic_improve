@@ -354,6 +354,13 @@ class MainWindow(QMainWindow):
             self.content_stack = QStackedWidget()
             self.selected_project_path = None
             self.templates_path = Path(__file__).parent.parent / "templates"
+
+            # 分组模式状态：'manual' 或 'auto'，None表示未选择
+            self.grouping_mode = None
+
+            # 保存按钮引用，用于更新状态
+            self.manual_group_btn = None
+            self.auto_group_btn = None
             
             # 导入版本信息
             from version import get_version
@@ -1751,9 +1758,9 @@ class MainWindow(QMainWindow):
         
         # 添加手动分组和分组更新按钮
         button_layout = QHBoxLayout()
-        manual_group_btn = QPushButton("手动分组")
+        self.manual_group_btn = QPushButton("手动分组")
         update_group_btn = QPushButton("分组更新")
-        auto_group_btn = QPushButton("自动分组")
+        self.auto_group_btn = QPushButton("自动分组")
         
         # 设置按钮样式
         button_style = """
@@ -1769,18 +1776,18 @@ class MainWindow(QMainWindow):
                 background-color: #2980b9;
             }
         """
-        manual_group_btn.setStyleSheet(button_style)
+        self.manual_group_btn.setStyleSheet(button_style)
         update_group_btn.setStyleSheet(button_style)
-        auto_group_btn.setStyleSheet(button_style)
-        
+        self.auto_group_btn.setStyleSheet(button_style)
+
         # 连接按钮信号
-        manual_group_btn.clicked.connect(self.on_manual_grouping)
+        self.manual_group_btn.clicked.connect(self.on_manual_grouping)
         update_group_btn.clicked.connect(self.on_update_grouping)
-        auto_group_btn.clicked.connect(self.on_auto_grouping)
-        
-        button_layout.addWidget(manual_group_btn)
+        self.auto_group_btn.clicked.connect(self.on_auto_grouping)
+
+        button_layout.addWidget(self.manual_group_btn)
         button_layout.addWidget(update_group_btn)
-        button_layout.addWidget(auto_group_btn)
+        button_layout.addWidget(self.auto_group_btn)
         button_layout.addStretch()
         
         param_layout.addLayout(inbreeding_layout)
@@ -1983,14 +1990,24 @@ class MainWindow(QMainWindow):
                 self.group_preview_table.setRowCount(0)
                 return
             
+            # 统计每个组的数量（包括空值）
+            # 创建一个副本用于显示，避免修改原始数据
+            display_df = df.copy()
+
+            # 将空值替换为"未分组"以便统计和显示
+            display_df['group'] = display_df['group'].fillna('未分组')
+            display_df['group'] = display_df['group'].replace('', '未分组')  # 空字符串也算未分组
+
+            # 将数字转换为字符串（如果有数字分组）
+            display_df['group'] = display_df['group'].astype(str)
+
             # 统计每个组的数量
-            group_counts = df.groupby('group').size().reset_index(name='count')
+            group_counts = display_df.groupby('group').size().reset_index(name='count')
             
             # 清空现有表格
             self.group_preview_table.setRowCount(0)
             
-            # 加载分配结果（这里暂时使用空数据，等待选配报告功能实现）
-            # 为新的列准备数据，每个组都有6个空值
+            # 加载选配报告并计算未分配数量
             unassigned_counts = {
                 '1选常规未分配': {},
                 '2选常规未分配': {},
@@ -1999,6 +2016,54 @@ class MainWindow(QMainWindow):
                 '2选性控未分配': {},
                 '3选性控未分配': {}
             }
+
+            # 尝试读取选配报告
+            report_files = [
+                self.selected_project_path / "analysis_results" / "个体选配报告.xlsx",
+                self.selected_project_path / "analysis_results" / "individual_mating_report.xlsx"
+            ]
+
+            report_df = None
+            for report_file in report_files:
+                if report_file.exists():
+                    try:
+                        report_df = pd.read_excel(report_file)
+                        break
+                    except:
+                        pass
+
+            # 如果找到报告，计算未分配数量
+            if report_df is not None:
+                # 检查列名是'group'还是'分组'
+                group_col = 'group' if 'group' in report_df.columns else '分组' if '分组' in report_df.columns else None
+
+                if group_col:
+                    # 对每个组计算未分配数量
+                    for group_name in display_df['group'].unique():
+                        group_report = report_df[report_df[group_col] == group_name]
+                        total_in_group = len(group_report)
+
+                        if total_in_group > 0:
+                            # 计算常规未分配
+                            unassigned_counts['1选常规未分配'][group_name] = len(group_report[group_report['1选常规'].isna() | (group_report['1选常规'] == '')])
+                            unassigned_counts['2选常规未分配'][group_name] = len(group_report[group_report['2选常规'].isna() | (group_report['2选常规'] == '')])
+                            unassigned_counts['3选常规未分配'][group_name] = len(group_report[group_report['3选常规'].isna() | (group_report['3选常规'] == '')])
+
+                            # 计算性控未分配
+                            unassigned_counts['1选性控未分配'][group_name] = len(group_report[group_report['1选性控'].isna() | (group_report['1选性控'] == '')])
+                            unassigned_counts['2选性控未分配'][group_name] = len(group_report[group_report['2选性控'].isna() | (group_report['2选性控'] == '')])
+                            unassigned_counts['3选性控未分配'][group_name] = len(group_report[group_report['3选性控'].isna() | (group_report['3选性控'] == '')])
+                        else:
+                            # 如果报告中没有这个组，说明该组还未选配，全部为未分配
+                            group_total = len(display_df[display_df['group'] == group_name])
+                            for key in unassigned_counts:
+                                unassigned_counts[key][group_name] = group_total
+            else:
+                # 如果没有报告，所有组的所有位置都是未分配（等于总数）
+                for group_name in display_df['group'].unique():
+                    group_total = len(display_df[display_df['group'] == group_name])
+                    for key in unassigned_counts:
+                        unassigned_counts[key][group_name] = group_total
             
             # 逐行填充表格
             self.group_preview_table.setRowCount(len(group_counts))
@@ -2019,13 +2084,12 @@ class MainWindow(QMainWindow):
                 self.group_preview_table.setItem(row, 1, QTableWidgetItem(str(group_name)))
                 self.group_preview_table.setItem(row, 2, QTableWidgetItem(str(total_count)))
                 
-                # 设置未分配数量列（6列）
+                # 设置未分配数量列（6列），使用实际计算的值或总数作为默认值
                 self.group_preview_table.setItem(row, 3, QTableWidgetItem(str(unassigned_counts['1选常规未分配'].get(group_name, total_count))))
                 self.group_preview_table.setItem(row, 4, QTableWidgetItem(str(unassigned_counts['2选常规未分配'].get(group_name, total_count))))
                 self.group_preview_table.setItem(row, 5, QTableWidgetItem(str(unassigned_counts['3选常规未分配'].get(group_name, total_count))))
                 self.group_preview_table.setItem(row, 6, QTableWidgetItem(str(unassigned_counts['1选性控未分配'].get(group_name, total_count))))
                 self.group_preview_table.setItem(row, 7, QTableWidgetItem(str(unassigned_counts['2选性控未分配'].get(group_name, total_count))))
-                # 确保索引正确
                 self.group_preview_table.setItem(row, 8, QTableWidgetItem(str(unassigned_counts['3选性控未分配'].get(group_name, total_count))))
             
             # 调整表格显示
@@ -2561,12 +2625,68 @@ class MainWindow(QMainWindow):
         
         return semen_inventory
 
+    def clear_mating_results(self):
+        """清除选配结果文件"""
+        if not self.selected_project_path:
+            return
+
+        # 清除选配相关的结果文件
+        files_to_clear = [
+            "个体选配报告.xlsx",
+            "individual_mating_report.xlsx",
+            "个体选配推荐矩阵.xlsx"
+        ]
+
+        for filename in files_to_clear:
+            file_path = self.selected_project_path / "analysis_results" / filename
+            if file_path.exists():
+                try:
+                    file_path.unlink()
+                    print(f"已清除: {filename}")
+                except Exception as e:
+                    print(f"清除 {filename} 失败: {e}")
+
     def on_manual_grouping(self):
         """手动分组按钮点击事件"""
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
-            
+
+        # 如果当前是自动分组模式，需要确认切换
+        if self.grouping_mode == 'auto':
+            reply = QMessageBox.question(
+                self,
+                "切换分组模式",
+                "切换到手动分组模式将：\n"
+                "1. 清除当前的自动分组设置\n"
+                "2. 清除已有的选配结果\n"
+                "3. 需要您手动编辑分组\n\n"
+                "是否确认切换到手动分组模式？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+            # 清除选配结果
+            self.clear_mating_results()
+
+            # 清除自动分组（将group列清空）
+            try:
+                index_file = self.selected_project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
+                if index_file.exists():
+                    df = pd.read_excel(index_file)
+                    if 'group' in df.columns:
+                        df['group'] = None  # 清空分组列
+                        df.to_excel(index_file, index=False)
+                        print("已清除自动分组设置")
+            except Exception as e:
+                print(f"清除自动分组失败: {e}")
+
+        # 切换到手动分组模式
+        self.grouping_mode = 'manual'
+        self.update_grouping_buttons_state()
+
         index_file = self.selected_project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
         if not index_file.exists():
             QMessageBox.warning(self, "警告", "请先进行母牛群指数排名")
@@ -2587,6 +2707,10 @@ class MainWindow(QMainWindow):
                 subprocess.call(['xdg-open', str(index_file)])
 
             QMessageBox.information(self, "提示", "已打开指数文件，请在文件中手动编辑分组，完成后请点击'分组更新'按钮更新分组预览")
+
+            # 更新分组预览（显示手动分组的内容）
+            self.load_group_preview()
+
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开文件时出错: {str(e)}")
 
@@ -2595,34 +2719,123 @@ class MainWindow(QMainWindow):
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
-            
+
         # 检查是否存在指数计算结果文件
         index_file = self.selected_project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
         if not index_file.exists():
             QMessageBox.warning(self, "警告", "请先进行母牛群指数排名")
             return
-            
+
         # 更新分组预览表
         self.load_group_preview()
         QMessageBox.information(self, "成功", "分组预览已更新")
+
+    def update_grouping_buttons_state(self):
+        """更新分组按钮状态，实现互斥效果"""
+        if not self.manual_group_btn or not self.auto_group_btn:
+            return
+
+        # 定义激活和非激活状态的样式
+        active_style = """
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """
+
+        inactive_style = """
+            QPushButton {
+                background-color: #95a5a6;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #7f8c8d;
+                cursor: pointer;
+            }
+        """
+
+        if self.grouping_mode == 'manual':
+            # 手动分组模式：手动按钮激活样式，自动按钮非激活但可点击
+            self.manual_group_btn.setStyleSheet(active_style)
+            self.manual_group_btn.setEnabled(True)
+            self.auto_group_btn.setStyleSheet(inactive_style)
+            self.auto_group_btn.setEnabled(True)  # 保持启用状态
+        elif self.grouping_mode == 'auto':
+            # 自动分组模式：自动按钮激活样式，手动按钮非激活但可点击
+            self.auto_group_btn.setStyleSheet(active_style)
+            self.auto_group_btn.setEnabled(True)
+            self.manual_group_btn.setStyleSheet(inactive_style)
+            self.manual_group_btn.setEnabled(True)  # 保持启用状态
+        else:
+            # 未选择模式：两个按钮都显示激活样式
+            self.manual_group_btn.setStyleSheet(active_style)
+            self.manual_group_btn.setEnabled(True)
+            self.auto_group_btn.setStyleSheet(active_style)
+            self.auto_group_btn.setEnabled(True)
 
     def on_auto_grouping(self):
         """自动分组按钮点击事件"""
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
-        
+
+        # 如果当前是手动分组模式，需要确认切换
+        if self.grouping_mode == 'manual':
+            reply = QMessageBox.question(
+                self,
+                "切换分组模式",
+                "切换到自动分组模式将：\n"
+                "1. 清除当前的手动分组设置\n"
+                "2. 清除已有的选配结果\n"
+                "3. 使用系统自动分组策略\n\n"
+                "是否确认切换到自动分组模式？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+            # 清除选配结果
+            self.clear_mating_results()
+
+            # 清除手动分组（将group列清空）
+            try:
+                index_file = self.selected_project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
+                if index_file.exists():
+                    df = pd.read_excel(index_file)
+                    if 'group' in df.columns:
+                        df['group'] = None  # 清空分组列
+                        df.to_excel(index_file, index=False)
+                        print("已清除手动分组设置")
+            except Exception as e:
+                print(f"清除手动分组失败: {e}")
+
+        # 切换到自动分组模式
+        self.grouping_mode = 'auto'
+        self.update_grouping_buttons_state()
+
         # 检查是否存在指数计算结果文件
         index_file = self.selected_project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
         if not index_file.exists():
             QMessageBox.warning(self, "警告", "请先进行母牛群指数排名")
             return
-            
+
         # 创建并显示自动分组对话框
         from gui.auto_grouping_dialog import AutoGroupingDialog
         auto_grouping_dialog = AutoGroupingDialog(self.selected_project_path, parent=self)
         auto_grouping_dialog.exec()
-        
+
         # 对话框关闭后更新分组预览
         self.load_group_preview()
 
@@ -2638,21 +2851,80 @@ class MainWindow(QMainWindow):
                 if checkbox and checkbox.isChecked():
                     group_name = self.group_preview_table.item(row, 1).text()
                     selected_groups.append(group_name)
-        
+
         if not selected_groups:
             QMessageBox.warning(self, "警告", "请先选择要清空选配的组")
             return
-            
+
         # 确认清空选配
         reply = QMessageBox.question(
-            self, 
-            "确认清空", 
-            f"确定要清空以下组的选配结果吗？\n{', '.join(selected_groups)}",
+            self,
+            "确认清空",
+            f"确定要清空以下组的选配结果吗？\n{', '.join(selected_groups)}\n\n"
+            "这将清空这些组中母牛的常规和性控选配结果。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-                                   
+
         if reply == QMessageBox.StandardButton.Yes:
-            QMessageBox.information(self, "提示", "清空选配功能稍后实现")
+            try:
+                # 读取现有的选配报告
+                report_files = [
+                    self.selected_project_path / "analysis_results" / "个体选配报告.xlsx",
+                    self.selected_project_path / "analysis_results" / "individual_mating_report.xlsx"
+                ]
+
+                cleared_count = 0
+                for report_file in report_files:
+                    if report_file.exists():
+                        df = pd.read_excel(report_file)
+
+                        # 检查列名是'group'还是'分组'
+                        group_col = 'group' if 'group' in df.columns else '分组' if '分组' in df.columns else None
+
+                        if group_col:
+                            # 清空选中组的选配结果
+                            for group in selected_groups:
+                                mask = df[group_col] == group
+                                if mask.any():
+                                    # 清空性控选配列
+                                    sexed_columns = ['1选性控', '2选性控', '3选性控', '性控备注']
+                                    for col in sexed_columns:
+                                        if col in df.columns:
+                                            df.loc[mask, col] = None
+
+                                    # 清空常规选配列
+                                    regular_columns = ['1选常规', '2选常规', '3选常规', '常规备注']
+                                    for col in regular_columns:
+                                        if col in df.columns:
+                                            df.loc[mask, col] = None
+
+                                    cleared_count += mask.sum()
+
+                        # 保存更新后的文件
+                        df.to_excel(report_file, index=False)
+                        print(f"已更新文件: {report_file.name}")
+
+                if cleared_count > 0:
+                    QMessageBox.information(
+                        self,
+                        "清空成功",
+                        f"已成功清空 {len(selected_groups)} 个组共 {cleared_count} 头母牛的选配结果。"
+                    )
+                    # 刷新分组预览以更新未分配数量
+                    self.load_group_preview()
+                else:
+                    QMessageBox.information(
+                        self,
+                        "提示",
+                        f"所选组中没有找到选配结果。"
+                    )
+
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "清空失败",
+                    f"清空选配结果时发生错误：\n{str(e)}"
+                )
 
     def toggle_group_checkboxes(self, checked):
         """处理全选/取消全选按钮点击事件"""
@@ -2811,7 +3083,9 @@ class MainWindow(QMainWindow):
             'control_defect_genes': control_defect_genes,
             'heifer_age_days': 420,
             'cycle_days': 21,
-            'skip_missing_bulls': skip_missing_bulls
+            'skip_missing_bulls': skip_missing_bulls,
+            'selected_groups': selected_groups,  # 添加选中的分组
+            'grouping_mode': self.grouping_mode  # 添加分组模式
         }
 
         # 使用多线程进度对话框

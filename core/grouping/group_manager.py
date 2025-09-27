@@ -302,29 +302,30 @@ class GroupManager:
         
         return df
 
-    def apply_temp_strategy(self, strategy: dict, progress_callback=None) -> pd.DataFrame:
+    def apply_temp_strategy(self, strategy: dict, progress_callback=None, grouping_mode: str = None) -> pd.DataFrame:
         """
         应用临时分组策略，返回分组结果
-        
+
         Args:
             strategy: 分组策略
             progress_callback: 进度回调函数
-        
+            grouping_mode: 分组模式 ('manual' 或 'auto')
+
         Returns:
             分组结果DataFrame
         """
         self.strategy = strategy
-        
+
         # 显示进度
         if progress_callback:
             progress_callback.set_task_info("正在读取指数计算结果...")
             progress_callback.update_info("开始应用分组策略...")
             progress_callback.update_progress(5)
-        
+
         # 读取指数计算结果
         if not self.index_file.exists():
             raise FileNotFoundError("请先进行牛只指数计算排名")
-        
+
         try:
             df = pd.read_excel(self.index_file)
             if progress_callback:
@@ -332,24 +333,127 @@ class GroupManager:
                 progress_callback.update_info(f"原始数据: {len(df)} 条记录")
         except Exception as e:
             raise Exception(f"读取指数计算结果失败: {str(e)}")
-        
+
         if progress_callback:
             progress_callback.set_task_info("正在筛选在场母牛...")
             progress_callback.update_progress(10)
-        
+
         # 筛选在场的母牛
         original_count = len(df)
         df = df[(df['是否在场'] == '是') & (df['sex'] == '母')].copy()
         filtered_count = len(df)
-        
+
         if progress_callback:
             progress_callback.update_info(f"筛选在场母牛: {original_count} -> {filtered_count} 头")
-        
-        
+
+        # 检查是否存在手动分组
+        has_manual_groups = False
+        manual_grouped_count = 0
+        empty_group_count = 0
+
+        # 如果明确指定了分组模式，优先使用指定的模式
+        if grouping_mode == 'manual':
+            # 强制使用手动分组模式
+            has_manual_groups = True
+            if progress_callback:
+                progress_callback.update_info("使用手动分组模式")
+            # 处理手动分组模式下的group列
+            if 'group' not in df.columns:
+                df['group'] = '未分组'
+                empty_group_count = len(df)
+            else:
+                # 检查并处理现有group列
+                for idx in df.index:
+                    if pd.notna(df.at[idx, 'group']):
+                        group_val = str(df.at[idx, 'group']).strip()
+                        if group_val == 'nan' or group_val == '':
+                            df.at[idx, 'group'] = '未分组'
+                            empty_group_count += 1
+                        else:
+                            manual_grouped_count += 1
+                    else:
+                        df.at[idx, 'group'] = '未分组'
+                        empty_group_count += 1
+        elif grouping_mode == 'auto':
+            # 强制使用自动分组模式
+            has_manual_groups = False
+            if progress_callback:
+                progress_callback.update_info("使用自动分组模式")
+            # 清空现有的group列，以便重新分组
+            df['group'] = None
+            # 自动分组模式下，跳过所有后续检测，直接进入自动分组逻辑
+        elif grouping_mode is None and 'group' in df.columns:
+            # 只有在没有明确指定模式时，才自动检测分组
+            # 检查是否有任何手动分组数据（非NaN的值）
+            # 只要有任何一个单元格有值（包括空字符串），就认为是手动分组
+            non_null_mask = df['group'].notna()
+            has_any_value = non_null_mask.any()
+
+            if has_any_value:
+                has_manual_groups = True
+
+                # 处理group列的值
+                for idx in df.index:
+                    if pd.notna(df.at[idx, 'group']):
+                        group_val = str(df.at[idx, 'group']).strip()
+                        if group_val == 'nan':  # pandas可能将NaN转为字符串'nan'
+                            df.at[idx, 'group'] = '未分组'
+                            empty_group_count += 1
+                        elif group_val == '':  # 空字符串
+                            df.at[idx, 'group'] = '未分组'  # 将空字符串标记为"未分组"
+                            empty_group_count += 1
+                        else:
+                            manual_grouped_count += 1
+                    else:
+                        # NaN值，标记为未分组
+                        df.at[idx, 'group'] = '未分组'
+                        empty_group_count += 1
+
+                print(f"检测到手动分组模式: {manual_grouped_count} 头牛已手动分组, {empty_group_count} 头牛未分组")
+                print("将跳过所有自动分组，保留用户的手动分组设置")
+                if progress_callback:
+                    progress_callback.update_info(f"检测到手动分组: 已分组 {manual_grouped_count} 头, 未分组 {empty_group_count} 头")
+                    progress_callback.update_info("使用手动分组模式，跳过自动分组")
+            else:
+                # group列存在但全是空的，进行自动分组
+                df['group'] = None
+                has_manual_groups = False
+                print("group列存在但为空，将进行自动分组")
+                if progress_callback:
+                    progress_callback.update_info("未检测到分组数据，将进行自动分组")
+        elif grouping_mode is None:
+            # 只有在没有明确指定模式且group列不存在时，才创建并进行自动分组
+            df['group'] = None
+            print("未检测到group列，将进行自动分组")
+            if progress_callback:
+                progress_callback.update_info("未检测到手动分组，将进行自动分组")
+
+        # 如果检测到手动分组，直接返回，不进行任何自动分组
+        if has_manual_groups:
+            print("\n===== 手动分组模式 =====")
+            print(f"已手动分组: {manual_grouped_count} 头")
+            print(f"未分组: {empty_group_count} 头")
+            print("保持所有手动分组设置，不进行自动分组")
+
+            if progress_callback:
+                progress_callback.set_task_info("手动分组模式，跳过自动分组")
+                progress_callback.update_progress(100)
+
+            # 统计分组情况
+            group_stats = df['group'].value_counts(dropna=False)
+            print("\n===== 分组统计 =====")
+            for group, count in group_stats.items():
+                if pd.isna(group) or group is None:
+                    print(f"未分组(空值): {count} 头")  # 这种情况应该不会出现，因为我们已经处理了
+                else:
+                    print(f"{group}: {count} 头")
+
+            return df
+
         if progress_callback:
             progress_callback.set_task_info("正在计算日龄和DIM...")
             progress_callback.update_progress(15)
-        
+
         # 计算日龄和DIM
         today = datetime.now()
         df['birth_date'] = pd.to_datetime(df['birth_date'], errors='coerce')
@@ -399,13 +503,13 @@ class GroupManager:
         
         # 处理后备牛
         heifer_df = df[heifer_mask].copy()
-        
+
         # 标记已孕和难孕牛 - 先处理NaN值
         pregnant_mask = heifer_df['repro_status'].fillna('').isin(['初检孕', '复检孕'])
         # 日龄中的None/NaN值视为0，确保布尔表达式有效性
         valid_age_mask = heifer_df['日龄'].notna()
         difficult_mask = valid_age_mask & (heifer_df['日龄'] >= 18 * 30.8) & ~pregnant_mask
-        
+
         # 分配特殊组
         heifer_df.loc[pregnant_mask, 'group'] = '后备牛已孕牛'
         heifer_df.loc[difficult_mask, 'group'] = '后备牛难孕牛'
@@ -484,11 +588,11 @@ class GroupManager:
         # 难孕牛：有DIM数据且DIM >= 600天且未孕（根据实际数据调整阈值）
         # DIM为空的牛不算难孕牛，应该归为未孕牛
         difficult_mask = mature_df['DIM'].notna() & (mature_df['DIM'] >= 600) & ~pregnant_mask
-        
+
         # 分配周期
         mature_df.loc[pregnant_mask, 'group'] = '成母牛已孕牛'
         mature_df.loc[difficult_mask, 'group'] = '成母牛难孕牛'
-        
+
         # 标记正常成母牛为未孕牛（而不是按周期分）
         normal_mask = ~(pregnant_mask | difficult_mask)
         mature_df.loc[normal_mask, 'group'] = '成母牛未孕牛'
@@ -890,11 +994,11 @@ class GroupManager:
                     if pd.isna(services):
                         services = 0
                     services = int(services)
-                    
+
                     # 从策略表中查找对应的配种方法
                     # 已孕牛和难孕牛通常使用最后一个配种方法（第4次+）
                     breeding_method = None
-                    
+
                     # 判断是后备牛还是成母牛
                     if '后备牛' in current_group:
                         # 查找后备牛策略（使用任意一个后备牛策略组，因为难孕牛和已孕牛的处理相同）
@@ -910,7 +1014,7 @@ class GroupManager:
                                 # 使用最后一个配种方法（第4次+）
                                 breeding_method = strategy_row['breeding_methods'][-1]
                                 break
-                    
+
                     # 根据配种方法决定分组
                     if breeding_method == "肉牛冻精":
                         result_df.loc[idx, 'group'] = f"{current_group}+非性控（肉牛）"
@@ -918,7 +1022,7 @@ class GroupManager:
                     else:
                         result_df.loc[idx, 'group'] = f"{current_group}+非性控"
                         regular_count += 1
-                    
+
                     processed_cows.add(idx)
             
             if special_count > 0:
@@ -938,14 +1042,14 @@ class GroupManager:
             has_group_mask = result_df['group'].notna()
             not_processed_mask = ~result_df.index.isin(processed_cows)
             no_breeding_mark_mask = ~result_df['group'].fillna('').str.contains('[+]性控|[+]非性控', na=False)
-            
+
             remaining_mask = has_group_mask & not_processed_mask & no_breeding_mark_mask
             remaining_count = remaining_mask.sum()
-            
+
             if remaining_count > 0:
                 if progress_callback:
                     progress_callback.update_info(f"处理剩余牛只: {remaining_count} 头 (默认非性控)")
-                
+
                 for idx in result_df[remaining_mask].index:
                     current_group = result_df.loc[idx, 'group']
                     if pd.notna(current_group):
@@ -962,7 +1066,7 @@ class GroupManager:
         group_stats = result_df['group'].value_counts()
         for group, count in group_stats.items():
             print(f"{group}: {count}头")
-            
+
         # 统计肉牛组数量
         beef_groups = group_stats[group_stats.index.str.contains('（肉牛）')]
         if not beef_groups.empty:

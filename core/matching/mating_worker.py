@@ -63,6 +63,8 @@ class MatingWorker(QThread):
                 heifer_age_days=self.params.get('heifer_age_days', 420),
                 cycle_days=self.params.get('cycle_days', 21),
                 skip_missing_bulls=self.params.get('skip_missing_bulls', False),
+                selected_groups=self.params.get('selected_groups', None),  # 传递选中的分组
+                grouping_mode=self.params.get('grouping_mode', None),  # 传递分组模式
                 progress_callback=progress_callback
             )
             

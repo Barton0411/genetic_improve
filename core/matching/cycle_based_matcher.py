@@ -175,9 +175,17 @@ class CycleBasedMatcher:
         # 筛选选中分组的母牛，同时处理 nan 值
         # 首先过滤掉 group 列中的 nan 值
         valid_recommendations = self.recommendations_df[self.recommendations_df['group'].notna()].copy()
+
+        # 将group列和selected_groups都转换为字符串进行比较
+        valid_recommendations['group_str'] = valid_recommendations['group'].astype(str)
+        selected_groups_str = [str(g) for g in selected_groups]
+
         selected_cows = valid_recommendations[
-            valid_recommendations['group'].isin(selected_groups)
+            valid_recommendations['group_str'].isin(selected_groups_str)
         ].copy()
+
+        # 恢复原始的group列
+        selected_cows = selected_cows.drop('group_str', axis=1)
 
         logger.info(f"选中的分组: {selected_groups}")
         logger.info(f"筛选后的母牛数量: {len(selected_cows)}")
@@ -219,42 +227,57 @@ class CycleBasedMatcher:
         return result_df
         
     def _group_by_cycles(self, cows_df: pd.DataFrame, selected_groups: List[str]) -> List[Tuple[str, pd.DataFrame]]:
-        """按周期分组并排序"""
+        """按分组处理母牛（支持手动分组和自动分组）"""
         cycle_groups = []
-        
-        # 识别周期组
+
+        # 处理所有选中的分组（不区分是否包含"周期"等关键字）
         for group in selected_groups:
-            # 跳过 nan 或非字符串类型的分组
-            if pd.isna(group) or not isinstance(group, str):
+            # 跳过 nan
+            if pd.isna(group):
                 logger.warning(f"跳过无效分组: {group}")
                 continue
-                
-            if '周期' in group:
-                group_cows = cows_df[cows_df['group'] == group].copy()
-                if not group_cows.empty:
-                    # 按指数得分排序（高分优先）
-                    score_col = 'Combine Index Score' if 'Combine Index Score' in group_cows.columns else None
-                    if score_col:
-                        group_cows = group_cows.sort_values(score_col, ascending=False)
-                    cycle_groups.append((group, group_cows))
-                    
-        # 按周期数字排序
-        cycle_groups.sort(key=lambda x: self._extract_cycle_number(x[0]))
-        
-        # 添加非周期组（放在最后）
-        for group in selected_groups:
-            # 跳过 nan 或非字符串类型的分组
-            if pd.isna(group) or not isinstance(group, str):
-                continue
-                
-            if '周期' not in group:
-                group_cows = cows_df[cows_df['group'] == group].copy()
-                if not group_cows.empty:
-                    score_col = 'Combine Index Score' if 'Combine Index Score' in group_cows.columns else None
-                    if score_col:
-                        group_cows = group_cows.sort_values(score_col, ascending=False)
-                    cycle_groups.append((group, group_cows))
-                    
+
+            # 转换为字符串进行比较
+            group_str = str(group)
+
+            # 获取该分组的母牛（比较时将两边都转为字符串）
+            group_cows = cows_df[cows_df['group'].astype(str) == group_str].copy()
+
+            if not group_cows.empty:
+                # 按指数得分排序（高分优先）
+                # 尝试多个可能的得分列名
+                score_cols = ['index_score', 'Combine Index Score', 'NM$权重_index']
+                score_col = None
+                for col in score_cols:
+                    if col in group_cows.columns:
+                        score_col = col
+                        break
+
+                if score_col:
+                    group_cows = group_cows.sort_values(score_col, ascending=False)
+
+                cycle_groups.append((group_str, group_cows))
+                logger.info(f"处理分组 '{group_str}'，包含 {len(group_cows)} 头母牛")
+            else:
+                logger.warning(f"分组 '{group_str}' 没有找到母牛")
+
+        # 对分组进行排序（如果是自动分组的周期组，按周期数字排序；否则保持原顺序）
+        def sort_key(x):
+            group_name = x[0]
+            # 尝试提取周期数字（仅用于自动分组的排序）
+            import re
+            match = re.search(r'第(\d+)周期', group_name)
+            if match:
+                return (0, int(match.group(1)))  # 周期组优先，按数字排序
+            else:
+                # 非周期组，保持原始顺序
+                try:
+                    return (1, selected_groups.index(group_name))
+                except ValueError:
+                    return (2, 0)  # 如果找不到，放在最后
+
+        cycle_groups.sort(key=sort_key)
+
         return cycle_groups
         
     def _extract_cycle_number(self, cycle_name: str) -> int:

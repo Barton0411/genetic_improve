@@ -45,6 +45,8 @@ class CompleteMatingExecutor:
                 heifer_age_days: int = 420,
                 cycle_days: int = 21,
                 skip_missing_bulls: bool = False,
+                selected_groups: Optional[List[str]] = None,
+                grouping_mode: Optional[str] = None,
                 progress_callback: Optional[callable] = None) -> Dict[str, Any]:
         """
         执行完整的个体选配流程
@@ -56,8 +58,10 @@ class CompleteMatingExecutor:
             heifer_age_days: 后备牛开配日龄
             cycle_days: 周期天数
             skip_missing_bulls: 是否跳过缺失数据的公牛
+            selected_groups: 用户选中的分组列表，如果为None则处理所有分组
+            grouping_mode: 分组模式 ('manual' 或 'auto')
             progress_callback: 进度回调函数
-            
+
         Returns:
             结果字典，包含成功标志和最终报告路径
         """
@@ -178,19 +182,60 @@ class CompleteMatingExecutor:
             # 对母牛进行分组
             grouped_cows = self.group_manager.apply_temp_strategy(
                 strategy=strategy_config,
-                progress_callback=SimpleProgressWrapper()
+                progress_callback=SimpleProgressWrapper(),
+                grouping_mode=grouping_mode
             )
-            
+
+            # 保存完整的分组数据（用于更新文件）
+            all_grouped_cows = grouped_cows.copy()
+
+            # 如果指定了选中的分组，只保留这些分组的母牛
+            if selected_groups:
+                logger.info(f"用户选中的分组: {selected_groups}")
+
+                # 处理可能包含配种方法标记的分组名
+                # 创建一个匹配函数，检查分组是否属于选中的分组
+                def is_selected_group(group_name):
+                    if pd.isna(group_name):
+                        return False
+
+                    # 将group_name转换为字符串
+                    group_name_str = str(group_name)
+
+                    # 直接匹配（字符串比较）
+                    if group_name_str in selected_groups:
+                        return True
+
+                    # 去掉配种方法标记后匹配（如"后备牛第1周期+性控"匹配"后备牛第1周期"）
+                    base_group = group_name_str.split('+')[0] if '+' in group_name_str else group_name_str
+                    if base_group in selected_groups:
+                        return True
+
+                    # 反向匹配（用户选了带标记的，数据中是不带标记的）
+                    for selected in selected_groups:
+                        selected_str = str(selected)
+                        selected_base = selected_str.split('+')[0] if '+' in selected_str else selected_str
+                        if base_group == selected_base:
+                            return True
+                    return False
+
+                # 过滤出选中分组的母牛
+                grouped_cows = grouped_cows[grouped_cows['group'].apply(is_selected_group)].copy()
+                logger.info(f"过滤后剩余母牛数量: {len(grouped_cows)}")
+
+                if len(grouped_cows) == 0:
+                    raise Exception(f"选中的分组中没有母牛: {selected_groups}")
+
             # 更新推荐生成器的母牛数据
             self.recommendation_generator.cow_data = grouped_cows
-            
+
             # 检查分组后的数据
             if 'group' not in grouped_cows.columns:
                 raise Exception("分组后的数据缺少 'group' 列")
-            
-            logger.info(f"分组后母牛数据列: {list(grouped_cows.columns)}")
-            logger.info(f"分组后母牛数量: {len(grouped_cows)}")
-            logger.info(f"分组统计: {grouped_cows['group'].value_counts().to_dict()}")
+
+            logger.info(f"待选配母牛数据列: {list(grouped_cows.columns)}")
+            logger.info(f"待选配母牛数量: {len(grouped_cows)}")
+            logger.info(f"待选配分组统计: {grouped_cows['group'].value_counts().to_dict()}")
             
             # 详细记录每个分组的母牛数量
             logger.info("===== 步骤2完成：分组统计详情 =====")
@@ -198,6 +243,7 @@ class CompleteMatingExecutor:
                 logger.info(f"  {group_name}: {count}头")
             
             # 保存更新后的分组数据到原文件，以便分组预览能正确显示
+            # 注意：使用all_grouped_cows（完整数据）而不是grouped_cows（过滤后的数据）
             index_file = self.project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
             if index_file.exists():
                 try:
@@ -205,10 +251,10 @@ class CompleteMatingExecutor:
                     original_df = pd.read_excel(index_file)
                     # 更新group列
                     original_df = original_df.drop('group', axis=1, errors='ignore')
-                    # 合并新的分组信息
+                    # 合并新的分组信息（使用完整的分组数据）
                     original_df = original_df.merge(
-                        grouped_cows[['cow_id', 'group']], 
-                        on='cow_id', 
+                        all_grouped_cows[['cow_id', 'group']],
+                        on='cow_id',
                         how='left'
                     )
                     # 保存回文件
@@ -270,16 +316,21 @@ class CompleteMatingExecutor:
             self.matcher.inbreeding_threshold = inbreeding_threshold
             self.matcher.control_defect_genes = control_defect_genes
             
-            # 获取所有分组并过滤掉 nan 值
-            all_groups = recommendations_df['group'].unique().tolist()
-            # 过滤掉 nan 和非字符串类型的分组
-            all_groups = [g for g in all_groups if pd.notna(g) and isinstance(g, str)]
-            
-            logger.info(f"有效分组列表: {all_groups}")
-            
+            # 获取要处理的分组列表
+            if selected_groups:
+                # 使用用户选中的分组
+                groups_to_process = selected_groups
+                logger.info(f"使用用户选中的分组: {groups_to_process}")
+            else:
+                # 如果没有指定，处理所有分组
+                all_groups = recommendations_df['group'].unique().tolist()
+                # 过滤掉 nan 和非字符串类型的分组
+                groups_to_process = [g for g in all_groups if pd.notna(g) and isinstance(g, str)]
+                logger.info(f"处理所有有效分组: {groups_to_process}")
+
             # 执行分配
             allocation_df = self.matcher.perform_allocation(
-                selected_groups=all_groups,
+                selected_groups=groups_to_process,
                 progress_callback=lambda msg, pct: progress_callback(msg, 60 + int(pct * 0.2)) if progress_callback else None
             )
             
@@ -295,9 +346,11 @@ class CompleteMatingExecutor:
             
             # 生成符合要求的个体选配报告
             final_report = self._generate_final_report(
-                allocation_df, 
+                allocation_df,
                 recommendations_df,
-                grouped_cows
+                grouped_cows,
+                all_grouped_cows,  # 传递所有分组的母牛数据
+                selected_groups  # 传递选中的分组
             )
             
             logger.info("===== 步骤5完成：最终报告统计 =====")
@@ -309,14 +362,28 @@ class CompleteMatingExecutor:
             # 步骤6: 保存报告 (90%)
             if progress_callback:
                 progress_callback("正在保存报告...", 90)
-            
-            # 保存最终报告
+
+            # 保存最终报告（累积更新模式）
             report_path = self.project_path / "analysis_results" / "个体选配报告.xlsx"
             report_path.parent.mkdir(exist_ok=True, parents=True)
-            
+
+            # 如果已存在报告，读取现有数据并智能合并
+            if report_path.exists():
+                try:
+                    existing_report = pd.read_excel(report_path)
+                    # 检查报告是否为空或没有'母牛号'列
+                    if len(existing_report) > 0 and '母牛号' in existing_report.columns:
+                        # 智能合并：空值不替换已有的选配结果
+                        final_report = self._smart_merge_reports(existing_report, final_report)
+                        logger.info(f"累积更新报告完成，共 {len(final_report)} 条记录")
+                    else:
+                        logger.info("现有报告为空或格式不正确，将创建新报告")
+                except Exception as e:
+                    logger.warning(f"读取现有报告失败: {e}，将创建新报告")
+
             with pd.ExcelWriter(report_path, engine='openpyxl') as writer:
                 final_report.to_excel(writer, sheet_name='选配结果', index=False)
-                
+
             # 同时保存为兼容格式
             compat_path = self.project_path / "analysis_results" / "individual_mating_report.xlsx"
             final_report.to_excel(compat_path, index=False)
@@ -577,13 +644,15 @@ class CompleteMatingExecutor:
         
         return ""  # 没有发现被跳过的优质公牛
     
-    def _generate_final_report(self, 
+    def _generate_final_report(self,
                               allocation_df: pd.DataFrame,
                               recommendations_df: pd.DataFrame,
-                              grouped_cows: pd.DataFrame) -> pd.DataFrame:
+                              grouped_cows: pd.DataFrame,
+                              all_grouped_cows: pd.DataFrame = None,
+                              selected_groups: List[str] = None) -> pd.DataFrame:
         """
         生成最终的个体选配报告
-        
+
         按照指定的表头格式生成报告
         """
         logger.info(f"开始生成最终报告...")
@@ -623,8 +692,11 @@ class CompleteMatingExecutor:
             # 构建报告行
             # 安全获取分组值，处理 nan 情况
             group_value = cow_info.get('group', '')
-            if pd.isna(group_value) or not isinstance(group_value, str):
+            if pd.isna(group_value):
                 group_value = '未分组'
+            else:
+                # 将分组值转换为字符串（支持数字分组）
+                group_value = str(group_value)
                 
             # 生成备注信息
             sexed_note = self._generate_breeding_notes(cow_id, rec_info, '性控', alloc_row)
@@ -661,6 +733,56 @@ class CompleteMatingExecutor:
             
             report_rows.append(report_row)
         
+        # 处理未选中分组的母牛（如果提供了所有分组数据）
+        if all_grouped_cows is not None and selected_groups is not None:
+            # 找出所有未被选中分组的母牛
+            unselected_cows = all_grouped_cows[~all_grouped_cows['cow_id'].isin(processed_cow_ids)].copy()
+            logger.info(f"未选中分组的母牛数量: {len(unselected_cows)}")
+
+            # 为未选中分组的母牛创建空白报告行
+            for _, cow_info in unselected_cows.iterrows():
+                cow_id = cow_info['cow_id']
+
+                # 获取分组信息
+                group_value = cow_info.get('group', '')
+                if pd.isna(group_value):
+                    group_value = '未分组'
+                else:
+                    # 将分组值转换为字符串（支持数字分组）
+                    group_value = str(group_value)
+
+                # 创建空白报告行（只填充基础信息）
+                report_row = {
+                    '母牛号': cow_id,
+                    '分组': group_value,
+                    '1选性控': '',
+                    '2选性控': '',
+                    '3选性控': '',
+                    '性控备注': '',
+                    '1选常规': '',
+                    '2选常规': '',
+                    '3选常规': '',
+                    '常规备注': '',
+                    '胎次': cow_info.get('lac', ''),
+                    '本胎次奶厅高峰产量': cow_info.get('peak_milk', ''),
+                    '305奶量': cow_info.get('milk_305', ''),
+                    '泌乳天数': cow_info.get('DIM', ''),
+                    '繁育状态': cow_info.get('repro_status', ''),
+                    '母牛指数得分': cow_info.get('index_score', ''),
+                    '品种': cow_info.get('breed', ''),
+                    '父亲': cow_info.get('sire', ''),
+                    '外祖父': cow_info.get('mgs', ''),
+                    '母亲': cow_info.get('dam', ''),
+                    '外曾外祖父': cow_info.get('mmgs', ''),
+                    '产犀日期': cow_info.get('calving_date', ''),
+                    '出生日期': cow_info.get('birth_date', ''),
+                    '数据提取日期': datetime.now().strftime('%Y-%m-%d'),
+                    '月龄': self._calculate_age_months(cow_info.get('birth_date')),
+                    '配次': cow_info.get('services_time', 0)
+                }
+
+                report_rows.append(report_row)
+
         # 创建DataFrame并按分组排序
         if not report_rows:
             logger.warning("没有生成任何报告行")
@@ -708,6 +830,75 @@ class CompleteMatingExecutor:
         
         return report_df
     
+    def _smart_merge_reports(self, existing_report: pd.DataFrame, new_report: pd.DataFrame) -> pd.DataFrame:
+        """
+        智能合并报告：以组为单位进行替换
+
+        规则：
+        1. 对于不在新报告中的母牛，保留原有记录
+        2. 对于在新报告中的母牛，按组处理：
+           - 性控组：如果新的1选性控不为空，整组替换；否则整组保留
+           - 常规组：如果新的1选常规不为空，整组替换；否则整组保留
+        """
+        # 定义选配组
+        sexed_group = ['1选性控', '2选性控', '3选性控', '性控备注']
+        regular_group = ['1选常规', '2选常规', '3选常规', '常规备注']
+
+        # 创建结果DataFrame
+        result_df = pd.DataFrame()
+
+        # 1. 保留不在新报告中的旧记录
+        new_cow_ids = new_report['母牛号'].tolist()
+        kept_existing = existing_report[~existing_report['母牛号'].isin(new_cow_ids)].copy()
+
+        # 2. 处理在新报告中的母牛
+        merged_rows = []
+        for cow_id in new_cow_ids:
+            # 获取新记录
+            new_row = new_report[new_report['母牛号'] == cow_id].iloc[0].copy()
+
+            # 检查是否在旧报告中存在
+            old_matches = existing_report[existing_report['母牛号'] == cow_id]
+            if not old_matches.empty:
+                old_row = old_matches.iloc[0]
+
+                # 处理性控组：检查新的1选性控是否为空
+                if '1选性控' in new_row.index and '1选性控' in old_row.index:
+                    new_first_sexed = new_row['1选性控']
+                    # 如果新的1选性控为空，保留整个性控组
+                    if pd.isna(new_first_sexed) or (isinstance(new_first_sexed, str) and new_first_sexed.strip() == ''):
+                        for col in sexed_group:
+                            if col in old_row.index:
+                                new_row[col] = old_row[col]
+                        logger.debug(f"母牛 {cow_id} 的性控组保留原有数据（1选性控为空）")
+                    else:
+                        logger.debug(f"母牛 {cow_id} 的性控组使用新数据（1选性控={new_first_sexed}）")
+
+                # 处理常规组：检查新的1选常规是否为空
+                if '1选常规' in new_row.index and '1选常规' in old_row.index:
+                    new_first_regular = new_row['1选常规']
+                    # 如果新的1选常规为空，保留整个常规组
+                    if pd.isna(new_first_regular) or (isinstance(new_first_regular, str) and new_first_regular.strip() == ''):
+                        for col in regular_group:
+                            if col in old_row.index:
+                                new_row[col] = old_row[col]
+                        logger.debug(f"母牛 {cow_id} 的常规组保留原有数据（1选常规为空）")
+                    else:
+                        logger.debug(f"母牛 {cow_id} 的常规组使用新数据（1选常规={new_first_regular}）")
+
+            merged_rows.append(new_row)
+
+        # 合并所有记录
+        if merged_rows:
+            updated_df = pd.DataFrame(merged_rows)
+            result_df = pd.concat([kept_existing, updated_df], ignore_index=True)
+        else:
+            result_df = kept_existing
+
+        logger.info(f"智能合并完成：保留 {len(kept_existing)} 条未更新记录，更新 {len(merged_rows)} 条记录")
+
+        return result_df
+
     def _calculate_age_months(self, birth_date):
         """计算月龄"""
         if pd.isna(birth_date):
