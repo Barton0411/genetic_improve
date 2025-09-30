@@ -1,6 +1,6 @@
 # 遗传改良系统 (Genetic Improvement System)
 
-[![Version](https://img.shields.io/badge/version-1.2.0.3-blue)](https://github.com/Barton0411/genetic_improve)
+[![Version](https://img.shields.io/badge/version-1.2.0.4-blue)](https://github.com/Barton0411/genetic_improve)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-yellow)](https://www.python.org/)
 
@@ -24,7 +24,7 @@
 ### 技术特点
 - 🚀 **OSS数据分发** - 基于阿里云OSS的高速数据库下载（132MB，247,192条记录）
 - 📊 **实时进度显示** - 数据库下载进度条，显示MB进度和百分比
-- 🔄 **智能版本管理** - 自动检测并更新到最新版本（当前v1.2.0.3）
+- 🔄 **智能版本管理** - 自动检测并更新到最新版本（当前v1.2.0.4）
 - 🔐 **安全登录** - 阿里云账号验证系统
 - ☁️ **本地缓存** - 智能本地数据库缓存，减少重复下载
 - 🔄 **自动更新** - 完整的应用内智能更新系统，支持强制更新和跨平台安装
@@ -72,8 +72,8 @@
 #### 方法1: 下载预编译版本（推荐）
 1. 访问 [Releases页面](https://github.com/Barton0411/genetic_improve/releases)
 2. 下载适合您操作系统的安装包：
-   - Windows: `遗传改良系统_v1.2.0.2_Windows.exe`
-   - macOS: `遗传改良系统_v1.2.0.2_macOS.dmg`
+   - Windows: `遗传改良系统_v1.2.0.4_Windows.exe`
+   - macOS: `遗传改良系统_v1.2.0.4_macOS.dmg`
 3. 运行安装包并按照提示完成安装
 
 #### 方法2: 从源代码构建

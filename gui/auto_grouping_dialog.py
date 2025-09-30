@@ -1,13 +1,15 @@
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
+    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QWidget, QFormLayout, QSpinBox, QListWidget, QGroupBox,
-    QMessageBox, QInputDialog, QTextBrowser, QTableWidgetItem
+    QMessageBox, QInputDialog, QTextBrowser, QTableWidgetItem, QApplication
 )
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QPalette
 
 from gui.progress import ProgressDialog
 from core.grouping.group_manager import GroupManager
 from gui.main_window import StrategyTableManager
+from gui.theme_manager import theme_manager
 
 class AutoGroupingDialog(QDialog):
     """自动分组对话框"""
@@ -21,25 +23,48 @@ class AutoGroupingDialog(QDialog):
         
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        
+
+        # 应用样式（theme_manager会自动检测深色/浅色模式）
+        if theme_manager.is_dark_mode:
+            self.setStyleSheet(theme_manager.get_auto_grouping_style())
+
         # 分组方式设计
         design_group = QGroupBox("分组方式设计")
-        design_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #2c3e50;
-                border: 1px solid #ddd;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-            }
-        """)
+        if theme_manager.is_dark_mode:
+            design_group.setStyleSheet("""
+                QGroupBox {
+                    font-size: 14px;
+                    font-weight: bold;
+                    color: white;
+                    border: 1px solid #555;
+                    border-radius: 5px;
+                    margin-top: 10px;
+                    padding-top: 10px;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 5px 0 5px;
+                    color: white;
+                }
+            """)
+        else:
+            design_group.setStyleSheet("""
+                QGroupBox {
+                    font-size: 14px;
+                    font-weight: bold;
+                    color: #2c3e50;
+                    border: 1px solid #ddd;
+                    border-radius: 5px;
+                    margin-top: 10px;
+                    padding-top: 10px;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 5px 0 5px;
+                }
+            """)
         design_layout = QVBoxLayout()
         
         # 创建分组策略设置页面
@@ -57,43 +82,77 @@ class AutoGroupingDialog(QDialog):
         self.reserve_age.setRange(0, 1000)
         self.reserve_age.setSuffix(" 天")
         self.reserve_age.setValue(420)  # 默认值
-        self.reserve_age.setStyleSheet("""
-            QSpinBox {
-                background-color: white;
-                color: #2c3e50;
-                border: 1px solid #bdc3c7;
-                padding: 3px;
-                min-height: 25px;
-                font-size: 13px;
-            }
-            QSpinBox::up-button, QSpinBox::down-button {
-                width: 15px;
-            }
-        """)
+        if theme_manager.is_dark_mode:
+            self.reserve_age.setStyleSheet("""
+                QSpinBox {
+                    background-color: #4a4a4a;
+                    color: white;
+                    border: 1px solid #555;
+                    padding: 3px;
+                    min-height: 25px;
+                    font-size: 13px;
+                }
+                QSpinBox::up-button, QSpinBox::down-button {
+                    width: 15px;
+                }
+            """)
+        else:
+            self.reserve_age.setStyleSheet("""
+                QSpinBox {
+                    background-color: white;
+                    color: #2c3e50;
+                    border: 1px solid #bdc3c7;
+                    padding: 3px;
+                    min-height: 25px;
+                    font-size: 13px;
+                }
+                QSpinBox::up-button, QSpinBox::down-button {
+                    width: 15px;
+                }
+            """)
         
         self.cycle_days = QSpinBox()
         self.cycle_days.setRange(0, 365)
         self.cycle_days.setSuffix(" 天")
         self.cycle_days.setValue(21)  # 默认值
-        self.cycle_days.setStyleSheet("""
-            QSpinBox {
-                background-color: white;
-                color: #2c3e50;
-                border: 1px solid #bdc3c7;
-                padding: 3px;
-                min-height: 25px;
-                font-size: 13px;
-            }
-            QSpinBox::up-button, QSpinBox::down-button {
-                width: 15px;
-            }
-        """)
+        if theme_manager.is_dark_mode:
+            self.cycle_days.setStyleSheet("""
+                QSpinBox {
+                    background-color: #4a4a4a;
+                    color: white;
+                    border: 1px solid #555;
+                    padding: 3px;
+                    min-height: 25px;
+                    font-size: 13px;
+                }
+                QSpinBox::up-button, QSpinBox::down-button {
+                    width: 15px;
+                }
+            """)
+        else:
+            self.cycle_days.setStyleSheet("""
+                QSpinBox {
+                    background-color: white;
+                    color: #2c3e50;
+                    border: 1px solid #bdc3c7;
+                    padding: 3px;
+                    min-height: 25px;
+                    font-size: 13px;
+                }
+                QSpinBox::up-button, QSpinBox::down-button {
+                    width: 15px;
+                }
+            """)
         
         # 设置标签样式
         reserve_label = QLabel("后备牛开配日龄:")
-        reserve_label.setStyleSheet("color: #2c3e50; font-size: 13px;")
         cycle_label = QLabel("选配周期:")
-        cycle_label.setStyleSheet("color: #2c3e50; font-size: 13px;")
+        if theme_manager.is_dark_mode:
+            reserve_label.setStyleSheet("color: white; font-size: 13px;")
+            cycle_label.setStyleSheet("color: white; font-size: 13px;")
+        else:
+            reserve_label.setStyleSheet("color: #2c3e50; font-size: 13px;")
+            cycle_label.setStyleSheet("color: #2c3e50; font-size: 13px;")
         
         param_form_layout.addRow(reserve_label, self.reserve_age)
         param_form_layout.addRow(cycle_label, self.cycle_days)
@@ -102,60 +161,113 @@ class AutoGroupingDialog(QDialog):
         
         # 添加策略表
         strategy_table_label = QLabel("配种策略设置:")
-        strategy_table_label.setStyleSheet("color: #2c3e50; font-size: 13px; font-weight: bold;")
+        if theme_manager.is_dark_mode:
+            strategy_table_label.setStyleSheet("color: white; font-size: 13px; font-weight: bold;")
+        else:
+            strategy_table_label.setStyleSheet("color: #2c3e50; font-size: 13px; font-weight: bold;")
         strategy_layout.addWidget(strategy_table_label)
         
         # 创建选配策略表
         self.strategy_table = StrategyTableManager.create_strategy_table(strategy_widget)
         
         # 设置表格样式以改善字体对比度
-        self.strategy_table.setStyleSheet("""
-            QTableWidget {
-                background-color: white;
-                color: #2c3e50;
-                font-size: 13px;
-                border: 1px solid #ddd;
-            }
-            QTableWidget::item {
-                color: #2c3e50;
-                padding: 5px;
-            }
-            QTableWidget::item:selected {
-                background-color: #3498db;
-                color: white;
-            }
-            QHeaderView::section {
-                background-color: #f5f5f5;
-                color: #2c3e50;
-                font-weight: bold;
-                padding: 5px;
-                border: 1px solid #ddd;
-            }
-            QComboBox {
-                background-color: white;
-                color: #2c3e50;
-                border: 1px solid #bdc3c7;
-                padding: 3px;
-                min-height: 25px;
-                font-size: 13px;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 5px solid #2c3e50;
-                margin-right: 5px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: white;
-                color: #2c3e50;
-                selection-background-color: #3498db;
-                selection-color: white;
-            }
-        """)
+        if theme_manager.is_dark_mode:
+            self.strategy_table.setStyleSheet("""
+                QTableWidget {
+                    background-color: #3a3a3a;
+                    color: white;
+                    font-size: 13px;
+                    border: 1px solid #555;
+                }
+                QTableWidget::item {
+                    background-color: #3a3a3a;
+                    color: white;
+                    padding: 5px;
+                }
+                QTableWidget::item:selected {
+                    background-color: #3a7fc5;
+                    color: white;
+                }
+                QHeaderView::section {
+                    background-color: #4a4a4a;
+                    color: white;
+                    font-weight: bold;
+                    padding: 5px;
+                    border: 1px solid #555;
+                }
+                QComboBox {
+                    background-color: #4a4a4a;
+                    color: white;
+                    border: 1px solid #555;
+                    padding: 3px;
+                    min-height: 25px;
+                    font-size: 13px;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                }
+                QComboBox::down-arrow {
+                    image: none;
+                    border-left: 4px solid transparent;
+                    border-right: 4px solid transparent;
+                    border-top: 5px solid white;
+                    margin-right: 5px;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #4a4a4a;
+                    color: white;
+                    selection-background-color: #3a7fc5;
+                    selection-color: white;
+                }
+            """)
+        else:
+            self.strategy_table.setStyleSheet("""
+                QTableWidget {
+                    background-color: white;
+                    color: #2c3e50;
+                    font-size: 13px;
+                    border: 1px solid #ddd;
+                }
+                QTableWidget::item {
+                    color: #2c3e50;
+                    padding: 5px;
+                }
+                QTableWidget::item:selected {
+                    background-color: #3498db;
+                    color: white;
+                }
+                QHeaderView::section {
+                    background-color: #f0f0f0;
+                    color: #2c3e50;
+                    font-weight: bold;
+                    padding: 5px;
+                    border: 1px solid #ddd;
+                }
+                QComboBox {
+                    background-color: white;
+                    color: #2c3e50;
+                    border: 1px solid #bdc3c7;
+                    padding: 3px;
+                    min-height: 25px;
+                    font-size: 13px;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                }
+                QComboBox::down-arrow {
+                    image: none;
+                    border-left: 4px solid transparent;
+                    border-right: 4px solid transparent;
+                    border-top: 5px solid #2c3e50;
+                    margin-right: 5px;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: white;
+                    color: #2c3e50;
+                    selection-background-color: #3498db;
+                    selection-color: white;
+                }
+            """)
         
         strategy_layout.addWidget(self.strategy_table)
         design_layout.addWidget(strategy_widget)
@@ -163,22 +275,43 @@ class AutoGroupingDialog(QDialog):
         # 已保存策略列表
         saved_strategies_layout = QVBoxLayout()
         saved_strategies_label = QLabel("已保存策略:")
-        saved_strategies_label.setStyleSheet("color: #2c3e50; font-size: 13px; font-weight: bold;")
+        if theme_manager.is_dark_mode:
+            saved_strategies_label.setStyleSheet("color: white; font-size: 13px; font-weight: bold;")
+        else:
+            saved_strategies_label.setStyleSheet("color: #2c3e50; font-size: 13px; font-weight: bold;")
         saved_strategies_layout.addWidget(saved_strategies_label)
 
         self.strategies_list = QListWidget()
         self.strategies_list.setMaximumHeight(130)
-        self.strategies_list.setStyleSheet("""
-            QListWidget {
-                border: 1px solid #ddd;
-                border-radius: 2px;
-                background-color: white;
-                font-size: 12px;
-            }
-            QListWidget::item {
-                padding: 2px;
-            }
-        """)
+        if theme_manager.is_dark_mode:
+            self.strategies_list.setStyleSheet("""
+                QListWidget {
+                    border: 1px solid #555;
+                    border-radius: 2px;
+                    background-color: #3a3a3a;
+                    color: white;
+                    font-size: 12px;
+                }
+                QListWidget::item {
+                    padding: 2px;
+                    color: white;
+                }
+                QListWidget::item:selected {
+                    background-color: #3a7fc5;
+                }
+            """)
+        else:
+            self.strategies_list.setStyleSheet("""
+                QListWidget {
+                    border: 1px solid #ddd;
+                    border-radius: 2px;
+                    background-color: white;
+                    font-size: 12px;
+                }
+                QListWidget::item {
+                    padding: 2px;
+                }
+            """)
         # 连接点击事件，自动加载选中的策略
         self.strategies_list.itemClicked.connect(self.load_selected_strategy)
         saved_strategies_layout.addWidget(self.strategies_list)
@@ -186,22 +319,43 @@ class AutoGroupingDialog(QDialog):
         
         # 按钮布局
         button_layout = QHBoxLayout()
-        button_style = """
-            QPushButton {
-                background-color: #f5f5f5;
-                border: 1px solid #ddd;
-                border-radius: 2px;
-                padding: 4px 8px;
-                min-width: 80px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #e9e9e9;
-            }
-            QPushButton:pressed {
-                background-color: #d5d5d5;
-            }
-        """
+        if theme_manager.is_dark_mode:
+            # 深色模式下，按钮深灰色背景，黑色文字
+            button_style = """
+                QPushButton {
+                    background-color: #5a5a5a;
+                    color: black;
+                    border: 1px solid #666;
+                    border-radius: 2px;
+                    padding: 4px 8px;
+                    min-width: 80px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #6a6a6a;
+                }
+                QPushButton:pressed {
+                    background-color: #4a4a4a;
+                }
+            """
+        else:
+            button_style = """
+                QPushButton {
+                    background-color: #f5f5f5;
+                    border: 1px solid #ddd;
+                    border-radius: 2px;
+                    padding: 4px 8px;
+                    min-width: 80px;
+                    font-size: 12px;
+                }
+                QPushButton:hover {
+                    background-color: #e9e9e9;
+                }
+                QPushButton:pressed {
+                    background-color: #d5d5d5;
+                }
+            """
         
         # 应用策略按钮样式（更醒目的颜色）
         apply_button_style = """

@@ -1,6 +1,8 @@
 from PyQt6.QtCore import Qt, QAbstractTableModel
 import pandas as pd
 from PyQt6.QtGui import QBrush, QColor
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtGui import QPalette
 
 class InbreedingDetailModel(QAbstractTableModel):
     """明细表数据模型"""
@@ -55,23 +57,37 @@ class InbreedingDetailModel(QAbstractTableModel):
         """获取单元格数据"""
         if not index.isValid() or not self.df.empty and (index.row() >= len(self.df) or index.column() >= len(self.display_columns)):
             return None
-            
+
+        col_name = self.display_columns[index.column()]
+
         if role == Qt.ItemDataRole.DisplayRole:
-            col_name = self.display_columns[index.column()]
             value = self.df.iloc[index.row()][col_name]
-            
+
             # 格式化基因数据
             if col_name in self.defect_genes or col_name.endswith('(母)') or col_name.endswith('(公)'):
                 return self._format_gene_value(value)
-            
+
             return str(value)
-            
+
         elif role == Qt.ItemDataRole.BackgroundRole:
-            col_name = self.display_columns[index.column()]
             if col_name in self.defect_genes:
                 value = self.df.iloc[index.row()][col_name]
                 return self._get_gene_background(value)
-                
+
+        elif role == Qt.ItemDataRole.ForegroundRole:
+            # 检测是否为深色模式
+            app = QApplication.instance()
+            is_dark_mode = False
+            if app:
+                palette = app.palette()
+                bg_color = palette.color(QPalette.ColorRole.Window)
+                brightness = (bg_color.red() * 299 + bg_color.green() * 587 + bg_color.blue() * 114) / 1000
+                is_dark_mode = brightness < 128
+
+            # 深色模式下，隐性基因列使用黑色文字
+            if is_dark_mode and col_name in self.defect_genes:
+                return QBrush(QColor(0, 0, 0))  # 黑色
+
         return None
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):

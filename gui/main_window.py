@@ -6,7 +6,7 @@ import json
 import logging
 
 from PyQt6.QtCore import (
-    Qt, QDir, QUrl, pyqtSignal, QThread, QTimer
+    Qt, QDir, QUrl, pyqtSignal, QThread, QTimer, QEvent
 )
 from PyQt6.QtGui import (
     QFileSystemModel, QDesktopServices, QBrush, QPalette, QPixmap, QColor, QFont, QIcon
@@ -44,6 +44,7 @@ from core.breeding_calc.mated_bull_traits_calc import MatedBullKeyTraitsPage
 from core.api.mating_result_pusher import MatingResultPusher  
 # from gui.matching_worker import MatchingWorker  # DEPRECATED - 使用 CycleBasedMatcher 替代
 from gui.recommendation_worker import RecommendationWorker
+from gui.theme_manager import theme_manager
 
 # 策略表格管理器，用于处理表格创建和数据逻辑
 class StrategyTableManager:
@@ -358,6 +359,10 @@ class MainWindow(QMainWindow):
             # 分组模式状态：'manual' 或 'auto'，None表示未选择
             self.grouping_mode = None
 
+            # 添加标志防止重复触发
+            self._db_update_triggered = False
+            self._event_filter_installed = False
+
             # 保存按钮引用，用于更新状态
             self.manual_group_btn = None
             self.auto_group_btn = None
@@ -415,16 +420,65 @@ class MainWindow(QMainWindow):
             logging.info("UI setup completed")
             # Delay database update until after window is shown
             # self.check_and_update_database_on_startup()
-            self._db_update_triggered = False  # Flag to ensure update only happens once
+            # Note: _db_update_triggered is already initialized above
             
             logging.info("MainWindow.__init__ completed successfully")
+
+            # 初始化表格引用
+            self.semen_tables = {}
+
         except Exception as e:
             logging.exception(f"Error in MainWindow.__init__: {e}")
             raise
 
+    # 暂时禁用eventFilter以避免卡死问题
+    # def eventFilter(self, source, event):
+    #     """事件过滤器，监听系统主题变化"""
+    #     try:
+    #         # 只处理应用程序级别的事件，避免过度处理
+    #         if source == QApplication.instance():
+    #             if event.type() == QEvent.Type.PaletteChange:
+    #                 # 系统主题发生变化，更新表格样式
+    #                 # 使用定时器稍微延迟执行，确保主题已经完全切换
+    #                 if hasattr(self, 'update_preview_tables_style'):
+    #                     QTimer.singleShot(100, self.update_preview_tables_style)
+    #     except Exception as e:
+    #         logging.error(f"eventFilter 处理错误: {e}")
+    #     return super().eventFilter(source, event)
+
+    def update_preview_tables_style(self):
+        """更新所有预览表格的样式"""
+        # 重新获取当前主题样式
+        style = theme_manager.get_preview_table_style()
+
+        # 更新分组预览表格
+        if hasattr(self, 'group_preview_table') and self.group_preview_table:
+            self.group_preview_table.setStyleSheet(style)
+            # 强制刷新表格显示
+            self.group_preview_table.viewport().update()
+
+        # 更新冻精预览表格 - 通过标签页遍历所有表格
+        if hasattr(self, 'semen_tab_widget') and self.semen_tab_widget:
+            for i in range(self.semen_tab_widget.count()):
+                widget = self.semen_tab_widget.widget(i)
+                if widget:
+                    # 查找该widget中的所有QTableWidget
+                    tables = widget.findChildren(QTableWidget)
+                    for table in tables:
+                        table.setStyleSheet(style)
+                        # 强制刷新表格显示
+                        table.viewport().update()
+
     def showEvent(self, event):
         """Override showEvent to trigger database update after window is shown"""
         super().showEvent(event)
+        # 暂时禁用事件过滤器，避免导致卡死
+        # if not hasattr(self, '_event_filter_installed') or not self._event_filter_installed:
+        #     try:
+        #         QApplication.instance().installEventFilter(self)
+        #         self._event_filter_installed = True
+        #     except Exception as e:
+        #         logging.error(f"安装事件过滤器时出错: {e}")
         
         # Only trigger database update once, after the window is first shown
         if not self._db_update_triggered:
@@ -1111,6 +1165,8 @@ class MainWindow(QMainWindow):
                 self.load_semen_preview()
                 # 同时刷新分组预览
                 self.load_group_preview()
+                # 更新表格样式以适应当前主题
+                self.update_preview_tables_style()
             
             self.update_nav_selected_style()
 
@@ -1636,11 +1692,29 @@ class MainWindow(QMainWindow):
 
         # 如果是 cs 用户，显示数据库存储位置
         if hasattr(self, 'username') and self.username == "cs":
-            from core.data.update_manager import LOCAL_DB_PATH
-            message += f"\n\n数据库本地存储位置：\n{LOCAL_DB_PATH}"
+            try:
+                from core.data.update_manager import LOCAL_DB_PATH
+                message += f"\n\n数据库本地存储位置：\n{str(LOCAL_DB_PATH)}"
+            except Exception as e:
+                logging.error(f"获取数据库路径时出错: {e}")
 
         logging.info(message)
-        QMessageBox.information(self, "更新完成", message)
+
+        # 直接显示消息，不使用消息框避免阻塞
+        # 或者可以使用定时器延迟显示
+        if hasattr(self, 'username') and self.username == "cs":
+            # 对于cs用户，仅记录日志，不显示消息框
+            logging.info("数据库更新完成 - cs用户跳过消息框")
+        else:
+            # 对于其他用户，延迟显示消息框
+            QTimer.singleShot(100, lambda: self.show_db_update_message(message))
+
+    def show_db_update_message(self, message: str):
+        """显示数据库更新完成消息"""
+        try:
+            QMessageBox.information(self, "更新完成", message)
+        except Exception as e:
+            logging.error(f"显示更新消息时出错: {e}")
 
     def on_db_update_error(self, error_message: str):
         """处理数据库更新错误的信号"""
@@ -1812,10 +1886,15 @@ class MainWindow(QMainWindow):
         self.group_preview_table = QTableWidget()
         self.group_preview_table.setColumnCount(9) # 修正为9列
         self.group_preview_table.setHorizontalHeaderLabels([
-            "勾选", "组名", "头数", 
-            "1选常规未分配", "2选常规未分配", "3选常规未分配", 
+            "勾选", "组名", "头数",
+            "1选常规未分配", "2选常规未分配", "3选常规未分配",
             "1选性控未分配", "2选性控未分配", "3选性控未分配" # 确保这里也是9个标题
         ])
+
+        # 应用预览表格样式（浅色模式下返回空字符串，保持默认样式）
+        style = theme_manager.get_preview_table_style()
+        if style:
+            self.group_preview_table.setStyleSheet(style)
         
         # 设置列宽和样式
         self.group_preview_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
@@ -2254,6 +2333,11 @@ class MainWindow(QMainWindow):
                     semen_table.setColumnCount(len(new_headers))
                     semen_table.setHorizontalHeaderLabels(new_headers)
 
+                    # 应用预览表格样式（浅色模式下返回空字符串，保持默认样式）
+                    style = theme_manager.get_preview_table_style()
+                    if style:
+                        semen_table.setStyleSheet(style)
+
                     bull_ids_in_category = bull_data_by_category[category]
                     print(f"[SemenPreview] 类别 '{category}' 找到 {len(bull_ids_in_category)} 头公牛")
                     semen_table.setRowCount(len(bull_ids_in_category))
@@ -2316,6 +2400,12 @@ class MainWindow(QMainWindow):
                         header_item.setFont(header_font)
                     semen_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
                     semen_table.cellChanged.connect(self.handle_semen_count_changed)
+
+                    # 应用当前主题样式
+                    style = theme_manager.get_preview_table_style()
+                    if style:
+                        semen_table.setStyleSheet(style)
+
                     type_layout.addWidget(semen_table)
                     self.semen_tables[category] = semen_table
                     self.semen_tab_widget.addTab(type_widget, category)
@@ -3571,7 +3661,7 @@ class MainWindow(QMainWindow):
                 font-size: 24px;
                 font-weight: bold;
                 padding: 20px;
-                color: #2c3e50;
+                color: black;
             }
         """)
         layout.addWidget(title_label)
@@ -3585,7 +3675,7 @@ class MainWindow(QMainWindow):
                 QLabel {
                     font-size: 16px;
                     padding: 5px;
-                    color: #34495e;
+                    color: black;
                 }
             """)
             layout.addWidget(version_label)
@@ -3596,7 +3686,7 @@ class MainWindow(QMainWindow):
                 QLabel {
                     font-size: 14px;
                     padding: 5px;
-                    color: #7f8c8d;
+                    color: black;
                 }
             """)
             layout.addWidget(date_label)
@@ -3614,7 +3704,7 @@ class MainWindow(QMainWindow):
                 font-size: 16px;
                 font-weight: bold;
                 padding: 10px 10px 5px 10px;
-                color: #2c3e50;
+                color: black;
             }
         """)
         layout.addWidget(history_label)
@@ -3626,6 +3716,7 @@ class MainWindow(QMainWindow):
                 border: 1px solid #ddd;
                 padding: 10px;
                 background-color: #f8f9fa;
+                color: black;
                 font-size: 13px;
                 line-height: 1.5;
             }
@@ -3651,7 +3742,7 @@ class MainWindow(QMainWindow):
             QLabel {
                 font-size: 12px;
                 padding: 10px;
-                color: #95a5a6;
+                color: black;
             }
         """)
         layout.addWidget(copyright_label)

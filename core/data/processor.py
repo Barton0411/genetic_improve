@@ -1273,6 +1273,19 @@ def preprocess_cow_data(cow_df, progress_callback=None):
 
         # 注意：dam相关列（birth_date_dam, mgd, birth_date_mgd）已在前面添加
 
+        # 确保关键ID字段都是字符串类型
+        print("[DEBUG-16.5] 确保ID字段为字符串类型...")
+        if 'cow_id' in cow_df.columns:
+            cow_df['cow_id'] = cow_df['cow_id'].astype(str)
+        if 'dam' in cow_df.columns:
+            cow_df['dam'] = cow_df['dam'].astype(str)
+        if 'mgd' in cow_df.columns:
+            cow_df['mgd'] = cow_df['mgd'].astype(str)
+        if 'sire' in cow_df.columns:
+            cow_df['sire'] = cow_df['sire'].astype(str)
+        if 'mgs' in cow_df.columns:
+            cow_df['mgs'] = cow_df['mgs'].astype(str)
+
         print("[DEBUG-17] 预处理完成，返回结果DataFrame，行数:", len(cow_df))
         return cow_df
     except Exception as e:
@@ -1390,7 +1403,7 @@ def process_cow_data_file(input_file: Path, project_path: Path, progress_callbac
     return output_file
 
 def preprocess_bull_data(bull_df, progress_callback=None):
-    # 清理 bull_id
+    # 清理 bull_id - 保持字符串类型
     bull_df['bull_id'] = bull_df['bull_id'].astype(str).apply(lambda x: x.replace(' ', '').strip())
     bull_df = bull_df.dropna(subset=['bull_id'])  # 删除 NaN 行
     bull_df = bull_df[bull_df['bull_id'] != '']  # 删除空字符串行
@@ -1418,6 +1431,9 @@ def preprocess_bull_data(bull_df, progress_callback=None):
         error_message = "\n".join(all_errors)
         raise ValueError(f"数据处理错误(以下为全部错误信息):\n{error_message}")
 
+    # 确保 bull_id 为字符串类型
+    bull_df['bull_id'] = bull_df['bull_id'].astype(str)
+
     # 没有错误则返回处理后的DataFrame
     return bull_df
 
@@ -1430,7 +1446,7 @@ def process_bull_data_file(input_file: Path, project_path: Path, progress_callba
     standardized_path.mkdir(parents=True, exist_ok=True)
     # 读取文件
     try:
-        df = pd.read_excel(input_file)
+        df = pd.read_excel(input_file, dtype={'bull_id': str, '公牛号': str, '冻精编号': str})
     except Exception as e:
         raise ValueError(f"读取备选公牛数据文件失败: {e}")
     # 对数据进行标准化处理，如：
@@ -1458,9 +1474,9 @@ def process_body_conformation_file(input_file: Path, project_path: Path, progres
     # 读取文件，根据文件类型选择读取方法
     try:
         if input_file.suffix.lower() == '.csv':
-            df = pd.read_csv(input_file)
+            df = pd.read_csv(input_file, dtype={'牛号': str, '耳号': str, 'cow_id': str})
         else:
-            df = pd.read_excel(input_file)
+            df = pd.read_excel(input_file, dtype={'牛号': str, '耳号': str, 'cow_id': str})
     except Exception as e:
         raise ValueError(f"读取体型外貌数据文件失败: {e}")
 
@@ -1477,6 +1493,12 @@ def process_body_conformation_file(input_file: Path, project_path: Path, progres
 
     # 删除缺失值
     df_cleaned = df.dropna(subset=required_columns)
+
+    # 确保牛号字段为字符串类型
+    if '牛号' in df_cleaned.columns:
+        df_cleaned['牛号'] = df_cleaned['牛号'].astype(str)
+    if 'cow_id' in df_cleaned.columns:
+        df_cleaned['cow_id'] = df_cleaned['cow_id'].astype(str)
 
     # 您可以在这里添加更多的标准化逻辑，例如数据类型转换、格式统一等
 
@@ -1517,9 +1539,9 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
     try:
         print(f"[DEBUG-BREEDING-3] 尝试读取配种记录文件: {input_file}")
         if input_file.suffix.lower() == '.csv':
-            df = pd.read_csv(input_file)
+            df = pd.read_csv(input_file, dtype={'耳号': str, '母牛号': str, '冻精编号': str, '配种公牛号': str})
         else:
-            df = pd.read_excel(input_file)
+            df = pd.read_excel(input_file, dtype={'耳号': str, '母牛号': str, '冻精编号': str, '配种公牛号': str})
         print(f"[DEBUG-BREEDING-4] 成功读取配种记录文件，形状: {df.shape}")
     except Exception as e:
         error_msg = f"读取配种记录数据文件失败: {e}"
@@ -1558,6 +1580,19 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
     print(f"[DEBUG-BREEDING-5] 删除缺失值前记录数: {len(df)}")
     df_cleaned = df.dropna(subset=required_columns)
     print(f"[DEBUG-BREEDING-6] 删除缺失值后记录数: {len(df_cleaned)}")
+
+    # 确保关键字段为字符串类型
+    print("[DEBUG-BREEDING-6.5] 确保ID字段为字符串类型...")
+    if '耳号' in df_cleaned.columns:
+        df_cleaned['耳号'] = df_cleaned['耳号'].astype(str)
+    if '母牛号' in df_cleaned.columns:
+        df_cleaned['母牛号'] = df_cleaned['母牛号'].astype(str)
+    if 'cow_id' in df_cleaned.columns:
+        df_cleaned['cow_id'] = df_cleaned['cow_id'].astype(str)
+    if '冻精编号' in df_cleaned.columns:
+        df_cleaned['冻精编号'] = df_cleaned['冻精编号'].astype(str)
+    if '配种公牛号' in df_cleaned.columns:
+        df_cleaned['配种公牛号'] = df_cleaned['配种公牛号'].astype(str)
 
     # 处理 '冻精编号' 使用 format_naab_number
     def apply_format_naab_number(x):
@@ -1804,6 +1839,10 @@ def preprocess_genomic_data(genomic_df, progress_callback=None):
         # 如果一些列在 STANDARD_GENOMIC_COLUMNS 中未出现，就忽略
         standardized_df = standardized_df[STANDARD_GENOMIC_COLUMNS + ["cow_id", "Results_Last_Updated"]]
 
+        # 确保cow_id为字符串类型
+        if 'cow_id' in standardized_df.columns:
+            standardized_df['cow_id'] = standardized_df['cow_id'].astype(str)
+
         print(f"处理后的数据形状: {standardized_df.shape}")
         print("基因组数据预处理完成")
         
@@ -1863,11 +1902,11 @@ def process_genomic_data_file(input_files: list[Path], project_path: Path, progr
             
             # 读取文件
             if input_file.suffix.lower() == '.csv':
-                df = pd.read_csv(input_file)
+                df = pd.read_csv(input_file, dtype={'cow_id': str, 'Farm ID': str, 'On-farm ID (Herd Management #)': str})
                 if progress_callback:
                     progress_callback(int(file_progress + 5), f"成功读取CSV文件，数据行数: {len(df)}")
             else:
-                df = pd.read_excel(input_file)
+                df = pd.read_excel(input_file, dtype={'cow_id': str, 'Farm ID': str, 'On-farm ID (Herd Management #)': str})
                 if progress_callback:
                     progress_callback(int(file_progress + 5), f"成功读取Excel文件，数据行数: {len(df)}")
 
@@ -1937,6 +1976,10 @@ def process_genomic_data_file(input_files: list[Path], project_path: Path, progr
                 
                 if progress_callback:
                     progress_callback(90, f"去重完成: {original_count} -> {deduplicated_count} 条记录")
+
+                # 确保cow_id为字符串类型
+                if 'cow_id' in final_df.columns:
+                    final_df['cow_id'] = final_df['cow_id'].astype(str)
 
                 # 保存最终结果
                 final_df.to_excel(final_output, index=False)

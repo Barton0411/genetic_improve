@@ -1,7 +1,7 @@
 # core/breeding_calc/index_page.py
 
 from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QGridLayout, QPushButton, 
+    QWidget, QHBoxLayout, QVBoxLayout, QGridLayout, QPushButton,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
     QSpinBox, QScrollArea, QInputDialog, QMainWindow
 )
@@ -10,6 +10,7 @@ import json
 
 from .index_calculation import IndexCalculation, TRAIT_SD
 from .cow_traits_calc import TRAITS_TRANSLATION  # 从 cow_traits_calc.py 导入 TRAITS_TRANSLATION
+from gui.theme_manager import theme_manager  # 导入主题管理器
 
 class IndexCalculationPage(QWidget):
     def __init__(self, parent=None):
@@ -133,24 +134,9 @@ class IndexCalculationPage(QWidget):
         self.cow_index_btn = QPushButton("母牛群指数排名")
         self.bull_index_btn = QPushButton("备选公牛指数排名")
 
-        # 设置按钮样式
-        button_style = """
-            QPushButton {
-                padding: 8px 16px;
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                min-width: 150px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """
-        for btn in [self.new_weight_btn, self.delete_weight_btn, 
+        # 根据主题设置按钮样式
+        button_style = theme_manager.get_button_style_for_index_calc()
+        for btn in [self.new_weight_btn, self.delete_weight_btn,
                    self.cow_index_btn, self.bull_index_btn]:
             btn.setStyleSheet(button_style)
 

@@ -132,15 +132,45 @@ class CowKeyTraitsPage(QWidget):
 
         # 中间：按钮区域
         button_layout = QVBoxLayout()
+
+        # 定义按钮样式
+        button_style = """
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 14px;
+                font-weight: bold;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton:pressed {
+                background-color: #21618c;
+            }
+        """
+
         add_button = QPushButton("添加 >>")
+        add_button.setStyleSheet(button_style)
         add_button.clicked.connect(self.add_trait)
+
         remove_button = QPushButton("<< 移除")
+        remove_button.setStyleSheet(button_style)
         remove_button.clicked.connect(self.remove_trait)
+
         select_all_button = QPushButton("全选")
+        select_all_button.setStyleSheet(button_style)
         select_all_button.clicked.connect(self.select_all_traits)
+
         reset_button = QPushButton("恢复默认")
+        reset_button.setStyleSheet(button_style)
         reset_button.clicked.connect(self.reset_traits)
+
         confirm_button = QPushButton("确认")  # 添加确认按钮
+        confirm_button.setStyleSheet(button_style)
         confirm_button.clicked.connect(self.start_cow_traits_calculation)  # 添加点击事件处理
         
         button_layout.addStretch()
