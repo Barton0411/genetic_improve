@@ -4,6 +4,52 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-cn/1.0.0/)，本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [1.2.0.5] - 2025-10-07 📚 文档体系建立与功能优化
+
+### 📚 文档体系
+- 建立完整的文档中心 (`docs/`)
+  - 文档导航 (`docs/README.md`)
+  - 系统架构文档 (`docs/开发文档/ARCHITECTURE.md`)
+  - API参考文档 (`docs/开发文档/API_REFERENCE.md`)
+  - 云服务配置文档 (`docs/部署文档/CLOUD_SERVICES.md`)
+  - 已完成任务清单 (`docs/项目管理/COMPLETED_TASKS.md`)
+  - 待办事项清单 (`docs/项目管理/TODO_LIST.md`)
+  - 项目路线图 (`docs/项目管理/ROADMAP.md`)
+- 整理文档目录结构
+  - 功能文档分类归档到 `docs/功能文档/`
+  - 历史文档归档到 `docs/历史文档/archived/`
+  - 按开发、部署、功能、管理分类
+- 更新 `.gitignore` 排除敏感信息
+
+### ✨ 功能优化
+- 缺失公牛上传功能改进
+  - 上传公牛数据时即时检查本地数据库
+  - 格式错误的NAAB号保留处理（不再拒绝）
+  - 自动上传缺失公牛到云端 (无需认证)
+- 用户提示信息简化
+  - 移除"这些信息已记录到云端数据库"等技术细节
+  - 移除"结果文件中这些公牛的性状值将显示为空"提示
+  - 合并重复弹窗，只显示关键信息
+- 数据库版本显示
+  - 侧边栏显示数据库版本和更新时间
+  - 格式：数据库版本: x.x.x\n数据库更新时间: YYYY-MM-DD
+
+### 🔧 技术改进
+- API地址统一为 `https://api.genepop.com`
+  - 更新 `config/api_config.json`
+  - 更新 `api/config.py`
+  - 更新 `api/api_client.py`
+  - 更新 `core/breeding_calc/base_calculation.py`
+- 缺失公牛上传无需认证
+  - `upload_missing_bulls()` 方法移除JWT token要求
+  - 服务器端 `/api/data/missing_bulls` 接口公开访问
+
+### 📝 文档内容
+- **系统架构文档**: 整体架构图、数据流向、技术栈、架构演进、技术决策
+- **API参考文档**: 认证API、数据API、请求响应示例、错误码说明
+- **云服务配置**: ECS、OSS、PolarDB、Nginx、SSL证书配置详情
+- **项目管理**: 85%完成度统计、待办事项分优先级、v1.3-v3.0路线图
+
 ## [1.2.0.4] - 2025-09-30 🔧 数据兼容性与深色模式优化
 
 ### 🔧 问题修复

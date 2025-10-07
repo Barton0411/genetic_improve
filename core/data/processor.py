@@ -1409,32 +1409,51 @@ def preprocess_bull_data(bull_df, progress_callback=None):
     bull_df = bull_df[bull_df['bull_id'] != '']  # 删除空字符串行
     bull_df = bull_df[~bull_df['bull_id'].str.contains("nan", case=False)]  # 删除包含"nan"的行
 
+    print(f"[DEBUG-BULL-PREPROCESS] 开始处理 {len(bull_df)} 条备选公牛记录")
+
     all_errors = []
     formatted_ids = []
+    invalid_count = 0
 
     total = bull_df.shape[0]
     for idx, row in bull_df.iterrows():
         original_id = row['bull_id']
         formatted_id, errors = format_naab_number(original_id)
         if errors:
+            # 记录错误但不中断处理
             all_errors.extend(errors)
-        # 无论是否有错误，都将formatted_id加入列表（有错则None）
-        formatted_ids.append(formatted_id)
+            invalid_count += 1
+            # 对于格式错误的NAAB号，保留原始值以便后续上传为缺失公牛
+            formatted_ids.append(original_id)
+            print(f"[DEBUG-BULL-PREPROCESS] 保留格式异常的NAAB号: {original_id}")
+        else:
+            # 格式正确，使用格式化后的ID
+            formatted_ids.append(formatted_id)
+
         if progress_callback:
             progress = int((idx + 1) / total * 100)
             progress_callback(progress)
 
     bull_df['bull_id'] = formatted_ids
 
-    # 如果有错误信息，一次性报错
+    # 显示警告信息但不终止处理（只在日志中显示，不弹窗）
     if all_errors:
-        error_message = "\n".join(all_errors)
-        raise ValueError(f"数据处理错误(以下为全部错误信息):\n{error_message}")
+        print(f"[DEBUG-BULL-PREPROCESS] ⚠️ 发现 {invalid_count} 个格式异常的NAAB号，将保留原值")
+        print(f"[DEBUG-BULL-PREPROCESS] 这些公牛在查询时会被识别为缺失公牛")
+        # 只显示前5个错误作为示例
+        sample_errors = all_errors[:5]
+        for error in sample_errors:
+            print(f"[DEBUG-BULL-PREPROCESS]   - {error}")
+        if len(all_errors) > 5:
+            print(f"[DEBUG-BULL-PREPROCESS]   ... 还有 {len(all_errors) - 5} 个类似错误")
+
+        # 不在这里弹窗，等到检查数据库后统一提示
 
     # 确保 bull_id 为字符串类型
     bull_df['bull_id'] = bull_df['bull_id'].astype(str)
 
-    # 没有错误则返回处理后的DataFrame
+    print(f"[DEBUG-BULL-PREPROCESS] 处理完成，保留所有 {len(bull_df)} 条记录")
+    # 返回处理后的DataFrame，包含格式错误的记录
     return bull_df
 
 def process_bull_data_file(input_file: Path, project_path: Path, progress_callback=None) -> Path:
@@ -1461,6 +1480,116 @@ def process_bull_data_file(input_file: Path, project_path: Path, progress_callba
         df_cleaned.to_excel(output_file, index=False)
     except Exception as e:
         raise ValueError(f"保存备选公牛数据文件失败: {e}")
+
+    # ========== 新增：检查本地数据库并上传缺失公牛 ==========
+    print("\n[检查点-上传] 开始检查本地数据库中的缺失公牛...")
+    try:
+        from core.data.update_manager import LOCAL_DB_PATH
+        from sqlalchemy import create_engine, text
+        import datetime
+
+        # 连接本地数据库
+        db_engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
+        print(f"[检查点-上传] 本地数据库路径: {LOCAL_DB_PATH}")
+
+        missing_bulls = []
+        bull_ids = df_cleaned['bull_id'].tolist()
+        print(f"[检查点-上传] 需要检查 {len(bull_ids)} 个公牛")
+
+        # 查询每个公牛是否在本地数据库中存在
+        with db_engine.connect() as conn:
+            for bull_id in bull_ids:
+                result = conn.execute(
+                    text("SELECT COUNT(*) as cnt FROM bull_library WHERE `BULL NAAB`=:bull_id"),
+                    {"bull_id": str(bull_id)}
+                ).fetchone()
+
+                if result[0] == 0:
+                    # 数据库中不存在
+                    missing_bulls.append(bull_id)
+                    print(f"[检查点-上传] 缺失公牛: {bull_id}")
+
+        print(f"[检查点-上传] 共发现 {len(missing_bulls)} 个缺失公牛")
+
+        # 如果有缺失公牛，上传到云端
+        if missing_bulls:
+            print("[检查点-上传] 准备上传缺失公牛到云端...")
+
+            # 准备上传数据
+            from api.api_client import get_api_client
+
+            # 获取用户名（从主窗口）
+            try:
+                from PyQt6.QtWidgets import QApplication
+                app = QApplication.instance()
+                if app:
+                    for widget in app.topLevelWidgets():
+                        if hasattr(widget, 'username'):
+                            username = widget.username
+                            break
+                    else:
+                        username = 'unknown'
+                else:
+                    username = 'unknown'
+            except:
+                username = 'unknown'
+
+            bulls_data = []
+            for bull_id in missing_bulls:
+                bulls_data.append({
+                    'bull': str(bull_id),
+                    'source': 'bull_upload',
+                    'time': datetime.datetime.now().isoformat(),
+                    'user': username
+                })
+
+            print(f"[检查点-上传] 用户名: {username}")
+            print(f"[检查点-上传] 调用API上传 {len(bulls_data)} 条记录...")
+
+            api_client = get_api_client()
+            success = api_client.upload_missing_bulls(bulls_data)
+
+            # 弹窗通知用户缺失公牛（合并提示，不管上传成功与否都显示）
+            try:
+                from PyQt6.QtWidgets import QMessageBox
+
+                # 构建缺失公牛列表（最多显示20个）
+                bull_list = "\n".join([f"• {bull}" for bull in missing_bulls[:20]])
+                if len(missing_bulls) > 20:
+                    bull_list += f"\n... 还有 {len(missing_bulls) - 20} 个"
+
+                msg = QMessageBox()
+                msg.setIcon(QMessageBox.Icon.Information)
+                msg.setWindowTitle("在本地数据库中未找到部分公牛")
+                msg.setText(f"在本地数据库中未找到 {len(missing_bulls)} 个公牛")
+                msg.setInformativeText(
+                    "建议您稍后更新本地数据库，或联系管理员添加这些公牛的完整信息。"
+                )
+                msg.setDetailedText(f"缺失公牛列表：\n\n{bull_list}")
+                msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+                msg.exec()
+
+            except Exception as e:
+                print(f"[检查点-上传] 无法显示通知对话框: {e}")
+
+            # 上传结果日志
+            if success:
+                print(f"[检查点-上传] ✅ 成功上传 {len(missing_bulls)} 个缺失公牛到云端")
+            else:
+                print(f"[检查点-上传] ❌ 上传失败")
+        else:
+            print("[检查点-上传] ✅ 所有公牛都在本地数据库中，无需上传")
+
+        db_engine.dispose()
+
+    except Exception as e:
+        print(f"[检查点-上传] ⚠️ 检查缺失公牛时发生异常: {e}")
+        import traceback
+        print(f"[检查点-上传] 异常详情:\n{traceback.format_exc()}")
+        # 即使检查失败，也继续返回文件路径，不影响主流程
+
+    print("[检查点-上传] 缺失公牛检查完成\n")
+    # ==========================================================
 
     return output_file  # 返回标准化后的文件路径
 

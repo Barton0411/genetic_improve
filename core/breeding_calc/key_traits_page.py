@@ -1229,9 +1229,7 @@ class KeyTraitsPage(QWidget):
                         QMessageBox.warning(
                             self,
                             "警告",
-                            f"以下公牛在数据库中未找到：\n{', '.join(missing_bulls)}\n"
-                            "这些信息已记录到云端数据库。\n"
-                            "结果文件中这些公牛的性状值将显示为空。"
+                            f"以下公牛在数据库中未找到：\n{', '.join(missing_bulls)}"
                         )
                     else:
                         raise Exception("API上传失败")

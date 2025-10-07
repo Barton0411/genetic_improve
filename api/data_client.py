@@ -135,14 +135,22 @@ class DataAPIClient:
             Tuple[bool, str]: (成功标志, 消息)
         """
         try:
+            print(f"[检查点-DataClient.upload] 准备向 {self.base_url}/api/data/missing_bulls 发送POST请求")
+            print(f"[检查点-DataClient.upload] 请求数据: {len(missing_bulls)} 条记录")
+
             response = self.session.post(
                 f"{self.base_url}/api/data/missing_bulls",
                 json={'bulls': missing_bulls},
                 timeout=self.timeout
             )
+
+            print(f"[检查点-DataClient.upload] HTTP状态码: {response.status_code}")
+
             response.raise_for_status()
 
             data = response.json()
+            print(f"[检查点-DataClient.upload] 响应数据: {data}")
+
             if data.get('success'):
                 count = data['data'].get('uploaded_count', 0)
                 return True, f"成功上传{count}条缺失公牛记录"
@@ -150,6 +158,7 @@ class DataAPIClient:
                 return False, data.get('message', '上传失败')
 
         except requests.exceptions.RequestException as e:
+            print(f"[检查点-DataClient.upload] ❌ 请求异常: {e}")
             logger.error(f"上传缺失公牛记录失败: {e}")
             return False, str(e)
 
@@ -306,10 +315,21 @@ def upload_missing_bulls_to_cloud(missing_bulls: List[Dict]) -> bool:
     Returns:
         bool: 是否成功
     """
+    print(f"[检查点-DataClient] upload_missing_bulls_to_cloud 被调用")
+    print(f"[检查点-DataClient] 接收到 {len(missing_bulls)} 条记录")
+    if len(missing_bulls) <= 3:
+        print(f"[检查点-DataClient] 记录内容: {missing_bulls}")
+
     client = get_data_client()
+    print(f"[检查点-DataClient] DataAPIClient base_url: {client.base_url}")
+
     success, message = client.upload_missing_bulls(missing_bulls)
+
     if success:
+        print(f"[检查点-DataClient] ✅ {message}")
         logger.info(message)
     else:
+        print(f"[检查点-DataClient] ❌ 上传失败: {message}")
         logger.error(f"上传失败: {message}")
+
     return success

@@ -2455,56 +2455,76 @@ class InbreedingPage(QWidget):
 
     def process_missing_bulls(self, missing_bulls: List[str], analysis_type: str) -> None:
         """处理缺失公牛记录"""
+        print("\n========== [检查点-近交] 缺失公牛上传流程开始 ==========")
+
         if not missing_bulls:
+            print("[检查点-近交] 没有缺失公牛，跳过上传")
             return
-            
+
         try:
             # 准备数据
-            print(f"处理{len(missing_bulls)}个缺失的公牛记录...")
+            print(f"[检查点-近交] 检测到 {len(missing_bulls)} 个缺失公牛")
+            print(f"[检查点-近交] 分析类型: {analysis_type}")
             if len(missing_bulls) > 10:
-                print(f"前10个缺失的公牛号: {missing_bulls[:10]}")
+                print(f"[检查点-近交] 前10个缺失的公牛号: {missing_bulls[:10]}")
             else:
-                print(f"缺失的公牛号: {missing_bulls}")
-                
+                print(f"[检查点-近交] 缺失的公牛号: {missing_bulls}")
+
             main_window = self.get_main_window()
             username = main_window.username if main_window else 'unknown'
+            print(f"[检查点-近交] 用户名: {username}")
+
             missing_df = pd.DataFrame({
                 'bull': missing_bulls,
                 'source': f'隐性基因筛查_{analysis_type}',
                 'time': datetime.datetime.now(),
                 'user': username
             })
-            
+
             # 通过API上传缺失公牛记录
+            print(f"[检查点-近交] USE_API 标志: {USE_API}")
             if USE_API:
-                print("尝试通过API上传缺失公牛记录...")
-                # 将DataFrame转换为字典列表
-                missing_records = missing_df.to_dict(orient='records')
+                print("[检查点-近交] 正在通过 data_client 上传...")
+                # 将DataFrame转换为字典列表，转换时间为ISO格式
+                missing_records = []
+                for _, row in missing_df.iterrows():
+                    record = row.to_dict()
+                    record['time'] = record['time'].isoformat()
+                    missing_records.append(record)
+
+                print(f"[检查点-近交] 已准备 {len(missing_records)} 条数据记录")
                 success = upload_missing_bulls_to_cloud(missing_records)
+
                 if success:
-                    print(f"成功通过API上传{len(missing_bulls)}个缺失公牛记录")
+                    print(f"[检查点-近交] ✅ 上传成功！已上传 {len(missing_bulls)} 个缺失公牛记录")
                 else:
-                    print(f"API上传失败，{len(missing_bulls)}个缺失公牛记录未能上传")
+                    print(f"[检查点-近交] ❌ API上传失败，{len(missing_bulls)} 个缺失公牛记录未能上传")
             else:
-                print("数据API客户端未安装，无法上传缺失公牛记录")
+                print("[检查点-近交] ❌ 数据API客户端未安装，无法上传缺失公牛记录")
                 logging.error("无法上传缺失公牛记录：API客户端未安装")
             
             # 提示用户
-            print("警告：在本地数据库中未找到公牛基因信息，涉及这些公牛的配对将显示为'缺少公牛信息'")
-            print("请确保本地数据库已更新，或者联系管理员添加这些公牛的基因信息")
+            print("[检查点-近交] 警告：在本地数据库中未找到公牛基因信息，涉及这些公牛的配对将显示为'缺少公牛信息'")
+            print("[检查点-近交] 请确保本地数据库已更新，或者联系管理员添加这些公牛的基因信息")
             logging.warning(f"在本地数据库中未找到{len(missing_bulls)}个公牛的基因信息，涉及这些公牛的配对将显示为'缺少公牛信息'")
-            
+
             # 显示消息框提醒用户
             QMessageBox.warning(
-                self, 
-                "公牛基因信息缺失", 
+                self,
+                "公牛基因信息缺失",
                 f"在本地数据库中未找到{len(missing_bulls)}个公牛的基因信息，\n"
                 f"涉及这些公牛的配对将在隐性基因分析中显示为'缺少公牛信息'。\n\n"
                 f"请确保本地数据库已更新，或者联系管理员添加这些公牛的基因信息。"
             )
-            
+
+            print("========== [检查点-近交] 缺失公牛上传流程结束 ==========\n")
+
         except Exception as e:
+            print(f"[检查点-近交] ❌ 处理缺失公牛记录时发生异常: {e}")
+            import traceback
+            print(f"[检查点-近交] 异常详情:\n{traceback.format_exc()}")
             logging.error(f"处理缺失公牛记录失败: {e}")
+            print("========== [检查点-近交] 缺失公牛上传流程结束 ==========\n")
 
     def analyze_gene_safety(self, cow_genes: Dict[str, str], bull_genes: Dict[str, str]) -> Dict[str, str]:
         """分析基因配对安全性

@@ -22,7 +22,7 @@ AUTH_API_PORT = 8000  # 认证API端口
 DATA_API_PORT = 8082  # 数据API端口（公牛数据库下载等）
 
 # 服务器配置
-PRODUCTION_SERVER = 'http://39.96.189.27'  # 生产服务器地址
+PRODUCTION_SERVER = 'https://api.genepop.com'  # 生产服务器地址
 
 # 注意：
 # 1. auth_api 运行在 8000 端口，通过 nginx 代理到 80 端口的 /api/auth/* 路径

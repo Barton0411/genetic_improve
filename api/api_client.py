@@ -102,7 +102,7 @@ class APIClient:
                 current_env = config.get('current_environment', 'production')
                 env_config = config.get('environments', {}).get(current_env, {})
 
-                self.base_url = env_config.get('api_base_url', 'http://39.96.189.27').rstrip('/')
+                self.base_url = env_config.get('api_base_url', 'https://api.genepop.com').rstrip('/')
                 self.timeout = env_config.get('timeout', 15)
                 self.retry_attempts = env_config.get('retry_attempts', 3)
 
@@ -113,7 +113,7 @@ class APIClient:
                 logger.info(f"已加载API配置 - 环境: {current_env}, URL: {self.base_url}, SSL验证: {self.verify_ssl}")
             else:
                 # 默认配置 - 使用可靠的HTTP连接
-                self.base_url = "http://39.96.189.27"
+                self.base_url = "https://api.genepop.com"
                 self.timeout = 15
                 self.retry_attempts = 3
                 self.verify_ssl = False
@@ -346,6 +346,7 @@ class APIClient:
     def upload_missing_bulls(self, bulls_data: list) -> bool:
         """
         上传缺失公牛记录到云端数据库
+        注意：此API无需认证
 
         Args:
             bulls_data: 缺失公牛数据列表
@@ -353,34 +354,22 @@ class APIClient:
         Returns:
             bool: 是否上传成功
         """
-        # 如果没有令牌，尝试从token manager恢复
-        if not self.token:
-            self._restore_token_from_manager()
-
-            # 如果仍然没有令牌，无法继续
-            if not self.token:
-                logger.error("未登录或令牌无效，无法上传缺失公牛数据")
-                print("未登录，无法上传缺失公牛数据")
-                return False
-
-        headers = {
-            'Authorization': f'Bearer {self.token}'
-        }
-
         data = {
             'bulls': bulls_data
         }
 
-        success, response = self._make_request('POST', '/api/data/missing_bulls', data, headers=headers)
+        # 此API无需认证，直接请求即可
+        success, response = self._make_request('POST', '/api/data/missing_bulls', data)
 
         if success and response.get('success'):
-            logger.info(f"成功通过API上传 {len(bulls_data)} 条缺失公牛记录")
-            print(f"成功通过API上传 {len(bulls_data)} 条缺失公牛记录")
+            uploaded_count = response.get('data', {}).get('uploaded_count', len(bulls_data))
+            logger.info(f"成功通过API上传 {uploaded_count} 条缺失公牛记录")
+            print(f"成功上传 {uploaded_count} 条缺失公牛记录到云端")
             return True
         else:
             error_msg = response.get('message', '未知错误')
             logger.error(f"API上传缺失公牛失败: {error_msg}")
-            print(f"API上传缺失公牛失败: {error_msg}")
+            print(f"上传缺失公牛记录失败: {error_msg}")
             return False
 
 

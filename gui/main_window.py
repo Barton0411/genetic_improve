@@ -583,7 +583,20 @@ class MainWindow(QMainWindow):
             }
         """)
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
+        # 添加数据库版本信息
+        self.db_version_label = QLabel("数据库版本: 检查中...")
+        self.db_version_label.setStyleSheet("""
+            QLabel {
+                color: #7f8c8d;
+                font-size: 11px;
+                padding: 5px 10px;
+                background-color: #2c3e50;
+            }
+        """)
+        self.db_version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.db_version_label.setWordWrap(True)
+
         # 添加关于按钮
         about_btn = QPushButton("关于")
         about_btn.setStyleSheet("""
@@ -601,8 +614,9 @@ class MainWindow(QMainWindow):
             }
         """)
         about_btn.clicked.connect(self.show_about_dialog)
-        
+
         nav_layout.addWidget(version_label)
+        nav_layout.addWidget(self.db_version_label)
         nav_layout.addWidget(about_btn)
 
     def create_genetic_analysis_page(self):
@@ -1689,6 +1703,27 @@ class MainWindow(QMainWindow):
             else:
                 # 最后备用消息
                 message = "本地数据库已成功检查和更新。"
+
+        # 更新侧边栏的数据库版本显示
+        if hasattr(self, 'db_version_label'):
+            try:
+                from core.data.update_manager import get_local_db_version_with_time
+                db_version, db_update_time = get_local_db_version_with_time()
+                if db_version and db_update_time:
+                    # 格式化日期
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(db_update_time)
+                        formatted_time = dt.strftime('%Y-%m-%d')
+                    except:
+                        formatted_time = db_update_time[:10] if len(db_update_time) >= 10 else db_update_time
+
+                    self.db_version_label.setText(f"数据库版本: {db_version}\n数据库更新时间: {formatted_time}")
+                else:
+                    self.db_version_label.setText("数据库版本: 未知")
+            except Exception as e:
+                logging.error(f"更新数据库版本显示时出错: {e}")
+                self.db_version_label.setText("数据库版本: 获取失败")
 
         # 如果是 cs 用户，显示数据库存储位置
         if hasattr(self, 'username') and self.username == "cs":

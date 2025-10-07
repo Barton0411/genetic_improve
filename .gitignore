@@ -53,3 +53,12 @@ analysis_results/
 *.tmp
 *.temp
 *.bak
+
+# Sensitive information (DO NOT COMMIT)
+docs/部署文档/SERVER_CREDENTIALS.md
+config/credentials.json
+config/.env
+.env
+*.pem
+*.key
+*_secret.json

@@ -7,10 +7,10 @@
       "description": "本地开发环境"
     },
     "production": {
-      "api_base_url": "http://39.96.189.27",
+      "api_base_url": "https://api.genepop.com",
       "timeout": 15,
       "retry_attempts": 5,
-      "description": "生产环境(临时使用HTTP+IP)"
+      "description": "生产环境"
     },
     "production_domain": {
       "api_base_url": "https://api.genepop.com",

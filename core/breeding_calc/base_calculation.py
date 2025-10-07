@@ -115,11 +115,19 @@ class BaseCowCalculation:
             bool: 是否处理成功
         """
         try:
+            print("\n========== [检查点] 缺失公牛上传流程开始 ==========")
+
             if not missing_bulls:
+                print("[检查点] 没有缺失公牛，跳过上传")
                 return True
 
-            import requests
-            import os
+            print(f"[检查点] 检测到 {len(missing_bulls)} 个缺失公牛")
+            print(f"[检查点] 数据来源: {source}")
+            print(f"[检查点] 用户名: {username}")
+            if len(missing_bulls) <= 10:
+                print(f"[检查点] 缺失公牛列表: {missing_bulls}")
+            else:
+                print(f"[检查点] 前10个缺失公牛: {missing_bulls[:10]}")
 
             # 准备上传数据
             bulls_data = []
@@ -131,36 +139,31 @@ class BaseCowCalculation:
                     'user': username
                 })
 
-            # 准备请求数据（无需认证）
-            data = {
-                'bulls': bulls_data
-            }
+            print(f"[检查点] 已准备 {len(bulls_data)} 条数据记录")
 
-            # 创建session并禁用代理
-            session = requests.Session()
-            session.trust_env = False  # 忽略系统代理设置
+            # 使用API客户端统一上传
+            print("[检查点] 正在导入 api_client...")
+            from api.api_client import get_api_client
+            api_client = get_api_client()
+            print(f"[检查点] API客户端已初始化，base_url: {api_client.base_url}")
 
-            # 直接调用API上传（无需认证头）
-            response = session.post(
-                'http://39.96.189.27/api/data/missing_bulls',
-                json=data,
-                timeout=15
-            )
+            print("[检查点] 正在调用 upload_missing_bulls...")
+            success = api_client.upload_missing_bulls(bulls_data)
 
-            if response.status_code == 200:
-                result = response.json()
-                if result.get('success'):
-                    print(f"成功上传 {len(missing_bulls)} 条缺失公牛记录到云端")
-                    return True
-                else:
-                    print(f"上传失败: {result.get('message', '未知错误')}")
-                    return False
+            if success:
+                print(f"[检查点] ✅ 上传成功！已上传 {len(missing_bulls)} 条缺失公牛记录")
+                print("========== [检查点] 缺失公牛上传流程结束 ==========\n")
+                return True
             else:
-                print(f"上传失败，HTTP状态码: {response.status_code}")
+                print(f"[检查点] ❌ 上传失败")
+                print("========== [检查点] 缺失公牛上传流程结束 ==========\n")
                 return False
 
         except Exception as e:
-            print(f"处理缺失公牛信息失败: {e}")
+            print(f"[检查点] ❌ 处理缺失公牛信息时发生异常: {e}")
+            import traceback
+            print(f"[检查点] 异常详情:\n{traceback.format_exc()}")
+            print("========== [检查点] 缺失公牛上传流程结束 ==========\n")
             return False
 
     def query_bull_traits(self, bull_id: str, selected_traits: list) -> Tuple[dict, bool]:

@@ -333,8 +333,11 @@ class IndexCalculation(BaseCowCalculation):
 
             # 6. 处理缺失的公牛信息
             if missing_bulls:
+                print(f"\n[检查点-指数] 在指数排序中发现 {len(missing_bulls)} 个缺失公牛")
+                print(f"[检查点-指数] 调用 process_missing_bulls 进行上传...")
                 self.process_missing_bulls(missing_bulls, 'bull_index', main_window.username)
-                print(f"缺失公牛数量: {len(missing_bulls)}")
+            else:
+                print("\n[检查点-指数] 所有公牛数据完整，无缺失公牛")
 
             # 7. 计算指数得分
             bull_df[f'{weight_name}_index'] = bull_df.apply(
