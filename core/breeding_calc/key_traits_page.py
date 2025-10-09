@@ -7,7 +7,7 @@
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, 
+    QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel,
     QListWidget, QListWidgetItem, QAbstractItemView, QMessageBox,
     QMainWindow
 )
@@ -18,6 +18,7 @@ from sqlalchemy import create_engine, text
 import datetime
 from pathlib import Path
 from sklearn.linear_model import LinearRegression
+import shutil
 
 from core.breeding_calc.traits_calculation import TraitsCalculation
 from core.data.update_manager import LOCAL_DB_PATH
@@ -744,13 +745,13 @@ class KeyTraitsPage(QWidget):
             detail_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_detail.xlsx"
             if not self.save_results_with_retry(cow_df, detail_output_path):
                 return False, "用户取消了保存操作"
-            
+
             # 7. 处理年度平均值和回归分析（第二次调用，从文件读取）
             yearly_output_path = main_window.selected_project_path / "analysis_results" / "sire_traits_mean_by_cow_birth_year.xlsx"
             # 注意：这里不需要再次处理，因为已经在5.5步骤处理过了
 
             # 8. 计算关键性状得分
-            pedigree_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pidgree.xlsx"
+            pedigree_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pedigree.xlsx"
             if not self.calculate_cow_key_traits_scores(detail_output_path, yearly_output_path):
                 return False, "用户取消了得分计算操作"
             
@@ -761,6 +762,42 @@ class KeyTraitsPage(QWidget):
                     return False, "用户取消了基因组数据更新操作"
             else:
                 print("未找到基因组数据文件，跳过基因组数据更新")
+
+            # 10. 生成最终育种值文件（包含所有母牛育种值）
+            try:
+                print("生成最终育种值文件...")
+                genomic_scores_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_genomic.xlsx"
+                pedigree_scores_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pedigree.xlsx"
+                final_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_final.xlsx"
+
+                # 优先使用genomic文件，如果不存在则使用pedigree文件
+                if genomic_scores_path.exists():
+                    source_path = genomic_scores_path
+                    source_type = "genomic"
+                elif pedigree_scores_path.exists():
+                    source_path = pedigree_scores_path
+                    source_type = "pedigree"
+                else:
+                    print("未找到scores文件，跳过生成final文件")
+                    source_path = None
+
+                if source_path:
+                    # 复制为final文件
+                    shutil.copy(source_path, final_output_path)
+                    print(f"✓ 已生成最终育种值文件: processed_cow_data_key_traits_final.xlsx (来源: {source_type})")
+            except Exception as e:
+                print(f"生成最终育种值文件失败: {e}")
+                # 不影响主流程，继续执行
+
+            # 11. 自动生成系谱识别分析结果（在合并育种值之后）
+            try:
+                from core.breeding_calc.generate_pedigree_analysis import generate_pedigree_analysis_result
+                print("自动生成系谱识别分析结果...")
+                generate_pedigree_analysis_result(main_window.selected_project_path)
+                print("✓ 系谱识别分析结果已生成")
+            except Exception as e:
+                print(f"生成系谱识别分析结果失败: {e}")
+                # 不影响主流程，继续执行
 
             return True, "计算完成"
 
@@ -972,7 +1009,7 @@ class KeyTraitsPage(QWidget):
                     
             # 8. 保存结果
             print("保存计算结果...")
-            output_path = detail_path.parent / "processed_cow_data_key_traits_scores_pidgree.xlsx"
+            output_path = detail_path.parent / "processed_cow_data_key_traits_scores_pedigree.xlsx"
             if not self.save_results_with_retry(df, output_path):
                 print("用户取消了得分数据保存操作")
                 return False

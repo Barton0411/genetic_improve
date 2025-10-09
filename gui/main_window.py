@@ -427,6 +427,23 @@ class MainWindow(QMainWindow):
             # 初始化表格引用
             self.semen_tables = {}
 
+            # 初始化对比牧场管理器
+            from core.benchmark import BenchmarkManager
+            self.benchmark_manager = BenchmarkManager()
+            self.selected_comparisons = []  # 已选择的对比牧场列表 [{farm_id, color}, ...]
+
+            # 预定义的对比颜色列表
+            self.comparison_colors = [
+                '#FF6B6B',  # 红色
+                '#4ECDC4',  # 青色
+                '#45B7D1',  # 蓝色
+                '#FFA07A',  # 橙色
+                '#98D8C8',  # 绿色
+                '#F7B731',  # 黄色
+                '#5F27CD',  # 紫色
+                '#00D2D3',  # 青绿
+            ]
+
         except Exception as e:
             logging.exception(f"Error in MainWindow.__init__: {e}")
             raise
@@ -1213,7 +1230,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(30)
-        
+
         # 标题
         title_label = QLabel("自动化报告生成")
         title_label.setStyleSheet("""
@@ -1226,7 +1243,7 @@ class MainWindow(QMainWindow):
         """)
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
-        
+
         # 说明文字
         info_label = QLabel(
             "根据您已完成的分析数据，自动生成综合报告。\n"
@@ -1242,12 +1259,12 @@ class MainWindow(QMainWindow):
         info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
-        
+
         # 按钮容器
         button_container = QWidget()
         button_layout = QHBoxLayout(button_container)
         button_layout.setSpacing(20)
-        
+
         # PPT报告按钮
         ppt_button = QPushButton("生成PPT报告")
         ppt_button.setMinimumSize(200, 60)
@@ -1269,8 +1286,8 @@ class MainWindow(QMainWindow):
             }
         """)
         ppt_button.clicked.connect(self.on_generate_ppt)
-        
-        # Excel报告按钮（预留）
+
+        # Excel报告按钮
         excel_button = QPushButton("生成Excel报告")
         excel_button.setMinimumSize(200, 60)
         excel_button.setStyleSheet("""
@@ -1293,16 +1310,16 @@ class MainWindow(QMainWindow):
                 background-color: #95a5a6;
             }
         """)
-        excel_button.setEnabled(False)  # 暂时禁用
-        excel_button.setToolTip("Excel报告功能即将推出")
-        
+        excel_button.clicked.connect(self.on_generate_excel_report)
+        excel_button.setToolTip("生成Excel综合报告（包含9个分析sheet）")
+
         button_layout.addStretch()
         button_layout.addWidget(ppt_button)
         button_layout.addWidget(excel_button)
         button_layout.addStretch()
-        
+
         layout.addWidget(button_container)
-        
+
         # 提示信息
         tip_label = QLabel(
             "提示：生成PPT报告前，请确保已完成以下分析：\n"
@@ -1322,9 +1339,103 @@ class MainWindow(QMainWindow):
         """)
         tip_label.setWordWrap(True)
         layout.addWidget(tip_label)
-        
+
+        # === 对比牧场选择区域 ===
+        benchmark_group = QGroupBox("对比牧场选择")
+        benchmark_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 18px;
+                font-weight: bold;
+                color: #2c3e50;
+                border: 2px solid #bdc3c7;
+                border-radius: 8px;
+                margin-top: 20px;
+                padding-top: 20px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 15px;
+                padding: 0 5px;
+            }
+        """)
+        benchmark_layout = QVBoxLayout()
+
+        # 顶部管理按钮
+        top_layout = QHBoxLayout()
+        manage_btn = QPushButton("管理对比牧场")
+        manage_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #95a5a6;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 15px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #7f8c8d;
+            }
+        """)
+        manage_btn.clicked.connect(self.open_benchmark_manager)
+        top_layout.addStretch()
+        top_layout.addWidget(manage_btn)
+        benchmark_layout.addLayout(top_layout)
+
+        # 对比数据选择表格（多选，包含对比牧场和外部参考数据）
+        table_label = QLabel("选择对比数据（勾选用于报告生成）:")
+        table_label.setStyleSheet("font-size: 14px; font-weight: normal; margin-top: 10px;")
+        benchmark_layout.addWidget(table_label)
+
+        from PyQt6.QtWidgets import QTableWidget
+        self.comparison_sources_table = QTableWidget()
+        self.comparison_sources_table.setMaximumHeight(200)
+        self.comparison_sources_table.setColumnCount(4)
+        self.comparison_sources_table.setHorizontalHeaderLabels(["选择", "类型", "名称", "颜色"])
+        self.comparison_sources_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.comparison_sources_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.comparison_sources_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.comparison_sources_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.comparison_sources_table.setStyleSheet("""
+            QTableWidget {
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QTableWidget::item {
+                padding: 5px;
+            }
+        """)
+        self.comparison_sources_table.verticalHeader().setVisible(False)
+        self.comparison_sources_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        benchmark_layout.addWidget(self.comparison_sources_table)
+
+        # 说明文字
+        help_label = QLabel(
+            "提示：勾选对比数据后，将在报告中显示对比图表。"
+            "对比牧场用于表格和折线图，外部参考数据仅用于折线图。"
+            "点击颜色可修改对比线的显示颜色。"
+        )
+        help_label.setStyleSheet("""
+            QLabel {
+                font-size: 12px;
+                color: #95a5a6;
+                padding: 10px;
+                background-color: #ecf0f1;
+                border-radius: 4px;
+                margin-top: 10px;
+            }
+        """)
+        help_label.setWordWrap(True)
+        benchmark_layout.addWidget(help_label)
+
+        benchmark_group.setLayout(benchmark_layout)
+        layout.addWidget(benchmark_group)
+
+        # 加载对比牧场列表
+        self.load_benchmark_farms()
+
         layout.addStretch()
-        
+
         return page
     
     # 在 handle_file_upload 方法中添加对基因组检测数据的处理逻辑
@@ -3622,7 +3733,315 @@ class MainWindow(QMainWindow):
                         
             except Exception as e:
                 QMessageBox.critical(self, "生成失败", f"生成PPT报告时发生错误：\n{str(e)}")
-    
+
+    def on_generate_excel_report(self):
+        """生成Excel综合报告"""
+        if not self.selected_project_path:
+            QMessageBox.warning(self, "警告", "请先选择一个项目")
+            return
+
+        try:
+            from core.excel_report import ExcelReportGenerator
+
+            # 获取用户名（从设置或默认值）
+            service_staff = getattr(self, 'username', '未指定')
+
+            # 创建进度对话框
+            progress_dialog = ProgressDialog(self)
+            progress_dialog.setWindowTitle("生成Excel综合报告")
+            progress_dialog.set_task_info("正在生成Excel综合报告...")
+            progress_dialog.show()
+            QApplication.processEvents()
+
+            # 创建Excel报告生成器
+            generator = ExcelReportGenerator(self.selected_project_path, service_staff)
+
+            # 生成报告
+            progress_dialog.update_progress(50)
+            QApplication.processEvents()
+
+            success, result = generator.generate()
+
+            progress_dialog.close()
+
+            if success:
+                # 生成成功
+                reply = QMessageBox.information(
+                    self,
+                    "生成成功",
+                    f"Excel综合报告已生成！\n\n文件位置：\n{result}\n\n是否立即打开查看？",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes
+                )
+
+                if reply == QMessageBox.StandardButton.Yes:
+                    try:
+                        from pathlib import Path
+                        QDesktopServices.openUrl(QUrl.fromLocalFile(str(result)))
+                    except Exception as e:
+                        QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}")
+            else:
+                # 生成失败
+                error_msg = result
+
+                # 检查是否是缺少必要文件
+                if "缺少必要文件" in error_msg:
+                    message = f"{error_msg}\n\n提示：请先完成以下分析：\n"
+                    message += "• 系谱识别分析\n"
+                    message += "• 育种性状分析\n"
+                    message += "• 公牛使用分析（如果需要）\n"
+                    message += "\n这些分析会生成Excel报告所需的数据文件。"
+
+                    QMessageBox.warning(self, "缺少必要文件", message)
+                else:
+                    QMessageBox.critical(self, "生成失败", f"生成Excel报告时发生错误：\n{error_msg}")
+
+        except Exception as e:
+            progress_dialog.close()
+            QMessageBox.critical(self, "生成失败", f"生成Excel报告时发生错误：\n{str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def load_benchmark_farms(self):
+        """加载对比数据（对比牧场+外部参考数据）到表格"""
+        try:
+            logging.info("开始加载对比数据...")
+
+            # 清空表格
+            self.comparison_sources_table.setRowCount(0)
+
+            # 加载所有对比牧场
+            farms = self.benchmark_manager.get_all_farms()
+            logging.info(f"加载到 {len(farms)} 个对比牧场")
+
+            # 加载所有外部参考数据
+            references = self.benchmark_manager.get_all_reference_data()
+            logging.info(f"加载到 {len(references)} 个外部参考数据")
+
+            # 加载已保存的选择
+            saved_comparisons = self.benchmark_manager.get_selected_comparisons()
+            if not saved_comparisons:
+                saved_comparisons = []
+            logging.info(f"加载到 {len(saved_comparisons)} 个已保存的选择")
+
+            # 添加对比牧场行
+            for farm in farms:
+                logging.info(f"添加对比牧场: {farm['name']}")
+                self._add_comparison_source_row(
+                    source_type='farm',
+                    source_id=farm['id'],
+                    name=farm['name'],
+                    saved_comparisons=saved_comparisons
+                )
+
+            # 添加外部参考数据行
+            for ref in references:
+                logging.info(f"添加外部参考: {ref['name']}")
+                self._add_comparison_source_row(
+                    source_type='reference',
+                    source_id=ref['id'],
+                    name=ref['name'],
+                    saved_comparisons=saved_comparisons
+                )
+
+            logging.info(f"✓ 对比数据加载完成，表格共有 {self.comparison_sources_table.rowCount()} 行")
+
+        except Exception as e:
+            logging.error(f"加载对比数据失败: {e}", exc_info=True)
+
+    def _add_comparison_source_row(self, source_type: str, source_id: str, name: str, saved_comparisons: list):
+        """
+        添加对比数据行到表格
+
+        Args:
+            source_type: 'farm' 或 'reference'
+            source_id: 数据源ID
+            name: 显示名称
+            saved_comparisons: 已保存的选择列表
+        """
+        row = self.comparison_sources_table.rowCount()
+        self.comparison_sources_table.insertRow(row)
+
+        # 查找是否已被选中，以及对应的颜色
+        is_checked = False
+        color = None
+        for comp in saved_comparisons:
+            if source_type == 'farm' and comp.get('farm_id') == source_id:
+                is_checked = True
+                color = comp.get('color')
+                break
+            elif source_type == 'reference' and comp.get('reference_id') == source_id:
+                is_checked = True
+                color = comp.get('color')
+                break
+
+        # 如果未分配颜色，分配默认颜色
+        if color is None:
+            color_index = row % len(self.comparison_colors)
+            color = self.comparison_colors[color_index]
+
+        # 第0列：复选框
+        from PyQt6.QtWidgets import QCheckBox
+        checkbox = QCheckBox()
+        checkbox.setChecked(is_checked)
+        checkbox.setStyleSheet("QCheckBox { margin-left: 10px; }")
+        checkbox.stateChanged.connect(lambda state, r=row: self._on_comparison_checkbox_changed(r, state))
+        checkbox_widget = QWidget()
+        checkbox_layout = QHBoxLayout(checkbox_widget)
+        checkbox_layout.addWidget(checkbox)
+        checkbox_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        checkbox_layout.setContentsMargins(0, 0, 0, 0)
+        self.comparison_sources_table.setCellWidget(row, 0, checkbox_widget)
+
+        # 第1列：类型
+        type_label = "对比牧场" if source_type == 'farm' else "外部参考"
+        type_item = QTableWidgetItem(type_label)
+        type_item.setFlags(type_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        if source_type == 'reference':
+            type_item.setForeground(QBrush(QColor("#e67e22")))  # 橙色标识外部参考
+        self.comparison_sources_table.setItem(row, 1, type_item)
+
+        # 第2列：名称
+        name_item = QTableWidgetItem(name)
+        name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        name_item.setData(Qt.ItemDataRole.UserRole, {
+            'type': source_type,
+            'id': source_id,
+            'color': color
+        })
+        self.comparison_sources_table.setItem(row, 2, name_item)
+
+        # 第3列：颜色按钮
+        color_btn = QPushButton()
+        color_btn.setFixedSize(60, 25)
+        color_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {color};
+                border: 1px solid #7f8c8d;
+                border-radius: 3px;
+            }}
+            QPushButton:hover {{
+                border: 2px solid #2c3e50;
+            }}
+        """)
+        color_btn.clicked.connect(lambda checked, r=row: self._change_comparison_source_color(r))
+        color_widget = QWidget()
+        color_layout = QHBoxLayout(color_widget)
+        color_layout.addWidget(color_btn)
+        color_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        color_layout.setContentsMargins(0, 0, 0, 0)
+        self.comparison_sources_table.setCellWidget(row, 3, color_widget)
+
+    def _on_comparison_checkbox_changed(self, row: int, state: int):
+        """处理复选框状态变化"""
+        name_item = self.comparison_sources_table.item(row, 2)
+        if not name_item:
+            return
+
+        data = name_item.data(Qt.ItemDataRole.UserRole)
+        source_type = data['type']
+        source_id = data['id']
+        color = data['color']
+
+        is_checked = (state == Qt.CheckState.Checked.value)
+
+        # 更新 selected_comparisons
+        if is_checked:
+            # 添加到选择列表
+            if source_type == 'farm':
+                if not any(c.get('farm_id') == source_id for c in self.selected_comparisons):
+                    self.selected_comparisons.append({
+                        'farm_id': source_id,
+                        'color': color
+                    })
+            else:  # reference
+                if not any(c.get('reference_id') == source_id for c in self.selected_comparisons):
+                    self.selected_comparisons.append({
+                        'reference_id': source_id,
+                        'color': color
+                    })
+        else:
+            # 从选择列表移除
+            if source_type == 'farm':
+                self.selected_comparisons = [c for c in self.selected_comparisons if c.get('farm_id') != source_id]
+            else:  # reference
+                self.selected_comparisons = [c for c in self.selected_comparisons if c.get('reference_id') != source_id]
+
+        # 保存选择
+        self.save_selected_comparisons()
+        logging.info(f"{'选中' if is_checked else '取消选中'} {data['type']}: {name_item.text()}")
+
+    def _change_comparison_source_color(self, row: int):
+        """修改对比数据源的颜色"""
+        from PyQt6.QtWidgets import QColorDialog
+
+        name_item = self.comparison_sources_table.item(row, 2)
+        if not name_item:
+            return
+
+        data = name_item.data(Qt.ItemDataRole.UserRole)
+        source_type = data['type']
+        source_id = data['id']
+        current_color = QColor(data['color'])
+
+        # 打开颜色选择对话框
+        color = QColorDialog.getColor(current_color, self, "选择对比线颜色")
+
+        if color.isValid():
+            new_color = color.name()
+
+            # 更新数据
+            data['color'] = new_color
+            name_item.setData(Qt.ItemDataRole.UserRole, data)
+
+            # 更新颜色按钮显示
+            color_widget = self.comparison_sources_table.cellWidget(row, 3)
+            if color_widget:
+                color_btn = color_widget.layout().itemAt(0).widget()
+                color_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {new_color};
+                        border: 1px solid #7f8c8d;
+                        border-radius: 3px;
+                    }}
+                    QPushButton:hover {{
+                        border: 2px solid #2c3e50;
+                    }}
+                """)
+
+            # 更新 selected_comparisons 中的颜色
+            for comp in self.selected_comparisons:
+                if source_type == 'farm' and comp.get('farm_id') == source_id:
+                    comp['color'] = new_color
+                    break
+                elif source_type == 'reference' and comp.get('reference_id') == source_id:
+                    comp['color'] = new_color
+                    break
+
+            # 保存选择
+            self.save_selected_comparisons()
+            logging.info(f"已修改 {source_type} 颜色: {name_item.text()} -> {new_color}")
+
+    def save_selected_comparisons(self):
+        """保存选择的对比牧场"""
+        self.benchmark_manager.save_selected_comparisons(self.selected_comparisons)
+        logging.info(f"已保存 {len(self.selected_comparisons)} 个对比选择")
+
+    def open_benchmark_manager(self):
+        """打开对比牧场管理对话框"""
+        try:
+            from gui.benchmark_dialog import BenchmarkDialog
+
+            dialog = BenchmarkDialog(self)
+            dialog.exec()
+
+            # 对话框关闭后，刷新列表
+            self.load_benchmark_farms()
+
+        except Exception as e:
+            logging.error(f"打开对比牧场管理器失败: {e}", exc_info=True)
+            QMessageBox.critical(self, "错误", f"打开对比牧场管理器失败：\n{str(e)}")
+
     def run_pedigree_analysis(self):
         """运行系谱识别情况分析"""
         if not self.selected_project_path:

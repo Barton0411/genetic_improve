@@ -213,6 +213,43 @@ class TraitsCalculation(BaseCowCalculation):
                 if progress_callback:
                     progress_callback(99, f"基因组文件已创建（仅系谱数据）: {genomic_output_path.name}")
 
+            # 10. 生成最终育种值文件
+            import shutil
+            try:
+                print("生成最终育种值文件...")
+                genomic_scores_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_genomic.xlsx"
+                pedigree_scores_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pedigree.xlsx"
+                final_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_final.xlsx"
+
+                if genomic_scores_path.exists():
+                    shutil.copy(genomic_scores_path, final_output_path)
+                    print(f"✓ 已生成最终育种值文件 (来源: genomic)")
+                elif pedigree_scores_path.exists():
+                    shutil.copy(pedigree_scores_path, final_output_path)
+                    print(f"✓ 已生成最终育种值文件 (来源: pedigree)")
+                else:
+                    print("未找到scores文件，跳过生成final文件")
+            except Exception as e:
+                print(f"生成最终育种值文件失败: {e}")
+
+            # 11. 自动生成系谱识别分析结果
+            try:
+                from core.breeding_calc.generate_pedigree_analysis import generate_pedigree_analysis_result
+                print("自动生成系谱识别分析结果...")
+                generate_pedigree_analysis_result(main_window.selected_project_path)
+                print("✓ 系谱识别分析结果已生成")
+            except Exception as e:
+                print(f"生成系谱识别分析结果失败: {e}")
+
+            # 12. 自动生成关键育种性状分析结果
+            try:
+                from core.breeding_calc.generate_key_traits_analysis import generate_key_traits_analysis_result
+                print("自动生成关键育种性状分析结果...")
+                generate_key_traits_analysis_result(main_window.selected_project_path)
+                print("✓ 关键育种性状分析结果已生成")
+            except Exception as e:
+                print(f"生成关键育种性状分析结果失败: {e}")
+
             if progress_callback:
                 progress_callback(100, "所有计算步骤已完成！")
             if task_info_callback:

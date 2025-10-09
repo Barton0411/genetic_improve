@@ -219,8 +219,39 @@ class MatrixRecommendationGenerator:
                 how='left'
             )
 
-            # 检查是否有缺失值
-            missing_bulls = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
+            # 检查是否有缺失值（仅检查有库存支数的公牛）
+            # 先获取有库存的公牛
+            has_stock = True
+            stock_col = None
+            if '支数' in self.bull_data.columns:
+                stock_col = '支数'
+            elif '冻精支数' in self.bull_data.columns:
+                stock_col = '冻精支数'
+            elif 'semen_count' in self.bull_data.columns:
+                stock_col = 'semen_count'
+            else:
+                has_stock = False
+
+            if has_stock and stock_col:
+                # 只检查有库存的公牛（支数 > 0）
+                missing_bulls_with_stock = self.bull_data[
+                    (self.bull_data['Index Score'].isna()) &
+                    (self.bull_data[stock_col] > 0)
+                ]['bull_id'].tolist()
+
+                # 统计没有库存的缺失公牛（不会报错，只记录日志）
+                missing_bulls_no_stock = self.bull_data[
+                    (self.bull_data['Index Score'].isna()) &
+                    (self.bull_data[stock_col] <= 0)
+                ]['bull_id'].tolist()
+
+                if missing_bulls_no_stock:
+                    logger.info(f"跳过 {len(missing_bulls_no_stock)} 头没有库存的公牛（无需育种指数）")
+
+                missing_bulls = missing_bulls_with_stock
+            else:
+                # 如果没有库存列，检查所有公牛
+                missing_bulls = self.bull_data[self.bull_data['Index Score'].isna()]['bull_id'].tolist()
 
             if missing_bulls:
                 if self.skip_missing_bulls_flag:
