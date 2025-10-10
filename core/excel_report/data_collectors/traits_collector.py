@@ -6,6 +6,7 @@
 from pathlib import Path
 import pandas as pd
 import logging
+from .benchmark_collector import BenchmarkDataCollector
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ def collect_traits_data(analysis_folder: Path, project_folder: Path) -> dict:
         - nm_distribution_all: 全部母牛NM$分布DataFrame
         - tpi_distribution_present: 在群母牛TPI分布DataFrame
         - tpi_distribution_all: 全部母牛TPI分布DataFrame
-        - comparison_farms: 对比牧场数据列表（待实现）
+        - comparison_data: 对比数据字典 {'farms': [...], 'references': [...]}
     """
     try:
         # 读取关键育种性状分析结果文件
@@ -58,8 +59,15 @@ def collect_traits_data(analysis_folder: Path, project_folder: Path) -> dict:
         else:
             logger.warning(f"育种性状明细文件不存在: {detail_file}")
 
-        # TODO: 读取对比牧场数据（待实现）
-        comparison_farms = []
+        # 收集对比数据（对比牧场 + 外部参考数据）
+        try:
+            benchmark_collector = BenchmarkDataCollector(project_folder)
+            comparison_data = benchmark_collector.collect()
+            logger.info(f"✓ 收集到 {len(comparison_data.get('farms', []))} 个对比牧场, "
+                       f"{len(comparison_data.get('references', []))} 个外部参考数据")
+        except Exception as e:
+            logger.warning(f"收集对比数据失败: {e}")
+            comparison_data = {'farms': [], 'references': []}
 
         return {
             'present_summary': present_summary,
@@ -68,7 +76,7 @@ def collect_traits_data(analysis_folder: Path, project_folder: Path) -> dict:
             'nm_distribution_all': nm_distribution_all,
             'tpi_distribution_present': tpi_distribution_present,
             'tpi_distribution_all': tpi_distribution_all,
-            'comparison_farms': comparison_farms,
+            'comparison_data': comparison_data,
             'detail_df': detail_df
         }
 

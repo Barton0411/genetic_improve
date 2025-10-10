@@ -28,7 +28,7 @@ class Sheet3Builder(BaseSheetBuilder):
                 'nm_distribution_all': 全部母牛NM$分布DataFrame,
                 'tpi_distribution_present': 在群母牛TPI分布DataFrame,
                 'tpi_distribution_all': 全部母牛TPI分布DataFrame,
-                'comparison_farms': 对比牧场数据列表（可选）,
+                'comparison_data': 对比数据字典 {'farms': [...], 'references': [...]},
                 'detail_df': 育种性状明细DataFrame
             }
         """
@@ -41,13 +41,18 @@ class Sheet3Builder(BaseSheetBuilder):
                 return
 
             # 构建Sheet 3-1: 年份汇总与性状进展
-            logger.info("  构建Sheet 3-1: 年份汇总与性状进展")
-            sheet3_1 = Sheet3YearlySummaryBuilder(self.wb, self.style_manager, self.chart_builder)
-            sheet3_1.build({
-                'present_summary': data.get('present_summary'),
-                'all_summary': data.get('all_summary'),
-                'comparison_farms': data.get('comparison_farms', [])
-            })
+            try:
+                logger.info("  构建Sheet 3-1: 年份汇总与性状进展")
+                sheet3_1 = Sheet3YearlySummaryBuilder(self.wb, self.style_manager, self.chart_builder)
+                sheet3_1.build({
+                    'present_summary': data.get('present_summary'),
+                    'all_summary': data.get('all_summary'),
+                    'comparison_data': data.get('comparison_data', {'farms': [], 'references': []})
+                })
+                logger.info("  ✓ Sheet 3-1构建完成")
+            except Exception as e:
+                logger.error(f"  ✗ Sheet 3-1构建失败: {e}", exc_info=True)
+                # 继续构建其他sheet
 
             # 构建Sheet 3-2: NM$分布分析
             logger.info("  构建Sheet 3-2: NM$分布分析")

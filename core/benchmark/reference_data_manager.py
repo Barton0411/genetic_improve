@@ -245,6 +245,7 @@ class ReferenceDataParser:
 
             # 提取所有数据
             data = {}
+            total_values = 0
             for idx, row in df.iterrows():
                 year = row[year_col_name]  # 第一列是年份
                 if pd.notna(year):
@@ -254,11 +255,19 @@ class ReferenceDataParser:
                         if pd.notna(value):
                             try:
                                 year_data[trait_col] = float(value)
+                                total_values += 1
                             except:
                                 year_data[trait_col] = None
                         else:
                             year_data[trait_col] = None
                     data[str(year)] = year_data
+
+            # 检查是否有有效数据
+            if total_values == 0:
+                logger.error(f"Excel文件中所有性状数据都为空！请填写实际数据后再导入。")
+                return None  # 返回None表示数据无效
+            else:
+                logger.info(f"共读取到 {total_values} 个有效数据值")
 
             # 提取最后出生年份
             year_only = [str(y) for y in year_rows if pd.notna(y) and '总计' not in str(y)]

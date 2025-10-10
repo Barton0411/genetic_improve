@@ -42,6 +42,10 @@ def main():
                 logging.StreamHandler()
             ]
         )
+
+        # 禁用matplotlib字体查找的DEBUG日志（太多了，会淹没关键日志）
+        logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+
         logging.info(f"Application starting... Log file: {log_file}")
     except Exception as e:
         # 如果仍然无法创建日志文件，只使用控制台输出
@@ -50,6 +54,10 @@ def main():
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[logging.StreamHandler()]
         )
+
+        # 禁用matplotlib字体查找的DEBUG日志
+        logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+
         logging.warning(f"Could not create log file {log_file}: {e}. Using console logging only.")
     
     # 设置项目根目录环境变量

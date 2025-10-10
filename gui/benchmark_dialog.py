@@ -26,12 +26,42 @@ class BenchmarkDialog(QDialog):
         self.setWindowTitle("对比牧场管理")
         self.setMinimumSize(800, 500)
 
+        # 保存父窗口引用
+        self.parent_window = parent
+
         # 初始化对比牧场管理器
         self.benchmark_manager = BenchmarkManager()
 
         self.setup_ui()
         self.load_farms()
         self.load_reference_data()
+
+    def closeEvent(self, event):
+        """对话框关闭时触发，通知父窗口刷新对比数据"""
+        if self.parent_window and hasattr(self.parent_window, 'load_benchmark_farms'):
+            self.parent_window.load_benchmark_farms()
+            logger.info("对比牧场管理对话框关闭，已刷新报告生成页数据")
+        super().closeEvent(event)
+
+    def confirm_changes(self):
+        """确认更改，刷新主窗口的对比牧场选择列表并关闭对话框"""
+        try:
+            # 重新加载配置，确保获取最新数据
+            self.benchmark_manager.config = self.benchmark_manager._load_config()
+
+            # 刷新主窗口的对比牧场选择列表
+            if self.parent_window and hasattr(self.parent_window, 'load_benchmark_farms'):
+                self.parent_window.load_benchmark_farms()
+                logger.info("已刷新报告生成页的对比数据列表")
+                # 刷新成功，关闭对话框
+                self.accept()
+            else:
+                logger.warning("无法刷新父窗口，parent_window或load_benchmark_farms方法不存在")
+                QMessageBox.warning(self, "警告", "无法刷新主窗口列表")
+
+        except Exception as e:
+            logger.error(f"刷新对比数据列表失败: {e}", exc_info=True)
+            QMessageBox.warning(self, "错误", f"刷新失败：\n{str(e)}")
 
     def setup_ui(self):
         """设置UI"""
@@ -50,11 +80,43 @@ class BenchmarkDialog(QDialog):
 
         layout.addWidget(self.tab_widget)
 
-        # 底部关闭按钮
+        # 底部按钮
         button_layout = QHBoxLayout()
         button_layout.addStretch()
 
+        self.confirm_btn = QPushButton("确认")
+        self.confirm_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                padding: 8px 20px;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        self.confirm_btn.clicked.connect(self.confirm_changes)
+        button_layout.addWidget(self.confirm_btn)
+
         self.close_btn = QPushButton("关闭")
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #95a5a6;
+                color: white;
+                padding: 8px 20px;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #7f8c8d;
+            }
+        """)
         self.close_btn.clicked.connect(self.accept)
         button_layout.addWidget(self.close_btn)
 
@@ -81,6 +143,8 @@ class BenchmarkDialog(QDialog):
         self.farm_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.farm_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.farm_table.setAlternatingRowColors(True)
+        # 双击行时打开编辑对话框
+        self.farm_table.cellDoubleClicked.connect(lambda: self.edit_farm())
         layout.addWidget(self.farm_table)
 
         # 按钮组
@@ -154,6 +218,9 @@ class BenchmarkDialog(QDialog):
 
     def load_farms(self):
         """加载牧场列表"""
+        # 重新加载配置，确保获取最新数据
+        self.benchmark_manager.config = self.benchmark_manager._load_config()
+
         self.farm_table.setRowCount(0)
 
         farms = self.benchmark_manager.get_all_farms()
@@ -165,20 +232,24 @@ class BenchmarkDialog(QDialog):
             # 牧场名称
             name_item = QTableWidgetItem(farm['name'])
             name_item.setData(Qt.ItemDataRole.UserRole, farm['id'])  # 存储farm_id
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # 禁止直接编辑
             self.farm_table.setItem(row, 0, name_item)
 
             # 描述
             desc_item = QTableWidgetItem(farm.get('description', ''))
+            desc_item.setFlags(desc_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # 禁止直接编辑
             self.farm_table.setItem(row, 1, desc_item)
 
             # 添加日期
             added_date = farm.get('added_date', '')[:10]  # 只显示日期部分
             date_item = QTableWidgetItem(added_date)
+            date_item.setFlags(date_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # 禁止直接编辑
             self.farm_table.setItem(row, 2, date_item)
 
             # 最后更新
             last_updated = farm.get('last_updated', '')[:10]
             updated_item = QTableWidgetItem(last_updated)
+            updated_item.setFlags(updated_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # 禁止直接编辑
             self.farm_table.setItem(row, 3, updated_item)
 
     def add_farm(self):
@@ -311,6 +382,9 @@ class BenchmarkDialog(QDialog):
 
     def load_reference_data(self):
         """加载外部参考数据列表"""
+        # 重新加载配置，确保获取最新数据
+        self.benchmark_manager.config = self.benchmark_manager._load_config()
+
         self.reference_table.setRowCount(0)
 
         references = self.benchmark_manager.get_all_reference_data()
@@ -322,20 +396,24 @@ class BenchmarkDialog(QDialog):
             # 参考数据名称
             name_item = QTableWidgetItem(ref['name'])
             name_item.setData(Qt.ItemDataRole.UserRole, ref['id'])
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # 禁止直接编辑
             self.reference_table.setItem(row, 0, name_item)
 
             # 描述
             desc_item = QTableWidgetItem(ref.get('description', ''))
+            desc_item.setFlags(desc_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # 禁止直接编辑
             self.reference_table.setItem(row, 1, desc_item)
 
             # 添加日期
             added_date = ref.get('added_date', '')[:10]
             date_item = QTableWidgetItem(added_date)
+            date_item.setFlags(date_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # 禁止直接编辑
             self.reference_table.setItem(row, 2, date_item)
 
             # 最后更新
             last_updated = ref.get('last_updated', '')[:10]
             updated_item = QTableWidgetItem(last_updated)
+            updated_item.setFlags(updated_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # 禁止直接编辑
             self.reference_table.setItem(row, 3, updated_item)
 
     def add_reference_data(self):
@@ -365,7 +443,18 @@ class BenchmarkDialog(QDialog):
                 QMessageBox.information(self, "成功", f"外部参考数据 '{ref_name}' 已添加")
                 self.load_reference_data()
             else:
-                QMessageBox.warning(self, "失败", "添加外部参考数据失败，请检查日志")
+                QMessageBox.warning(
+                    self, "添加失败",
+                    "添加外部参考数据失败。\n\n"
+                    "可能的原因：\n"
+                    "1. Excel文件中所有性状数据都为空\n"
+                    "2. 文件格式不正确\n"
+                    "3. 缺少必需的列（出生年份、性状列）\n\n"
+                    "请检查：\n"
+                    "• 确保已填写性状数据（数值）\n"
+                    "• 列名格式正确（平均TPI、平均NM$等）\n"
+                    "• 可以下载模板参考正确格式"
+                )
 
     def delete_reference_data(self):
         """删除外部参考数据"""

@@ -343,6 +343,8 @@ class BenchmarkManager:
                     ...
                 ]
         """
+        # 先重新加载配置，确保不覆盖其他更改
+        self.config = self._load_config()
         self.config['selected_comparisons'] = comparisons
         self._save_config()
         logger.info(f"已保存 {len(comparisons)} 个对比选择")

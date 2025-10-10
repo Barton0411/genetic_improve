@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 import json
 import logging
+import re
 
 from PyQt6.QtCore import (
     Qt, QDir, QUrl, pyqtSignal, QThread, QTimer, QEvent
@@ -1362,6 +1363,28 @@ class MainWindow(QMainWindow):
 
         # 顶部管理按钮
         top_layout = QHBoxLayout()
+
+        # 刷新按钮
+        refresh_btn = QPushButton("🔄 刷新列表")
+        refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 15px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        refresh_btn.clicked.connect(self.load_benchmark_farms)
+        top_layout.addWidget(refresh_btn)
+
+        top_layout.addStretch()
+
+        # 管理按钮
         manage_btn = QPushButton("管理对比牧场")
         manage_btn.setStyleSheet("""
             QPushButton {
@@ -1377,8 +1400,8 @@ class MainWindow(QMainWindow):
             }
         """)
         manage_btn.clicked.connect(self.open_benchmark_manager)
-        top_layout.addStretch()
         top_layout.addWidget(manage_btn)
+
         benchmark_layout.addLayout(top_layout)
 
         # 对比数据选择表格（多选，包含对比牧场和外部参考数据）
@@ -1389,12 +1412,13 @@ class MainWindow(QMainWindow):
         from PyQt6.QtWidgets import QTableWidget
         self.comparison_sources_table = QTableWidget()
         self.comparison_sources_table.setMaximumHeight(200)
-        self.comparison_sources_table.setColumnCount(4)
-        self.comparison_sources_table.setHorizontalHeaderLabels(["选择", "类型", "名称", "颜色"])
+        self.comparison_sources_table.setColumnCount(5)
+        self.comparison_sources_table.setHorizontalHeaderLabels(["选择", "类型", "名称", "摘要", "颜色"])
         self.comparison_sources_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.comparison_sources_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.comparison_sources_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.comparison_sources_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.comparison_sources_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.comparison_sources_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.comparison_sources_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.comparison_sources_table.setStyleSheet("""
             QTableWidget {
                 border: 1px solid #bdc3c7;
@@ -1407,13 +1431,17 @@ class MainWindow(QMainWindow):
         """)
         self.comparison_sources_table.verticalHeader().setVisible(False)
         self.comparison_sources_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+
+        # 添加双击事件，预览数据
+        self.comparison_sources_table.cellDoubleClicked.connect(self.preview_comparison_data)
+
         benchmark_layout.addWidget(self.comparison_sources_table)
 
         # 说明文字
         help_label = QLabel(
             "提示：勾选对比数据后，将在报告中显示对比图表。"
             "对比牧场用于表格和折线图，外部参考数据仅用于折线图。"
-            "点击颜色可修改对比线的显示颜色。"
+            "双击可预览数据详情，点击颜色可修改对比线的显示颜色。"
         )
         help_label.setStyleSheet("""
             QLabel {
@@ -3807,6 +3835,14 @@ class MainWindow(QMainWindow):
         try:
             logging.info("开始加载对比数据...")
 
+            # 在清空表格前，先保存当前的选择状态（从内存中的 self.selected_comparisons）
+            current_selections = self.selected_comparisons.copy() if hasattr(self, 'selected_comparisons') else []
+            logging.info(f"当前内存中的选择: {len(current_selections)} 个")
+
+            # 强制重新加载配置文件（确保获取最新数据）
+            self.benchmark_manager.config = self.benchmark_manager._load_config()
+            logging.info("已重新加载配置文件")
+
             # 清空表格
             self.comparison_sources_table.setRowCount(0)
 
@@ -3818,11 +3854,15 @@ class MainWindow(QMainWindow):
             references = self.benchmark_manager.get_all_reference_data()
             logging.info(f"加载到 {len(references)} 个外部参考数据")
 
-            # 加载已保存的选择
-            saved_comparisons = self.benchmark_manager.get_selected_comparisons()
-            if not saved_comparisons:
-                saved_comparisons = []
-            logging.info(f"加载到 {len(saved_comparisons)} 个已保存的选择")
+            # 使用当前内存中的选择（优先），如果没有则从配置加载
+            if current_selections:
+                saved_comparisons = current_selections
+                logging.info(f"使用当前选择状态: {len(saved_comparisons)} 个")
+            else:
+                saved_comparisons = self.benchmark_manager.get_selected_comparisons()
+                if not saved_comparisons:
+                    saved_comparisons = []
+                logging.info(f"从配置文件加载选择: {len(saved_comparisons)} 个")
 
             # 添加对比牧场行
             for farm in farms:
@@ -3844,7 +3884,11 @@ class MainWindow(QMainWindow):
                     saved_comparisons=saved_comparisons
                 )
 
+            # 刷新完成后，重新构建 selected_comparisons 列表
+            self.selected_comparisons = saved_comparisons
+
             logging.info(f"✓ 对比数据加载完成，表格共有 {self.comparison_sources_table.rowCount()} 行")
+            logging.info(f"✓ 选中状态已恢复: {len(self.selected_comparisons)} 个")
 
         except Exception as e:
             logging.error(f"加载对比数据失败: {e}", exc_info=True)
@@ -3911,7 +3955,14 @@ class MainWindow(QMainWindow):
         })
         self.comparison_sources_table.setItem(row, 2, name_item)
 
-        # 第3列：颜色按钮
+        # 第3列：摘要
+        summary_text = self._generate_summary_text(source_type, source_id)
+        summary_item = QTableWidgetItem(summary_text)
+        summary_item.setFlags(summary_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        summary_item.setForeground(QBrush(QColor("#7f8c8d")))  # 灰色字体
+        self.comparison_sources_table.setItem(row, 3, summary_item)
+
+        # 第4列：颜色按钮
         color_btn = QPushButton()
         color_btn.setFixedSize(60, 25)
         color_btn.setStyleSheet(f"""
@@ -3930,7 +3981,163 @@ class MainWindow(QMainWindow):
         color_layout.addWidget(color_btn)
         color_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         color_layout.setContentsMargins(0, 0, 0, 0)
-        self.comparison_sources_table.setCellWidget(row, 3, color_widget)
+        self.comparison_sources_table.setCellWidget(row, 4, color_widget)
+
+    def _generate_summary_text(self, source_type: str, source_id: str) -> str:
+        """
+        生成数据源摘要文本
+
+        Args:
+            source_type: 'farm' 或 'reference'
+            source_id: 数据源ID
+
+        Returns:
+            摘要文本
+        """
+        try:
+            if source_type == 'farm':
+                # 对比牧场：在群母牛665头,202x年 - 2024年，在群牛总计数据预览（显示前3项）
+                farm = self.benchmark_manager.get_farm_by_id(source_id)
+                if not farm:
+                    return "数据加载失败"
+
+                data_summary = farm.get('data_summary', {})
+                present_summary = data_summary.get('present_summary', {})
+
+                # 获取头数
+                cow_count = present_summary.get('cow_count', 0)
+
+                # 获取年份范围
+                year_rows = present_summary.get('year_rows', [])
+                year_range = ""
+                if year_rows:
+                    # 过滤掉"总计"行
+                    actual_years = [y for y in year_rows if '总计' not in str(y)]
+                    if actual_years:
+                        # 提取纯年份（去掉"年"和"及以前"）
+                        first_year = actual_years[0]
+                        last_year = actual_years[-1]
+
+                        match_first = re.search(r'(\d{4})', first_year)
+                        match_last = re.search(r'(\d{4})', last_year)
+
+                        if match_first and match_last:
+                            year_range = f"{match_first.group(1)}年 - {match_last.group(1)}年"
+
+                # 获取总计数据（前3项）
+                data = present_summary.get('data', {})
+                total_data = None
+                for year_key in data.keys():
+                    if '总计' in str(year_key):
+                        total_data = data[year_key]
+                        break
+
+                trait_preview = ""
+                if total_data:
+                    # 获取前3个性状（排除头数）
+                    traits = present_summary.get('traits', [])
+                    preview_items = []
+                    for trait in traits[:3]:
+                        value = total_data.get(trait)
+                        if value is not None:
+                            # 保留2位小数
+                            try:
+                                formatted_value = f"{float(value):.2f}"
+                            except (ValueError, TypeError):
+                                formatted_value = str(value)
+                            preview_items.append(f"{trait}={formatted_value}")
+
+                    if preview_items:
+                        trait_preview = ", ".join(preview_items)
+
+                # 组合摘要
+                parts = []
+                if cow_count > 0:
+                    parts.append(f"在群母牛{cow_count}头")
+                if year_range:
+                    parts.append(year_range)
+                if trait_preview:
+                    parts.append(trait_preview)
+
+                return ", ".join(parts) if parts else "暂无数据"
+
+            else:  # reference
+                # 外部参考：57个性状, 202x年 - 2024年，最后1年数据预览（显示前3项）
+                reference = self.benchmark_manager.get_reference_by_id(source_id)
+                if not reference:
+                    return "数据加载失败"
+
+                data_summary = reference.get('data_summary', {})
+                present_summary = data_summary.get('present_summary', {})
+
+                # 获取性状数量
+                traits = present_summary.get('traits', [])
+                trait_count = len(traits)
+
+                # 获取年份范围
+                year_rows = present_summary.get('year_rows', [])
+                year_range = ""
+                if year_rows:
+                    # 过滤掉"总计"行
+                    actual_years = [y for y in year_rows if '总计' not in str(y)]
+                    if actual_years:
+                        # 提取纯年份（去掉"年"和"及以前"）
+                        first_year = actual_years[0]
+                        last_year = actual_years[-1]
+
+                        match_first = re.search(r'(\d{4})', first_year)
+                        match_last = re.search(r'(\d{4})', last_year)
+
+                        if match_first and match_last:
+                            year_range = f"{match_first.group(1)}年 - {match_last.group(1)}年"
+
+                # 获取最后一年的数据（前3项）
+                data = present_summary.get('data', {})
+                latest_year_data = None
+                latest_year_str = None
+                if year_rows:
+                    # 获取最后一年（排除"总计"）
+                    actual_years = [y for y in year_rows if '总计' not in str(y)]
+                    if actual_years:
+                        latest_year = actual_years[-1]
+                        latest_year_data = data.get(latest_year)
+                        # 提取纯年份用于显示
+                        match = re.search(r'(\d{4})', latest_year)
+                        if match:
+                            latest_year_str = match.group(1)
+
+                trait_preview = ""
+                if latest_year_data and latest_year_str:
+                    # 获取前3个性状
+                    preview_items = []
+                    for trait in traits[:3]:
+                        value = latest_year_data.get(trait)
+                        if value is not None:
+                            # 保留2位小数
+                            try:
+                                formatted_value = f"{float(value):.2f}"
+                            except (ValueError, TypeError):
+                                formatted_value = str(value)
+                            preview_items.append(f"{trait}={formatted_value}")
+
+                    if preview_items:
+                        # 添加年份前缀
+                        trait_preview = f"{latest_year_str}年平均数据：" + ", ".join(preview_items)
+
+                # 组合摘要
+                parts = []
+                if trait_count > 0:
+                    parts.append(f"{trait_count}个性状")
+                if year_range:
+                    parts.append(year_range)
+                if trait_preview:
+                    parts.append(trait_preview)
+
+                return ", ".join(parts) if parts else "暂无数据"
+
+        except Exception as e:
+            logging.error(f"生成摘要文本失败: {e}", exc_info=True)
+            return "摘要生成失败"
 
     def _on_comparison_checkbox_changed(self, row: int, state: int):
         """处理复选框状态变化"""
@@ -3995,7 +4202,7 @@ class MainWindow(QMainWindow):
             name_item.setData(Qt.ItemDataRole.UserRole, data)
 
             # 更新颜色按钮显示
-            color_widget = self.comparison_sources_table.cellWidget(row, 3)
+            color_widget = self.comparison_sources_table.cellWidget(row, 4)
             if color_widget:
                 color_btn = color_widget.layout().itemAt(0).widget()
                 color_btn.setStyleSheet(f"""
@@ -4035,12 +4242,213 @@ class MainWindow(QMainWindow):
             dialog = BenchmarkDialog(self)
             dialog.exec()
 
-            # 对话框关闭后，刷新列表
-            self.load_benchmark_farms()
+            # 注意：对话框关闭时会自动通过closeEvent刷新数据，无需手动调用
 
         except Exception as e:
             logging.error(f"打开对比牧场管理器失败: {e}", exc_info=True)
             QMessageBox.critical(self, "错误", f"打开对比牧场管理器失败：\n{str(e)}")
+
+    def preview_comparison_data(self, row, column):
+        """预览对比数据"""
+        try:
+            # 获取行数据
+            name_item = self.comparison_sources_table.item(row, 2)
+            if not name_item:
+                return
+
+            data = name_item.data(Qt.ItemDataRole.UserRole)
+            source_type = data['type']
+            source_id = data['id']
+
+            # 根据类型获取数据
+            if source_type == 'farm':
+                farm = self.benchmark_manager.get_farm_by_id(source_id)
+                if not farm:
+                    QMessageBox.warning(self, "警告", "未找到该对比牧场数据")
+                    return
+
+                # 显示对比牧场数据预览
+                self._show_farm_preview(farm)
+
+            else:  # reference
+                reference = self.benchmark_manager.get_reference_by_id(source_id)
+                if not reference:
+                    QMessageBox.warning(self, "警告", "未找到该外部参考数据")
+                    return
+
+                # 显示外部参考数据预览
+                self._show_reference_preview(reference)
+
+        except Exception as e:
+            logging.error(f"预览对比数据失败: {e}", exc_info=True)
+            QMessageBox.warning(self, "预览失败", f"预览数据时发生错误：\n{str(e)}")
+
+    def _show_farm_preview(self, farm):
+        """显示对比牧场数据预览"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QTabWidget, QWidget, QTableWidget, QTableWidgetItem
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"对比牧场预览 - {farm['name']}")
+        dialog.setMinimumSize(1000, 700)
+
+        layout = QVBoxLayout(dialog)
+
+        # 基本信息
+        info_text = QTextEdit()
+        info_text.setReadOnly(True)
+        info_text.setMaximumHeight(150)
+
+        content = f"<h2>{farm['name']}</h2>"
+        content += f"<p><b>描述：</b>{farm.get('description', '无')}</p>"
+        content += f"<p><b>添加日期：</b>{farm.get('added_date', '未知')[:10]}</p>"
+        content += f"<p><b>最后更新：</b>{farm.get('last_updated', '未知')[:10]}</p>"
+
+        info_text.setHtml(content)
+        layout.addWidget(info_text)
+
+        # Tab控件，分别显示在群母牛和全部母牛数据
+        tab_widget = QTabWidget()
+
+        # 在群母牛Tab
+        if 'data_summary' in farm and 'present_summary' in farm['data_summary']:
+            present = farm['data_summary']['present_summary']
+            present_tab = self._create_data_preview_table(present)
+            tab_widget.addTab(present_tab, f"在群母牛 ({present.get('cow_count', 0)}头)")
+
+        # 全部母牛Tab
+        if 'data_summary' in farm and 'all_summary' in farm['data_summary']:
+            all_cows = farm['data_summary']['all_summary']
+            all_tab = self._create_data_preview_table(all_cows)
+            tab_widget.addTab(all_tab, f"全部母牛 ({all_cows.get('cow_count', 0)}头)")
+
+        layout.addWidget(tab_widget)
+
+        # 关闭按钮
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+
+        dialog.exec()
+
+    def _create_data_preview_table(self, data_summary):
+        """创建数据预览表格"""
+        from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QLabel
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # 获取年份和性状
+        year_rows = data_summary.get('year_rows', [])
+        traits = data_summary.get('traits', [])
+        data = data_summary.get('data', {})
+
+        # 检查是否有有效数据
+        has_data = False
+        for year_data in data.values():
+            if any(v is not None for v in year_data.values()):
+                has_data = True
+                break
+
+        # 如果没有有效数据，显示提示信息
+        if not has_data:
+            warning_label = QLabel(
+                "⚠️ 该文件中所有性状数据都为空\n\n"
+                "请确保：\n"
+                "1. 已在Excel文件中填写实际数值\n"
+                "2. 数据格式正确（数字类型）\n"
+                "3. 列名格式正确（平均TPI、平均NM$等）\n\n"
+                "建议：下载模板文件，参考示例数据格式"
+            )
+            warning_label.setStyleSheet("""
+                QLabel {
+                    color: #e74c3c;
+                    background-color: #fdecea;
+                    border: 2px solid #e74c3c;
+                    border-radius: 5px;
+                    padding: 20px;
+                    font-size: 14px;
+                }
+            """)
+            warning_label.setWordWrap(True)
+            layout.addWidget(warning_label)
+
+        # 创建表格
+        table = QTableWidget()
+
+        # 设置表格大小
+        table.setRowCount(len(year_rows))
+        table.setColumnCount(len(traits) + 1)  # +1 for year column
+
+        # 设置表头
+        headers = ['年份'] + [t.replace('平均', '') for t in traits]
+        table.setHorizontalHeaderLabels(headers)
+
+        # 填充数据
+        for row_idx, year in enumerate(year_rows):
+            # 年份列
+            year_item = QTableWidgetItem(str(year))
+            table.setItem(row_idx, 0, year_item)
+
+            # 性状数据列
+            year_data = data.get(str(year), {})
+            for col_idx, trait in enumerate(traits):
+                value = year_data.get(trait)
+                if value is not None:
+                    value_item = QTableWidgetItem(f"{value:.2f}")
+                else:
+                    value_item = QTableWidgetItem("-")
+                table.setItem(row_idx, col_idx + 1, value_item)
+
+        # 设置表格样式
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        # 为性状列设置固定宽度，避免列太多时每列太窄
+        for i in range(1, len(headers)):
+            table.setColumnWidth(i, 100)  # 每列100像素宽度
+
+        table.setAlternatingRowColors(True)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.horizontalHeader().setStretchLastSection(False)  # 禁用最后一列自动拉伸
+
+        layout.addWidget(table)
+
+        return widget
+
+    def _show_reference_preview(self, reference):
+        """显示外部参考数据预览"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"外部参考数据预览 - {reference['name']}")
+        dialog.setMinimumSize(1000, 700)
+
+        layout = QVBoxLayout(dialog)
+
+        # 基本信息
+        info_text = QTextEdit()
+        info_text.setReadOnly(True)
+        info_text.setMaximumHeight(150)
+
+        content = f"<h2>{reference['name']}</h2>"
+        content += f"<p><b>描述：</b>{reference.get('description', '无')}</p>"
+        content += f"<p><b>添加日期：</b>{reference.get('added_date', '未知')[:10]}</p>"
+        content += f"<p><b>最后更新：</b>{reference.get('last_updated', '未知')[:10]}</p>"
+        content += f"<p><b>用途：</b><span style='color: #e67e22;'>仅用于折线图对比，不添加到表格</span></p>"
+
+        info_text.setHtml(content)
+        layout.addWidget(info_text)
+
+        # 显示数据表格
+        if 'data_summary' in reference and 'present_summary' in reference['data_summary']:
+            data = reference['data_summary']['present_summary']
+            data_table = self._create_data_preview_table(data)
+            layout.addWidget(data_table)
+
+        # 关闭按钮
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+
+        dialog.exec()
 
     def run_pedigree_analysis(self):
         """运行系谱识别情况分析"""
