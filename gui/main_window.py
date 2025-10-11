@@ -2708,29 +2708,7 @@ class MainWindow(QMainWindow):
         """执行选配的核心逻辑 - 重定向到新的分配方法"""
         # 直接调用新的选配分配方法
         self.on_allocate_mating()
-    
-    def _collect_semen_counts(self) -> dict:
-        """收集冻精支数信息"""
-        semen_counts = {}
-        
-        try:
-            import pandas as pd
-            bull_file = self.selected_project_path / "standardized_data" / "processed_bull_data.xlsx"
-            df = pd.read_excel(bull_file)
-            
-            # 确保列存在
-            if 'bull_id' in df.columns and '支数' in df.columns:
-                for _, row in df.iterrows():
-                    bull_id = str(row['bull_id']).strip()
-                    count = row['支数']
-                    if pd.notna(count) and count > 0:
-                        semen_counts[bull_id] = int(count)
-            
-        except Exception as e:
-            logger.error(f"收集冻精支数失败: {e}")
-        
-        return semen_counts
-    
+
     def _get_inbreeding_threshold(self) -> float:
         """获取近交系数阈值"""
         threshold_text = self.inbreeding_combo.currentText()
@@ -2870,38 +2848,64 @@ class MainWindow(QMainWindow):
         else:  # 无视近交
             return 100.0
     
-    def _collect_semen_counts(self):
-        """收集冻精支数信息"""
+    def _collect_semen_counts(self, semen_type=None):
+        """
+        收集冻精支数信息
+
+        Args:
+            semen_type: 冻精类型 ('常规', '性控', 或 None表示收集所有)
+                       None: 收集所有标签页的支数（累加同一bull_id）
+                       '常规': 只收集常规冻精标签页
+                       '性控': 只收集性控冻精标签页
+
+        Returns:
+            dict: bull_id -> 支数
+        """
         semen_inventory = {}
-        
+
         # 遍历所有标签页
         for tab_index in range(self.semen_tab_widget.count()):
+            tab_name = self.semen_tab_widget.tabText(tab_index)
+
+            # 如果指定了冻精类型，只处理对应的标签页
+            if semen_type is not None:
+                if semen_type == '常规' and '常规' not in tab_name:
+                    continue
+                if semen_type == '性控' and '性控' not in tab_name:
+                    continue
+
             tab_widget = self.semen_tab_widget.widget(tab_index)
             if not tab_widget:
                 continue
-                
+
             layout = tab_widget.layout()
             if not layout or layout.count() == 0:
                 continue
-                
+
             table = layout.itemAt(0).widget()
             if not isinstance(table, QTableWidget):
                 continue
-                
+
             # 从表格中收集支数
             for row in range(table.rowCount()):
                 bull_id_item = table.item(row, 0)  # 公牛ID
                 count_item = table.item(row, 13)   # 支数
-                
+
                 if bull_id_item and count_item:
                     bull_id = bull_id_item.text()
                     count_text = count_item.text()
-                    
+
+                    count = 0
                     if count_text.isdigit():
-                        semen_inventory[bull_id] = int(count_text)
+                        count = int(count_text)
+
+                    # 如果semen_type=None，累加同一bull_id的支数
+                    if semen_type is None:
+                        semen_inventory[bull_id] = semen_inventory.get(bull_id, 0) + count
                     else:
-                        semen_inventory[bull_id] = 0
-        
+                        # 指定类型时，直接设置（每个bull_id在对应标签页应该只出现一次）
+                        semen_inventory[bull_id] = count
+
         return semen_inventory
 
     def clear_mating_results(self):
@@ -3325,12 +3329,15 @@ class MainWindow(QMainWindow):
         # 保存冻精支数
         self.save_all_semen_counts()
 
-        # 收集冻精库存
-        semen_inventory = self._collect_semen_counts()
+        # 分别检查常规和性控冻精库存
+        regular_inventory = self._collect_semen_counts('常规')
+        sexed_inventory = self._collect_semen_counts('性控')
 
-        # 检查库存
-        all_zero = all(count == 0 for count in semen_inventory.values())
-        if all_zero:
+        # 检查是否两种冻精类型都没有库存
+        regular_has_stock = any(count > 0 for count in regular_inventory.values())
+        sexed_has_stock = any(count > 0 for count in sexed_inventory.values())
+
+        if not regular_has_stock and not sexed_has_stock:
             QMessageBox.warning(
                 self,
                 "警告",
@@ -3338,6 +3345,9 @@ class MainWindow(QMainWindow):
                 "请在「冻精预览」表格中设置冻精支数后再进行选配。"
             )
             return
+
+        # 收集冻精库存（用于后续处理）
+        semen_inventory = self._collect_semen_counts(None)
 
         # 显示选配前确认对话框
         from gui.mating_confirmation_dialog import MatingConfirmationDialog
@@ -3556,20 +3566,26 @@ class MainWindow(QMainWindow):
         
         # 首先保存所有冻精支数
         self.save_all_semen_counts()
-        
-        # 收集冻精库存信息
-        semen_inventory = self._collect_semen_counts()
-        
-        # 检查是否所有冻精支数都为0
-        all_zero = all(count == 0 for count in semen_inventory.values())
-        if all_zero:
+
+        # 分别检查常规和性控冻精库存
+        regular_inventory = self._collect_semen_counts('常规')
+        sexed_inventory = self._collect_semen_counts('性控')
+
+        # 检查是否两种冻精类型都没有库存
+        regular_has_stock = any(count > 0 for count in regular_inventory.values())
+        sexed_has_stock = any(count > 0 for count in sexed_inventory.values())
+
+        if not regular_has_stock and not sexed_has_stock:
             QMessageBox.warning(
-                self, 
-                "警告", 
+                self,
+                "警告",
                 "所有公牛的冻精支数都为0！\n\n"
                 "请在「冻精预览」表格中设置冻精支数后再进行分配。"
             )
             return
+
+        # 合并两种类型的库存用于分配（累加同一bull_id的支数）
+        semen_inventory = self._collect_semen_counts(None)
         
         # 创建进度对话框
         self.progress_dialog = ProgressDialog(self)
