@@ -1,18 +1,84 @@
 """
-Sheet 7构建器: 备选公牛排名
-TODO: 待实现
+Sheet 7构建器: 配种记录-隐性基因/近交系数明细
+v1.2版本 - 直接复制已配公牛分析结果文件
 """
 
 from .base_builder import BaseSheetBuilder
+from openpyxl.styles import Alignment
 import logging
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
 class Sheet7Builder(BaseSheetBuilder):
-    """Sheet 7: 备选公牛排名"""
+    """
+    Sheet 7: 配种记录-隐性基因/近交系数明细
+
+    直接复制"已配公牛_近交系数及隐性基因分析结果"文件内容
+    """
 
     def build(self, data: dict):
-        """构建Sheet 7"""
-        logger.warning("Sheet7Builder尚未实现")
-        pass
+        """
+        构建Sheet 7: 配种记录明细
+
+        Args:
+            data: 包含配种记录明细数据
+                - data: DataFrame数据
+                - file_path: 源文件路径
+        """
+        try:
+            # 检查数据
+            if not data or 'data' not in data:
+                logger.warning("Sheet7: 缺少数据，跳过生成")
+                return
+
+            df = data['data']
+            if df.empty:
+                logger.warning("Sheet7: 数据为空，跳过生成")
+                return
+
+            # 创建Sheet（Excel sheet名称不能包含斜杠）
+            self._create_sheet("配种记录-隐性基因及近交系数明细")
+            logger.info("构建Sheet 7: 配种记录-隐性基因及近交系数明细")
+
+            # 写入表头
+            for col_idx, col_name in enumerate(df.columns, start=1):
+                cell = self.ws.cell(row=1, column=col_idx, value=col_name)
+                self.style_manager.apply_header_style(cell)
+
+            # 写入数据
+            for row_idx, row_data in enumerate(df.itertuples(index=False), start=2):
+                for col_idx, value in enumerate(row_data, start=1):
+                    cell = self.ws.cell(row=row_idx, column=col_idx, value=value)
+                    self.style_manager.apply_data_style(cell, alignment='center')
+
+            # 冻结首行
+            self._freeze_panes('A2')
+
+            # 设置列宽（根据内容自动调整）
+            for col_idx, col_name in enumerate(df.columns, start=1):
+                # 基础列宽
+                if '(' in str(col_name):  # 带括号的基因列，较窄
+                    width = 10
+                elif col_name in ['母牛号', '配种公牛号', '原始公牛号']:
+                    width = 15
+                elif col_name in ['配种日期']:
+                    width = 12
+                elif col_name in ['后代近交详情']:
+                    width = 30
+                else:
+                    width = 12
+
+                self.ws.column_dimensions[self._get_column_letter(col_idx)].width = width
+
+            logger.info(f"✓ Sheet 7构建完成: {len(df)}行 × {len(df.columns)}列")
+
+        except Exception as e:
+            logger.error(f"构建Sheet 7失败: {e}", exc_info=True)
+            raise
+
+    def _get_column_letter(self, col_idx: int) -> str:
+        """获取列字母（1->A, 2->B, ...）"""
+        from openpyxl.utils import get_column_letter
+        return get_column_letter(col_idx)

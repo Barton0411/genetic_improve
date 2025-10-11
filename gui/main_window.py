@@ -1190,7 +1190,7 @@ class MainWindow(QMainWindow):
                 self.content_stack.setCurrentIndex(5)  # 添加个体选配页面的索引
             elif text == "自动化生成":
                 self.content_stack.setCurrentIndex(6)  # 自动化生成页面
-            
+
             # 切换到个体选配页面时刷新冻精预览
             if text == "个体选配" and hasattr(self, 'load_semen_preview'):
                 print("[DEBUG-NAV] 切换到个体选配页面，刷新冻精预览...")
@@ -1199,6 +1199,11 @@ class MainWindow(QMainWindow):
                 self.load_group_preview()
                 # 更新表格样式以适应当前主题
                 self.update_preview_tables_style()
+
+            # 切换到自动化生成页面时刷新对比牧场选择列表
+            if text == "自动化生成" and hasattr(self, 'load_benchmark_farms'):
+                print("[DEBUG-NAV] 切换到自动化生成页面，刷新对比牧场选择列表...")
+                self.load_benchmark_farms()
             
             self.update_nav_selected_style()
 
@@ -2420,7 +2425,7 @@ class MainWindow(QMainWindow):
                         final_classifications[bull_id] = "性控"
                         print(f"[SemenPreview] 自动分类: {bull_id} -> 性控 (基于 '{semen_type_str}')")
                         auto_classified = True
-                    
+
                     if not auto_classified and bull_id not in bulls_needing_manual_classification:
                         bulls_needing_manual_classification.append(bull_id)
                         print(f"[SemenPreview] 需要手动分类: {bull_id} (原始类型: '{semen_type_str}')")

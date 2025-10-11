@@ -2649,11 +2649,14 @@ class InbreedingPage(QWidget):
                     print(f"分析第{i+1}条配对记录")
                 _, row = row  # 解包iterrows返回的元组
                 cow_id = str(row['耳号'])
-                
+
+                # 读取配种日期
+                breeding_date = row['配种日期'] if '配种日期' in row and pd.notna(row['配种日期']) else ''
+
                 # 标准化父号(转换为REG)
                 original_sire_id = str(row['父号']) if pd.notna(row['父号']) else ''
                 sire_id = pedigree_db.standardize_animal_id(original_sire_id, 'bull')
-                
+
                 # 标准化公牛号(冻精编号转换为REG)
                 original_bull_id = str(row['冻精编号']) if pd.notna(row['冻精编号']) else ''
                 bull_id = pedigree_db.standardize_animal_id(original_bull_id, 'bull')
@@ -2681,6 +2684,7 @@ class InbreedingPage(QWidget):
                 # 记录结果
                 result_dict = {
                     '母牛号': cow_id,
+                    '配种日期': breeding_date,
                     '父号': sire_id,
                     '原始父号': original_sire_id if original_sire_id != sire_id else '',
                     '配种公牛号': bull_id,

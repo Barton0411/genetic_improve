@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class ExcelReportGenerator:
-    """Excel综合报告生成器 v1.1"""
+    """Excel综合报告生成器 v1.2"""
 
     def __init__(self, project_folder: Path, service_staff: str = None):
         """
@@ -44,7 +44,7 @@ class ExcelReportGenerator:
         """
         try:
             logger.info("=" * 60)
-            logger.info("开始生成Excel综合报告 v1.1")
+            logger.info("开始生成Excel综合报告 v1.2")
             logger.info("=" * 60)
 
             # 1. 检查数据文件
@@ -74,41 +74,51 @@ class ExcelReportGenerator:
             # 3. 生成各个Sheet
             logger.info("\nStep 3: 生成Sheet...")
 
-            logger.info("  [1/10] 生成Sheet 1: 牧场基础信息")
+            # Sheets 1-4: 牧场和牛群分析（已完成）
+            logger.info("  [1/15] 生成Sheet 1: 牧场基础信息")
             self._build_sheet1(data['farm_info'])
 
-            logger.info("  [2/10] 生成Sheet 1A: 牧场牛群原始数据")
+            logger.info("  [2/15] 生成Sheet 1A: 牧场牛群原始数据")
             self._build_sheet1a(data['farm_info'])
 
-            logger.info("  [3/10] 生成Sheet 2: 系谱识别分析")
+            logger.info("  [3/15] 生成Sheet 2: 系谱识别分析")
             self._build_sheet2(data['pedigree'])
 
-            logger.info("  [3A/10] 生成Sheet 2明细: 全群母牛系谱识别明细")
+            logger.info("  [4/15] 生成Sheet 2明细: 全群母牛系谱识别明细")
             self._build_sheet2_detail(data['pedigree'])
 
-            logger.info("  [4/10] 生成Sheet 3: 育种性状分析")
+            logger.info("  [5/15] 生成Sheet 3: 育种性状分析")
             self._build_sheet3(data['traits'])
 
-            logger.info("  [5/10] 生成Sheet 4: 母牛指数分析")
+            logger.info("  [6/15] 生成Sheet 4: 母牛指数分析")
             self._build_sheet4(data['cow_index'])
 
-            logger.info("  [6/10] 生成Sheet 5: 隐性基因分析")
-            self._build_sheet5(data['genes'])
+            # Sheets 5-7: 配种记录分析（v1.2新规划）
+            logger.info("  [7/15] 生成Sheet 5: 配种记录-隐性基因分析")
+            self._build_sheet5(data.get('breeding_genes', {}))
 
-            logger.info("  [7/10] 生成Sheet 6: 近交系数分析")
-            self._build_sheet6(data['inbreeding'])
+            logger.info("  [8/15] 生成Sheet 6: 配种记录-近交系数分析")
+            self._build_sheet6(data.get('breeding_inbreeding', {}))
 
-            logger.info("  [8/10] 生成Sheet 7: 备选公牛排名")
-            self._build_sheet7(data['bull_ranking'])
+            logger.info("  [9/15] 生成Sheet 7: 配种记录-隐性基因及近交系数明细")
+            self._build_sheet7(data.get('breeding_details', {}))
 
-            logger.info("  [9/10] 生成Sheet 7A: 备选公牛预测分析")
-            self._build_sheet7a(data['bull_prediction'])
+            # Sheets 8-9: 已用公牛分析（v1.2新规划）
+            logger.info("  [10/15] 生成Sheet 8: 已用公牛性状汇总分析")
+            self._build_sheet8(data.get('used_bulls_summary', {}))
+
+            logger.info("  [11/15] 生成Sheet 9: 已用公牛性状明细")
+            self._build_sheet9(data.get('used_bulls_detail', {}))
+
+            # Sheets 10-11: 备选公牛和选配结果（v1.2新规划）
+            logger.info("  [12/15] 生成Sheet 10: 备选公牛排名")
+            self._build_sheet10(data.get('bull_ranking', {}))
 
             if data.get('mating'):
-                logger.info("  [10/10] 生成Sheet 8: 选配推荐结果")
-                self._build_sheet8(data['mating'])
+                logger.info("  [13/15] 生成Sheet 11: 选配推荐结果")
+                self._build_sheet11(data['mating'])
             else:
-                logger.info("  [10/10] Sheet 8: 无选配数据，跳过")
+                logger.info("  [13/15] Sheet 11: 无选配数据，跳过")
 
             logger.info("✓ 所有Sheet生成完成")
 
@@ -137,7 +147,7 @@ class ExcelReportGenerator:
 
     def _collect_all_data(self) -> dict:
         """
-        收集所有需要的数据
+        收集所有需要的数据 (v1.2)
 
         Returns:
             数据字典
@@ -147,24 +157,48 @@ class ExcelReportGenerator:
             collect_pedigree_data,
             collect_traits_data,
             collect_cow_index_data,
-            collect_bull_usage_data,
-            collect_gene_data,
-            collect_inbreeding_data,
             collect_bull_ranking_data,
-            collect_bull_prediction_data,
             collect_mating_data
         )
 
+        # v1.2数据收集器
+        from .data_collectors import (
+            collect_breeding_genes_data,
+            collect_breeding_inbreeding_data,
+            collect_breeding_detail_data
+        )
+
+        # Sheet 5: 配种记录-隐性基因分析（已实现）
+        breeding_genes = collect_breeding_genes_data(self.analysis_folder)
+
+        # Sheet 6: 配种记录-近交系数分析（已实现）
+        breeding_inbreeding = collect_breeding_inbreeding_data(self.analysis_folder)
+
+        # Sheet 7: 配种记录明细（已实现）
+        breeding_details = collect_breeding_detail_data(self.analysis_folder)
+
+        # Sheet 8-9: 待实现，暂时使用空数据
+        used_bulls_summary = {}
+        used_bulls_detail = {}
+
         return {
+            # Sheets 1-4: 牧场和牛群分析（已完成）
             'farm_info': collect_farm_info(self.project_folder, self.service_staff),
             'pedigree': collect_pedigree_data(self.analysis_folder),
             'traits': collect_traits_data(self.analysis_folder, self.project_folder),
             'cow_index': collect_cow_index_data(self.analysis_folder, self.project_folder),
-            'bull_usage': collect_bull_usage_data(self.analysis_folder),
-            'genes': collect_gene_data(self.analysis_folder),
-            'inbreeding': collect_inbreeding_data(self.analysis_folder),
+
+            # Sheets 5-7: 配种记录分析（v1.2新增）
+            'breeding_genes': breeding_genes,
+            'breeding_inbreeding': breeding_inbreeding,
+            'breeding_details': breeding_details,
+
+            # Sheets 8-9: 已用公牛分析（v1.2新增）
+            'used_bulls_summary': used_bulls_summary,
+            'used_bulls_detail': used_bulls_detail,
+
+            # Sheets 10-11: 备选公牛和选配结果
             'bull_ranking': collect_bull_ranking_data(self.analysis_folder),
-            'bull_prediction': collect_bull_prediction_data(self.analysis_folder),
             'mating': collect_mating_data(self.analysis_folder)
         }
 
@@ -208,31 +242,43 @@ class ExcelReportGenerator:
         builder.build(data)
 
     def _build_sheet5(self, data: dict):
-        """构建Sheet 5: 隐性基因分析"""
+        """构建Sheet 5: 配种记录-隐性基因分析"""
         from .sheet_builders import Sheet5Builder
         builder = Sheet5Builder(self.wb, self.style_manager, self.chart_builder)
         builder.build(data)
 
     def _build_sheet6(self, data: dict):
-        """构建Sheet 6: 近交系数分析"""
+        """构建Sheet 6: 配种记录-近交系数分析"""
         from .sheet_builders import Sheet6Builder
         builder = Sheet6Builder(self.wb, self.style_manager, self.chart_builder)
         builder.build(data)
 
     def _build_sheet7(self, data: dict):
-        """构建Sheet 7: 备选公牛排名"""
+        """构建Sheet 7: 配种记录-隐性基因/近交系数明细"""
         from .sheet_builders import Sheet7Builder
         builder = Sheet7Builder(self.wb, self.style_manager, self.chart_builder)
         builder.build(data)
 
-    def _build_sheet7a(self, data: dict):
-        """构建Sheet 7A: 备选公牛预测分析"""
-        from .sheet_builders import Sheet7ABuilder
-        builder = Sheet7ABuilder(self.wb, self.style_manager, self.chart_builder)
-        builder.build(data)
-
     def _build_sheet8(self, data: dict):
-        """构建Sheet 8: 个体选配结果"""
+        """构建Sheet 8: 已用公牛性状汇总分析"""
         from .sheet_builders import Sheet8Builder
         builder = Sheet8Builder(self.wb, self.style_manager, self.chart_builder)
+        builder.build(data)
+
+    def _build_sheet9(self, data: dict):
+        """构建Sheet 9: 已用公牛性状明细"""
+        from .sheet_builders import Sheet9Builder
+        builder = Sheet9Builder(self.wb, self.style_manager, self.chart_builder)
+        builder.build(data)
+
+    def _build_sheet10(self, data: dict):
+        """构建Sheet 10: 备选公牛排名"""
+        from .sheet_builders import Sheet10Builder
+        builder = Sheet10Builder(self.wb, self.style_manager, self.chart_builder)
+        builder.build(data)
+
+    def _build_sheet11(self, data: dict):
+        """构建Sheet 11: 选配推荐结果"""
+        from .sheet_builders import Sheet11Builder
+        builder = Sheet11Builder(self.wb, self.style_manager, self.chart_builder)
         builder.build(data)
