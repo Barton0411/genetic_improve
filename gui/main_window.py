@@ -2392,9 +2392,9 @@ class MainWindow(QMainWindow):
             df['bull_id'] = df['bull_id'].astype(str).str.strip()
             df['semen_type'] = df['semen_type'].astype(str).str.strip()
             df = df[df['bull_id'].notna() & (df['bull_id'] != '') & (df['bull_id'].str.lower() != 'nan')]
-            df = df.drop_duplicates(subset=['bull_id'], keep='first').reset_index(drop=True) # 确保ID唯一
+            df = df.drop_duplicates(subset=['bull_id', 'semen_type'], keep='first').reset_index(drop=True) # 同一冻精类型下去重
             all_bull_ids = df['bull_id'].tolist()
-            print(f"[SemenPreview] 文件中有效且唯一的公牛ID数量: {len(all_bull_ids)}")
+            print(f"[SemenPreview] 文件中有效且唯一的公牛记录数量（bull_id + semen_type）: {len(all_bull_ids)}")
 
             if hasattr(self, 'semen_tab_widget'):
                 self.semen_tab_widget.clear()
@@ -2402,50 +2402,60 @@ class MainWindow(QMainWindow):
                 print("[SemenPreview] 错误：semen_tab_widget 未初始化")
                 return
 
-            # --- 分类逻辑 ---
-            final_classifications = {} # bull_id -> classification
-            if 'classification' in df.columns:
-                df['classification'] = df['classification'].astype(str).str.strip()
-                valid_classifications = df[df['classification'].isin(['常规', '性控'])]
-                final_classifications = dict(zip(valid_classifications['bull_id'], valid_classifications['classification']))
-                print(f"[SemenPreview] 从文件中加载了 {len(final_classifications)} 条有效分类记录")
+            # --- 分类逻辑（支持同一公牛的多个冻精类型）---
+            if 'classification' not in df.columns:
+                df['classification'] = ''
+            df['classification'] = df['classification'].astype(str).str.strip()
 
-            bulls_needing_manual_classification = []
+            # 保留已有的有效分类
+            valid_count = len(df[df['classification'].isin(['常规', '性控'])])
+            print(f"[SemenPreview] 从文件中加载了 {valid_count} 条有效分类记录")
+
+            # 逐行处理分类
+            rows_needing_manual_classification = []
             print("[SemenPreview] 开始自动分类 (基于 semen_type)...")
             for index, row in df.iterrows():
+                current_classification = row['classification']
+                # 如果已有有效分类，跳过
+                if current_classification in ['常规', '性控']:
+                    continue
+
+                # 基于 semen_type 自动分类
                 bull_id = row['bull_id']
-                if bull_id not in final_classifications: # 只处理尚未分类的
-                    semen_type_str = row['semen_type']
-                    auto_classified = False
-                    if "常规" in semen_type_str:
-                        final_classifications[bull_id] = "常规"
-                        print(f"[SemenPreview] 自动分类: {bull_id} -> 常规 (基于 '{semen_type_str}')")
-                        auto_classified = True
-                    elif "性控" in semen_type_str:
-                        final_classifications[bull_id] = "性控"
-                        print(f"[SemenPreview] 自动分类: {bull_id} -> 性控 (基于 '{semen_type_str}')")
-                        auto_classified = True
+                semen_type_str = row['semen_type']
+                auto_classified = False
 
-                    if not auto_classified and bull_id not in bulls_needing_manual_classification:
-                        bulls_needing_manual_classification.append(bull_id)
-                        print(f"[SemenPreview] 需要手动分类: {bull_id} (原始类型: '{semen_type_str}')")
+                if "常规" in semen_type_str:
+                    df.at[index, 'classification'] = "常规"
+                    print(f"[SemenPreview] 自动分类: {bull_id} ({semen_type_str}) -> 常规")
+                    auto_classified = True
+                elif "性控" in semen_type_str:
+                    df.at[index, 'classification'] = "性控"
+                    print(f"[SemenPreview] 自动分类: {bull_id} ({semen_type_str}) -> 性控")
+                    auto_classified = True
 
-            print(f"[SemenPreview] 自动分类完成，需要手动分类的数量: {len(bulls_needing_manual_classification)}")
-            user_classifications = {}
+                if not auto_classified:
+                    row_info = f"{bull_id} ({semen_type_str})"
+                    rows_needing_manual_classification.append((index, row_info, bull_id))
+                    print(f"[SemenPreview] 需要手动分类: {row_info}")
 
-            if bulls_needing_manual_classification:
-                classify_dialog = ClassifySemenDialog(bulls_needing_manual_classification, self)
+            print(f"[SemenPreview] 自动分类完成，需要手动分类的数量: {len(rows_needing_manual_classification)}")
+
+            if rows_needing_manual_classification:
+                # 提取唯一的 bull_id 用于手动分类对话框
+                unique_bulls_for_dialog = list(set([item[2] for item in rows_needing_manual_classification]))
+                classify_dialog = ClassifySemenDialog(unique_bulls_for_dialog, self)
                 if classify_dialog.exec() == QDialog.DialogCode.Accepted:
                     user_classifications = classify_dialog.get_classifications()
                     print(f"[SemenPreview] 用户手动分类结果: {user_classifications}")
-                    final_classifications.update(user_classifications) # 合并用户分类
+                    # 应用用户分类到对应的行
+                    for index, row_info, bull_id in rows_needing_manual_classification:
+                        if bull_id in user_classifications:
+                            df.at[index, 'classification'] = user_classifications[bull_id]
                 else:
                     QMessageBox.warning(self, "取消", "公牛分类已取消，未手动分类的公牛将不会被分类。")
-                    # 用户取消，这些公牛将保持未分类状态
 
-            # 更新 DataFrame 中的 'classification' 列
-            df['classification'] = df['bull_id'].map(final_classifications)
-            print(f"[SemenPreview] 更新 DataFrame 中的分类列完成。")
+            print(f"[SemenPreview] 分类处理完成。")
 
             # --- 支数加载逻辑 ---
             counts_dict = {}

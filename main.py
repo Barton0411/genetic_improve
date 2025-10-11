@@ -18,7 +18,7 @@ def main():
 
     # 项目根目录
     project_root = Path(__file__).parent
-
+    
     # 用户配置目录（用于存储token、settings等敏感信息）
     if os.name == 'nt':  # Windows
         app_data_dir = Path(os.environ.get('APPDATA', os.path.expanduser('~'))) / 'GeneticImprove'
