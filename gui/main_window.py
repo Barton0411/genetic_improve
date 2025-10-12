@@ -2392,9 +2392,9 @@ class MainWindow(QMainWindow):
             df['bull_id'] = df['bull_id'].astype(str).str.strip()
             df['semen_type'] = df['semen_type'].astype(str).str.strip()
             df = df[df['bull_id'].notna() & (df['bull_id'] != '') & (df['bull_id'].str.lower() != 'nan')]
-            df = df.drop_duplicates(subset=['bull_id'], keep='first').reset_index(drop=True) # 确保ID唯一
-            all_bull_ids = df['bull_id'].tolist()
-            print(f"[SemenPreview] 文件中有效且唯一的公牛ID数量: {len(all_bull_ids)}")
+            # 保留所有行，不去重（同一公牛可能有多种冻精类型）
+            df = df.reset_index(drop=True)
+            print(f"[SemenPreview] 文件中有效的公牛数据行数: {len(df)}")
 
             if hasattr(self, 'semen_tab_widget'):
                 self.semen_tab_widget.clear()
@@ -2402,52 +2402,8 @@ class MainWindow(QMainWindow):
                 print("[SemenPreview] 错误：semen_tab_widget 未初始化")
                 return
 
-            # --- 分类逻辑 ---
-            final_classifications = {} # bull_id -> classification
-            if 'classification' in df.columns:
-                df['classification'] = df['classification'].astype(str).str.strip()
-                valid_classifications = df[df['classification'].isin(['常规', '性控'])]
-                final_classifications = dict(zip(valid_classifications['bull_id'], valid_classifications['classification']))
-                print(f"[SemenPreview] 从文件中加载了 {len(final_classifications)} 条有效分类记录")
-
-            bulls_needing_manual_classification = []
-            print("[SemenPreview] 开始自动分类 (基于 semen_type)...")
-            for index, row in df.iterrows():
-                bull_id = row['bull_id']
-                if bull_id not in final_classifications: # 只处理尚未分类的
-                    semen_type_str = row['semen_type']
-                    auto_classified = False
-                    if "常规" in semen_type_str:
-                        final_classifications[bull_id] = "常规"
-                        print(f"[SemenPreview] 自动分类: {bull_id} -> 常规 (基于 '{semen_type_str}')")
-                        auto_classified = True
-                    elif "性控" in semen_type_str:
-                        final_classifications[bull_id] = "性控"
-                        print(f"[SemenPreview] 自动分类: {bull_id} -> 性控 (基于 '{semen_type_str}')")
-                        auto_classified = True
-
-                    if not auto_classified and bull_id not in bulls_needing_manual_classification:
-                        bulls_needing_manual_classification.append(bull_id)
-                        print(f"[SemenPreview] 需要手动分类: {bull_id} (原始类型: '{semen_type_str}')")
-
-            print(f"[SemenPreview] 自动分类完成，需要手动分类的数量: {len(bulls_needing_manual_classification)}")
-            user_classifications = {}
-
-            if bulls_needing_manual_classification:
-                classify_dialog = ClassifySemenDialog(bulls_needing_manual_classification, self)
-                if classify_dialog.exec() == QDialog.DialogCode.Accepted:
-                    user_classifications = classify_dialog.get_classifications()
-                    print(f"[SemenPreview] 用户手动分类结果: {user_classifications}")
-                    final_classifications.update(user_classifications) # 合并用户分类
-                else:
-                    QMessageBox.warning(self, "取消", "公牛分类已取消，未手动分类的公牛将不会被分类。")
-                    # 用户取消，这些公牛将保持未分类状态
-
-            # 更新 DataFrame 中的 'classification' 列
-            df['classification'] = df['bull_id'].map(final_classifications)
-            print(f"[SemenPreview] 更新 DataFrame 中的分类列完成。")
-
             # --- 支数加载逻辑 ---
+            # 使用(bull_id, semen_type)作为复合键存储支数
             counts_dict = {}
             count_col_name = None
             if '支数' in df.columns:
@@ -2459,19 +2415,27 @@ class MainWindow(QMainWindow):
                 print(f"[SemenPreview] 从文件列 '{count_col_name}' 加载支数...")
                 # 确保列是数值类型，无效值转为0
                 df[count_col_name] = pd.to_numeric(df[count_col_name], errors='coerce').fillna(0).astype(int)
-                counts_dict = dict(zip(df['bull_id'], df[count_col_name]))
-                print(f"[SemenPreview] 加载了 {len(counts_dict)} 条支数记录")
+                # 使用(bull_id, semen_type)复合键
+                for _, row in df.iterrows():
+                    key = (str(row['bull_id']), str(row['semen_type']))
+                    counts_dict[key] = int(row[count_col_name])
+                print(f"[SemenPreview] 加载了 {len(counts_dict)} 条支数记录（使用复合键）")
             else:
                 print("[SemenPreview] 文件中未找到 '支数' 或 'count' 列，将创建 '支数' 列并初始化为0。")
                 df['支数'] = 0 # 添加新列并初始化
-                counts_dict = dict(zip(df['bull_id'], df['支数']))
+                for _, row in df.iterrows():
+                    key = (str(row['bull_id']), str(row['semen_type']))
+                    counts_dict[key] = 0
 
             # --- 保存更新后的 DataFrame 回 processed_bull_data.xlsx ---
-            # 在填充表格前先保存一次，确保分类信息持久化
+            # 在填充表格前先保存一次，确保支数信息持久化
             try:
                 print(f"[SemenPreview] 尝试保存更新后的数据回: {bull_file}")
+                # 删除classification列（如果存在）
+                if 'classification' in df.columns:
+                    df = df.drop(columns=['classification'])
                 df.to_excel(bull_file, index=False)
-                print(f"[SemenPreview] 已成功保存更新后的分类和支数到: {bull_file}")
+                print(f"[SemenPreview] 已成功保存更新后的支数到: {bull_file}")
             except PermissionError:
                 QMessageBox.critical(self, "保存失败", f"""无法保存更新后的备选公牛数据。
 文件 {bull_file.name} 可能被其他程序占用。
@@ -2496,9 +2460,9 @@ class MainWindow(QMainWindow):
             engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
 
             main_categories = ["常规", "性控"]
-            # 直接从更新后的 df 中筛选数据
+            # 直接使用semen_type筛选数据（不再使用classification）
             bull_data_by_category = {
-                cat: df[df['classification'] == cat]['bull_id'].tolist()
+                cat: df[df['semen_type'] == cat][['bull_id', 'semen_type']].values.tolist()
                 for cat in main_categories
             }
 
@@ -2517,18 +2481,18 @@ class MainWindow(QMainWindow):
                     if style:
                         semen_table.setStyleSheet(style)
 
-                    bull_ids_in_category = bull_data_by_category[category]
-                    print(f"[SemenPreview] 类别 '{category}' 找到 {len(bull_ids_in_category)} 头公牛")
-                    semen_table.setRowCount(len(bull_ids_in_category))
+                    bull_data_in_category = bull_data_by_category[category]
+                    print(f"[SemenPreview] 类别 '{category}' 找到 {len(bull_data_in_category)} 条数据")
+                    semen_table.setRowCount(len(bull_data_in_category))
 
-                    for i, bull_id in enumerate(bull_ids_in_category):
+                    for i, (bull_id, semen_type) in enumerate(bull_data_in_category):
                         # 设置冻精编号
                         id_item = QTableWidgetItem(bull_id)
                         id_item.setFlags(id_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                         id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                         semen_table.setItem(i, 0, id_item)
 
-                        # 查询数据库获取性状
+                        # 查询数据库获取性状（只使用bull_id，不考虑semen_type）
                         trait_values = {}
                         try:
                             query_str = f"SELECT {', '.join(f'`{t}`' for t in trait_columns_db)} FROM bull_library WHERE `BULL NAAB` = :bull_id OR `BULL REG` = :bull_id LIMIT 1"
@@ -2547,8 +2511,9 @@ class MainWindow(QMainWindow):
                             trait_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                             semen_table.setItem(i, j + 1, trait_item)
 
-                        # 设置支数列 (从 counts_dict 获取)
-                        count_item = QTableWidgetItem(str(counts_dict.get(bull_id, 0)))
+                        # 设置支数列 (使用复合键从 counts_dict 获取)
+                        count_key = (bull_id, semen_type)
+                        count_item = QTableWidgetItem(str(counts_dict.get(count_key, 0)))
                         count_item.setFlags(count_item.flags() | Qt.ItemFlag.ItemIsEditable)
                         count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                         font = QFont()
@@ -2804,35 +2769,46 @@ class MainWindow(QMainWindow):
                 df.rename(columns={'count': '支数'}, inplace=True)
                 count_col = '支数'
                 
-            # 收集所有标签页中的支数
-            counts_update = {}
+            # 收集所有标签页中的支数（使用复合键）
+            counts_update = {}  # {(bull_id, semen_type): count}
             for tab_index in range(self.semen_tab_widget.count()):
+                tab_name = self.semen_tab_widget.tabText(tab_index)
                 tab_widget = self.semen_tab_widget.widget(tab_index)
                 if not tab_widget: continue
-                
+
+                # 从标签页名称推断semen_type
+                if '常规' in tab_name:
+                    semen_type = '常规'
+                elif '性控' in tab_name:
+                    semen_type = '性控'
+                else:
+                    continue  # 跳过无法识别的标签页
+
                 layout = tab_widget.layout()
                 if not layout or layout.count() == 0: continue
-                
+
                 table = layout.itemAt(0).widget()
                 if not isinstance(table, QTableWidget): continue
-                
+
                 # 遍历表格中的每一行，收集支数
                 for row in range(table.rowCount()):
                     bull_id_item = table.item(row, 0)
                     count_item = table.item(row, 13)
-                    
+
                     if bull_id_item and count_item:
                         bull_id = bull_id_item.text()
                         count_text = count_item.text()
-                        
+
                         if count_text.isdigit():
-                            counts_update[bull_id] = int(count_text)
-            
-            # 更新DataFrame
-            for bull_id, count in counts_update.items():
-                match_index = df[df['bull_id'] == bull_id].index
-                if not match_index.empty:
-                    df.loc[match_index[0], count_col] = count
+                            # 使用(bull_id, semen_type)作为key
+                            counts_update[(bull_id, semen_type)] = int(count_text)
+
+            # 更新DataFrame（匹配bull_id和semen_type）
+            for (bull_id, semen_type), count in counts_update.items():
+                match_mask = (df['bull_id'] == bull_id) & (df['semen_type'] == semen_type)
+                match_indices = df[match_mask].index
+                if not match_indices.empty:
+                    df.loc[match_indices[0], count_col] = count
             
             # 保存回文件
             df.to_excel(bull_file, index=False)
@@ -2861,37 +2837,47 @@ class MainWindow(QMainWindow):
             return 100.0
     
     def _collect_semen_counts(self):
-        """收集冻精支数信息"""
+        """收集冻精支数信息，返回{(bull_id, semen_type): count}"""
         semen_inventory = {}
-        
+
         # 遍历所有标签页
         for tab_index in range(self.semen_tab_widget.count()):
+            tab_name = self.semen_tab_widget.tabText(tab_index)
             tab_widget = self.semen_tab_widget.widget(tab_index)
             if not tab_widget:
                 continue
-                
+
+            # 从标签页名称推断semen_type
+            if '常规' in tab_name:
+                semen_type = '常规'
+            elif '性控' in tab_name:
+                semen_type = '性控'
+            else:
+                continue  # 跳过无法识别的标签页
+
             layout = tab_widget.layout()
             if not layout or layout.count() == 0:
                 continue
-                
+
             table = layout.itemAt(0).widget()
             if not isinstance(table, QTableWidget):
                 continue
-                
+
             # 从表格中收集支数
             for row in range(table.rowCount()):
                 bull_id_item = table.item(row, 0)  # 公牛ID
                 count_item = table.item(row, 13)   # 支数
-                
+
                 if bull_id_item and count_item:
                     bull_id = bull_id_item.text()
                     count_text = count_item.text()
-                    
+
                     if count_text.isdigit():
-                        semen_inventory[bull_id] = int(count_text)
+                        # 使用(bull_id, semen_type)复合键
+                        semen_inventory[(bull_id, semen_type)] = int(count_text)
                     else:
-                        semen_inventory[bull_id] = 0
-        
+                        semen_inventory[(bull_id, semen_type)] = 0
+
         return semen_inventory
 
     def clear_mating_results(self):

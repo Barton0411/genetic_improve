@@ -21,7 +21,7 @@ class CycleBasedMatcher:
     def __init__(self):
         self.recommendations_df = None
         self.bull_data = None
-        self.bull_inventory = {}  # 公牛库存 {bull_id: remaining_count}
+        self.bull_inventory = {}  # 公牛库存 {(bull_id, semen_type): remaining_count}
         self.bull_scores = {}  # 公牛得分 {bull_id: score}
         self.allocation_results = []  # 分配结果
         self.inbreeding_threshold = 6.25  # 默认近交系数阈值
@@ -89,9 +89,18 @@ class CycleBasedMatcher:
                 else:
                     logger.warning("未找到公牛指数得分文件，将使用默认值0")
                 
-                # 初始化库存和得分
+                # 初始化库存和得分（使用复合键）
                 for _, bull in self.bull_data.iterrows():
                     bull_id = str(bull['bull_id'])
+
+                    # 获取semen_type
+                    if 'semen_type' in bull:
+                        semen_type = str(bull['semen_type'])
+                    elif 'classification' in bull:
+                        semen_type = str(bull['classification'])
+                    else:
+                        semen_type = '常规'  # 默认为常规
+
                     # 支持多种列名，bull 是一个 Series
                     if 'semen_count' in bull:
                         count = bull['semen_count']
@@ -99,9 +108,11 @@ class CycleBasedMatcher:
                         count = bull['支数']
                     else:
                         count = 0
-                    self.bull_inventory[bull_id] = int(count)
-                    
-                    # 保存公牛得分
+
+                    # 使用(bull_id, semen_type)作为复合键
+                    self.bull_inventory[(bull_id, semen_type)] = int(count)
+
+                    # 保存公牛得分（按bull_id，不区分类型）
                     self.bull_scores[bull_id] = bull.get('Bull Index Score', 0)
                     
                 # 检查是否所有支数都是0
@@ -119,26 +130,25 @@ class CycleBasedMatcher:
             logger.error(f"加载数据失败: {e}")
             return False
             
-    def set_inventory(self, inventory_dict: Dict[str, int]):
-        """设置公牛库存"""
-        for bull_id, count in inventory_dict.items():
-            if bull_id in self.bull_inventory:
-                self.bull_inventory[bull_id] = count
-        logger.info(f"更新了 {len(inventory_dict)} 头公牛的库存")
+    def set_inventory(self, inventory_dict: Dict):
+        """设置公牛库存，支持复合键{(bull_id, semen_type): count}"""
+        for key, count in inventory_dict.items():
+            if key in self.bull_inventory:
+                self.bull_inventory[key] = count
+        logger.info(f"更新了 {len(inventory_dict)} 条库存记录")
         
     def check_zero_inventory(self) -> bool:
         """检查是否所有公牛库存都是0"""
         return all(count == 0 for count in self.bull_inventory.values())
         
     def get_inventory_summary(self) -> pd.DataFrame:
-        """获取库存汇总"""
+        """获取库存汇总（使用复合键）"""
         summary = []
-        for _, bull in self.bull_data.iterrows():
-            bull_id = str(bull['bull_id'])
+        for (bull_id, semen_type), count in self.bull_inventory.items():
             summary.append({
                 '公牛号': bull_id,
-                '冻精类型': bull['classification'] if 'classification' in bull else (bull['semen_type'] if 'semen_type' in bull else '未知'),
-                '当前库存': self.bull_inventory.get(bull_id, 0)
+                '冻精类型': semen_type,
+                '当前库存': count
             })
         return pd.DataFrame(summary)
         
@@ -366,9 +376,10 @@ class CycleBasedMatcher:
             already_allocated = self._get_cow_allocations(cow_id, semen_type)
             
             # 过滤出可用的公牛（有库存、满足约束、未分配）
+            # 使用(bull_id, semen_type)复合键查询库存
             available_bulls = [
                 bull for bull in valid_bulls
-                if self.bull_inventory.get(bull['bull_id'], 0) > 0 and
+                if self.bull_inventory.get((bull['bull_id'], semen_type), 0) > 0 and
                    self._meets_constraints(bull) and
                    bull['bull_id'] not in already_allocated
             ]
@@ -405,13 +416,11 @@ class CycleBasedMatcher:
     def _allocate_first_choice_proportional(self, cycle_name: str, cycle_cows: pd.DataFrame, semen_type: str):
         """分配1选（严格按库存比例）"""
         try:
-            # 获取该类型有库存的公牛
+            # 获取该类型有库存的公牛（使用复合键）
             bull_inventories = {}
-            for bull_id, count in self.bull_inventory.items():
-                if count > 0:
-                    bull_type = self._get_bull_type(bull_id)
-                    if bull_type == semen_type:
-                        bull_inventories[bull_id] = count
+            for (bull_id, bull_semen_type), count in self.bull_inventory.items():
+                if count > 0 and bull_semen_type == semen_type:
+                    bull_inventories[bull_id] = count
         except Exception as e:
             logger.error(f"获取公牛库存时出错: {e}")
             return
@@ -455,12 +464,12 @@ class CycleBasedMatcher:
                         valid_bulls = ast.literal_eval(valid_bulls)
                     except:
                         valid_bulls = []
-                # 只保留有库存和配额的公牛
+                # 只保留有库存和配额的公牛（使用复合键查询库存）
                 valid_bulls = [
                     b for b in valid_bulls
                     if b['bull_id'] in bull_quotas and
                     bull_quotas[b['bull_id']] > 0 and
-                    self.bull_inventory.get(b['bull_id'], 0) > 0 and
+                    self.bull_inventory.get((b['bull_id'], semen_type), 0) > 0 and
                     self._meets_constraints(b)  # 满足约束
                 ]
                 
@@ -525,10 +534,10 @@ class CycleBasedMatcher:
             # 尝试分配给得分最高且有配额的公牛
             for bull_info in candidate['valid_bulls']:
                 bull_id = bull_info['bull_id']
-                
+
                 if (bull_id in bull_quotas and
                     used_quotas[bull_id] < bull_quotas[bull_id] and
-                    self.bull_inventory.get(bull_id, 0) > 0):
+                    self.bull_inventory.get((bull_id, semen_type), 0) > 0):
 
                     # 分配成功
                     self._record_allocation(cow_id, bull_id, semen_type, 1, bull_info)
@@ -548,10 +557,10 @@ class CycleBasedMatcher:
     def _allocate_second_third_choice(self, cycle_name: str, cycle_cows: pd.DataFrame,
                                      semen_type: str, choice_num: int):
         """分配2选或3选（平均分配给库存>0的公牛）"""
-        # 获取有库存的公牛列表
+        # 获取有库存的公牛列表（使用复合键）
         available_bulls = [
-            bull_id for bull_id, count in self.bull_inventory.items()
-            if count > 0 and self._get_bull_type(bull_id) == semen_type
+            bull_id for (bull_id, bull_semen_type), count in self.bull_inventory.items()
+            if count > 0 and bull_semen_type == semen_type
         ]
 
         if not available_bulls:
@@ -614,7 +623,7 @@ class CycleBasedMatcher:
                     if (bull_id not in already_allocated and
                         bull_id in bull_quotas and
                         used_quotas[bull_id] < bull_quotas[bull_id] and
-                        self.bull_inventory.get(bull_id, 0) > 0):
+                        self.bull_inventory.get((bull_id, semen_type), 0) > 0):
 
                         # 分配成功
                         self._record_allocation(cow_id, bull_id, semen_type, choice_num, bull_info)
@@ -640,25 +649,16 @@ class CycleBasedMatcher:
         logger.info(f"{choice_num}选实际分配: {actual_allocation}")
                     
     def _get_available_bulls_with_ratio(self, semen_type: str) -> Dict[str, float]:
-        """获取有库存的公牛及其比例"""
+        """获取有库存的公牛及其比例（使用复合键）"""
         bulls_with_stock = {}
         total_stock = 0
-        
-        for _, bull in self.bull_data.iterrows():
-            bull_id = str(bull['bull_id'])
-            # bull 是一个 Series，使用索引访问
-            if 'classification' in bull:
-                bull_type = bull['classification']
-            elif 'semen_type' in bull:
-                bull_type = bull['semen_type']
-            else:
-                bull_type = ''
-            
-            if bull_type == semen_type and self.bull_inventory.get(bull_id, 0) > 0:
-                stock = self.bull_inventory[bull_id]
+
+        # 直接从复合键库存中筛选
+        for (bull_id, bull_semen_type), stock in self.bull_inventory.items():
+            if bull_semen_type == semen_type and stock > 0:
                 bulls_with_stock[bull_id] = stock
                 total_stock += stock
-                
+
         # 计算比例
         if total_stock > 0:
             return {bull_id: stock / total_stock for bull_id, stock in bulls_with_stock.items()}
@@ -723,7 +723,9 @@ class CycleBasedMatcher:
             if cow_id in cow_info:
                 key = f"{result['choice_num']}选{result['semen_type']}"
                 cow_info[cow_id][key] = result['bull_id']
-                cow_info[cow_id][f"{key}_剩余"] = self.bull_inventory.get(result['bull_id'], 0)
+                # 使用复合键获取剩余库存
+                bull_key = (result['bull_id'], result['semen_type'])
+                cow_info[cow_id][f"{key}_剩余"] = self.bull_inventory.get(bull_key, 0)
         
         logger.info(f"有分配记录的母牛数量: {len(allocated_cow_ids)}")
         logger.info(f"推荐列表中的母牛总数: {len(cow_info)}")
@@ -770,44 +772,41 @@ class CycleBasedMatcher:
             return False
             
     def get_allocation_summary(self) -> pd.DataFrame:
-        """获取分配汇总"""
+        """获取分配汇总（使用复合键）"""
         summary = []
 
         # 重新统计，分别计算每个选择的分配
         # allocation_results 的结构是: {'cow_id', 'bull_id', 'semen_type', 'choice_num', ...}
+        # 使用复合键 (bull_id, semen_type) 进行统计
         choice_counts = {}
         for result in self.allocation_results:
             bull_id = result['bull_id']
-            choice_num = result['choice_num']  # 1, 2, 或 3
             semen_type = result['semen_type']  # '常规' 或 '性控'
+            choice_num = result['choice_num']  # 1, 2, 或 3
+
+            # 使用复合键
+            composite_key = (bull_id, semen_type)
 
             # 初始化公牛的计数器
-            if bull_id not in choice_counts:
-                choice_counts[bull_id] = {'1选': 0, '2选': 0, '3选': 0}
+            if composite_key not in choice_counts:
+                choice_counts[composite_key] = {'1选': 0, '2选': 0, '3选': 0}
 
             # 增加对应选择的计数
             choice_key = f'{choice_num}选'
-            choice_counts[bull_id][choice_key] += 1
+            choice_counts[composite_key][choice_key] += 1
 
-        for _, bull in self.bull_data.iterrows():
-            bull_id = str(bull['bull_id'])
-            # bull 是一个 Series
-            if 'semen_count' in bull:
-                original_count = int(bull['semen_count'])
-            elif '支数' in bull:
-                original_count = int(bull['支数'])
-            else:
-                original_count = 0
-
+        # 从复合键库存中获取每个公牛的信息
+        for (bull_id, semen_type), original_count in self.bull_inventory.items():
             # 获取该公牛的分配统计
-            bull_counts = choice_counts.get(bull_id, {'1选': 0, '2选': 0, '3选': 0})
+            composite_key = (bull_id, semen_type)
+            bull_counts = choice_counts.get(composite_key, {'1选': 0, '2选': 0, '3选': 0})
             first_choice = bull_counts['1选']
             second_choice = bull_counts['2选']
             third_choice = bull_counts['3选']
 
             summary.append({
                 '公牛号': bull_id,
-                '冻精类型': bull.get('classification', bull.get('semen_type', '')),
+                '冻精类型': semen_type,
                 '原始库存': original_count,
                 '1选推荐': first_choice,
                 '2选推荐': second_choice,
