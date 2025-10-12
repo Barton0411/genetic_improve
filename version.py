@@ -3,10 +3,24 @@
 """
 
 # 版本号格式: 主版本号.次版本号.修订号.构建号 (xxx.xxx.xxx.xxx)
-VERSION = "1.2.0.9"
+VERSION = "1.2.0.11"
 
 # 版本历史
 VERSION_HISTORY = [
+    {
+        "version": "1.2.0.11",
+        "date": "2025-10-12",
+        "author": "Development Team",
+        "changes": [
+            "🐛 修复所有选配模块的classification列引用错误",
+            "🔧 完全移除classification列支持，统一使用semen_type",
+            "✨ 6个模块修复：complete_mating_executor, simple/matrix_recommendation_generator等",
+            "🧹 简化代码：移除向后兼容逻辑，代码更简洁可维护",
+            "✅ 选配功能恢复正常：个体选配、完整选配、推荐矩阵生成",
+            "🧪 清理测试文件：删除26个开发测试脚本",
+            "🎨 修复近交系数分析完成弹窗按钮大小不一致问题"
+        ]
+    },
     {
         "version": "1.2.0.9",
         "date": "2025-10-12",

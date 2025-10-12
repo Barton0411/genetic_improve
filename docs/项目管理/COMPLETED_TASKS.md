@@ -1,7 +1,7 @@
 # 已完成工作清单
 
-**当前版本:** v1.2.0.4
-**更新时间:** 2025-10-07
+**当前版本:** v1.2.0.11
+**更新时间:** 2025-10-12
 
 ---
 
@@ -172,6 +172,25 @@ CI/CD自动化: ██████████████████░░  90
 - [x] 智能分配算法
 - [x] 选配预览和统计
 - [x] 选配结果导出 (Excel)
+
+### 复合键库存管理系统重构 (v1.2.0.9 - v1.2.0.11)
+- [x] 使用 (bull_id, semen_type) 复合键管理库存
+- [x] 支持同一公牛多种冻精类型独立管理
+- [x] 删除冗余 classification 列，统一使用 semen_type
+- [x] 修复字典覆盖导致的库存丢失问题
+- [x] 修复类型与库存不匹配的分配错误
+- [x] 修复所有选配模块的列引用错误：
+  - complete_mating_executor.py
+  - simple_recommendation_generator.py
+  - recommendation_generator.py
+  - group_preview_updater.py
+  - matrix_recommendation_generator.py
+  - individual_matcher.py
+- [x] 清理26个开发测试文件
+- [x] 修复UI弹窗按钮大小不一致问题
+
+**完成时间:** 2025-10-12
+**影响范围:** 冻精库存管理、个体选配、完整选配、推荐矩阵生成
 
 ### 报告生成
 - [x] PPT自动生成
