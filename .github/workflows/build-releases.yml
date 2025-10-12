@@ -2,10 +2,8 @@ name: Build Cross-Platform Releases
 
 on:
   push:
-    branches:
-      - main  # 推送到main分支时触发
     tags:
-      - 'v*.*.*'  # 当推送版本标签时触发
+      - 'v*.*.*'  # 只在推送版本标签时触发构建
   workflow_dispatch:  # 允许手动触发
     inputs:
       version:
