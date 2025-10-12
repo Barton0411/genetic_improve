@@ -3,10 +3,25 @@
 """
 
 # 版本号格式: 主版本号.次版本号.修订号.构建号 (xxx.xxx.xxx.xxx)
-VERSION = "1.2.0.8"
+VERSION = "1.2.0.9"
 
 # 版本历史
 VERSION_HISTORY = [
+    {
+        "version": "1.2.0.9",
+        "date": "2025-10-12",
+        "author": "Development Team",
+        "changes": [
+            "🔧 核心修复：使用(bull_id, semen_type)复合键重构库存管理系统",
+            "✨ 支持同一公牛多种冻精类型的库存独立管理（如001HO09154常规400+性控100）",
+            "🗑️ 删除冗余classification列，统一使用semen_type标识冻精类型",
+            "🔄 移除load_semen_preview中的去重逻辑，保留所有(bull_id, semen_type)组合",
+            "💾 save_all_semen_counts使用复合键精确匹配更新库存数据",
+            "📊 分配逻辑全面改用复合键访问库存，遗传数据查询仅使用bull_id",
+            "🎯 修复字典覆盖导致的库存丢失问题",
+            "✅ 修复类型与库存不匹配的分配错误"
+        ]
+    },
     {
         "version": "1.2.0.8",
         "date": "2025-10-11",
