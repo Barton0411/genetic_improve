@@ -81,18 +81,14 @@ class IndividualMatcher:
         
         # 按类型分组计算比例
         for bull_id, count in semen_counts.items():
-            # 从备选公牛数据中获取分类
+            # 从备选公牛数据中获取冻精类型
             bull_row = self.bull_data[self.bull_data['bull_id'] == bull_id]
             if bull_row.empty:
                 continue
 
-            # 向后兼容：优先使用semen_type，否则使用classification
-            if 'semen_type' in bull_row.columns:
-                classification = bull_row['semen_type'].iloc[0]
-            else:
-                classification = bull_row['classification'].iloc[0]
-            if classification in ratios:
-                ratios[classification][bull_id] = count
+            semen_type = bull_row['semen_type'].iloc[0]
+            if semen_type in ratios:
+                ratios[semen_type][bull_id] = count
         
         # 转换为百分比
         for semen_type in ratios:
