@@ -3462,7 +3462,21 @@ class InbreedingPage(QWidget):
                 background-color: #2980b9;
             }
         """)
-        
+
+        cancel_button.setStyleSheet("""
+            QPushButton {
+                background-color: #95a5a6;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #7f8c8d;
+            }
+        """)
+
         button_layout.addWidget(open_button)
         button_layout.addWidget(cancel_button)
         layout.addLayout(button_layout)
