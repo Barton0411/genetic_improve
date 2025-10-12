@@ -92,10 +92,15 @@ class RecommendationGenerator:
     
     def _get_bulls_by_type(self, semen_type: str) -> List[str]:
         """获取指定类型的公牛列表"""
-        if 'classification' not in self.bull_data.columns:
+        # 向后兼容：优先使用semen_type，否则使用classification
+        if 'semen_type' in self.bull_data.columns:
+            type_col = 'semen_type'
+        elif 'classification' in self.bull_data.columns:
+            type_col = 'classification'
+        else:
             return []
-        
-        bulls = self.bull_data[self.bull_data['classification'] == semen_type]['bull_id'].tolist()
+
+        bulls = self.bull_data[self.bull_data[type_col] == semen_type]['bull_id'].tolist()
         return [str(bull_id) for bull_id in bulls if pd.notna(bull_id)]
     
     def _rank_bulls_for_cow(self, cow_row: pd.Series, bull_ids: List[str]) -> List[Tuple[str, float, float]]:

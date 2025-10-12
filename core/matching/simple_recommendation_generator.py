@@ -92,13 +92,13 @@ class SimpleRecommendationGenerator:
                 logger.error("公牛数据缺少 bull_id 列")
                 return False
                 
-            # 添加冻精类型列（如果没有）
-            if 'classification' not in self.bull_data.columns:
-                if 'semen_type' in self.bull_data.columns:
-                    self.bull_data['classification'] = self.bull_data['semen_type']
+            # 确保有semen_type列（向后兼容）
+            if 'semen_type' not in self.bull_data.columns:
+                if 'classification' in self.bull_data.columns:
+                    self.bull_data['semen_type'] = self.bull_data['classification']
                 else:
                     # 默认都是常规
-                    self.bull_data['classification'] = '常规'
+                    self.bull_data['semen_type'] = '常规'
                     
             # 添加支数列（如果没有）
             if 'semen_count' not in self.bull_data.columns:
@@ -271,7 +271,7 @@ class SimpleRecommendationGenerator:
             for semen_type in ['常规', '性控']:
                 # 获取该类型的公牛
                 type_bulls = self.bull_data[
-                    self.bull_data['classification'] == semen_type
+                    self.bull_data['semen_type'] == semen_type
                 ].copy()
                 
                 if type_bulls.empty:

@@ -419,9 +419,9 @@ class CompleteMatingExecutor:
             bull_file = self.project_path / "standardized_data" / "processed_bull_data.xlsx"
             if bull_file.exists():
                 self.cached_bull_data = pd.read_excel(bull_file)
-                # 分别缓存性控和常规公牛
-                self.cached_sexed_bulls = self.cached_bull_data[self.cached_bull_data['classification'] == '性控'].copy()
-                self.cached_regular_bulls = self.cached_bull_data[self.cached_bull_data['classification'] == '常规'].copy()
+                # 分别缓存性控和常规公牛（使用semen_type列）
+                self.cached_sexed_bulls = self.cached_bull_data[self.cached_bull_data['semen_type'] == '性控'].copy()
+                self.cached_regular_bulls = self.cached_bull_data[self.cached_bull_data['semen_type'] == '常规'].copy()
                 logger.info(f"已缓存公牛数据: 性控{len(self.cached_sexed_bulls)}头，常规{len(self.cached_regular_bulls)}头")
             else:
                 logger.warning("未找到公牛数据文件")

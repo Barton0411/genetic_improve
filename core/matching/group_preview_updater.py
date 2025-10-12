@@ -161,7 +161,8 @@ class GroupPreviewUpdater:
                                           reverse=True):
             bull_info = self.bull_data[self.bull_data['bull_id'] == bull_id]
             if not bull_info.empty:
-                semen_type = bull_info.iloc[0].get('classification', '')
+                # 向后兼容：优先使用semen_type，否则使用classification
+                semen_type = bull_info.iloc[0].get('semen_type', bull_info.iloc[0].get('classification', ''))
                 total_count = bull_info.iloc[0].get('semen_count', 0)
                 remaining = self.bull_remaining.get(bull_id, 0)
                 

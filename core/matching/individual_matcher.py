@@ -85,8 +85,12 @@ class IndividualMatcher:
             bull_row = self.bull_data[self.bull_data['bull_id'] == bull_id]
             if bull_row.empty:
                 continue
-                
-            classification = bull_row['classification'].iloc[0]
+
+            # 向后兼容：优先使用semen_type，否则使用classification
+            if 'semen_type' in bull_row.columns:
+                classification = bull_row['semen_type'].iloc[0]
+            else:
+                classification = bull_row['classification'].iloc[0]
             if classification in ratios:
                 ratios[classification][bull_id] = count
         

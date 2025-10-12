@@ -304,8 +304,10 @@ class MatrixRecommendationGenerator:
             return
 
         total_bulls = len(self.bull_data)
-        regular_bulls = len(self.bull_data[self.bull_data['classification'] == '常规'])
-        sexed_bulls = len(self.bull_data[self.bull_data['classification'] == '性控'])
+        # 向后兼容：优先使用semen_type，否则使用classification
+        type_col = 'semen_type' if 'semen_type' in self.bull_data.columns else 'classification'
+        regular_bulls = len(self.bull_data[self.bull_data[type_col] == '常规'])
+        sexed_bulls = len(self.bull_data[self.bull_data[type_col] == '性控'])
 
         # 检查库存
         no_inventory = 0
@@ -346,8 +348,10 @@ class MatrixRecommendationGenerator:
             (self.bull_data['支数'] > 0) &
             (self.bull_data['Index Score'].notna())
         ]
-        valid_regular = len(valid_bulls[valid_bulls['classification'] == '常规'])
-        valid_sexed = len(valid_bulls[valid_bulls['classification'] == '性控'])
+        # 向后兼容：优先使用semen_type，否则使用classification
+        type_col = 'semen_type' if 'semen_type' in valid_bulls.columns else 'classification'
+        valid_regular = len(valid_bulls[valid_bulls[type_col] == '常规'])
+        valid_sexed = len(valid_bulls[valid_bulls[type_col] == '性控'])
 
         logger.info(f"有效公牛数(有库存且有数据): {len(valid_bulls)} (常规: {valid_regular}, 性控: {valid_sexed})")
 
@@ -393,8 +397,10 @@ class MatrixRecommendationGenerator:
             logger.info(f"过滤掉 {skipped_count} 头缺少指数数据的公牛")
 
         # 分别处理常规和性控公牛
-        regular_bulls = valid_bull_data[valid_bull_data['classification'] == '常规']
-        sexed_bulls = valid_bull_data[valid_bull_data['classification'] == '性控']
+        # 向后兼容：优先使用semen_type，否则使用classification
+        type_col = 'semen_type' if 'semen_type' in valid_bull_data.columns else 'classification'
+        regular_bulls = valid_bull_data[valid_bull_data[type_col] == '常规']
+        sexed_bulls = valid_bull_data[valid_bull_data[type_col] == '性控']
 
         regular_bull_ids = regular_bulls['bull_id'].astype(str).tolist() if not regular_bulls.empty else []
         sexed_bull_ids = sexed_bulls['bull_id'].astype(str).tolist() if not sexed_bulls.empty else []
@@ -799,8 +805,10 @@ class MatrixRecommendationGenerator:
         genetic_dict = self._build_genetic_dict()
 
         # 分别处理常规和性控公牛
-        regular_bulls = self.bull_data[self.bull_data['classification'] == '常规']
-        sexed_bulls = self.bull_data[self.bull_data['classification'] == '性控']
+        # 向后兼容：优先使用semen_type，否则使用classification
+        type_col = 'semen_type' if 'semen_type' in self.bull_data.columns else 'classification'
+        regular_bulls = self.bull_data[self.bull_data[type_col] == '常规']
+        sexed_bulls = self.bull_data[self.bull_data[type_col] == '性控']
 
         # 预计算公牛得分
         regular_bull_scores = dict(zip(regular_bulls['bull_id'].astype(str), regular_bulls['Index Score'])) if not regular_bulls.empty else {}
