@@ -93,14 +93,16 @@ class PedigreeAnalysis:
         # 添加性别限制，排除公牛
         df = df[df['sex'] != '公']
         
-        # 获取最大出生年份
-        max_birth_year = df['birth_year'].max()
-        if pd.isna(max_birth_year):
-            max_birth_year = pd.Timestamp.now().year
-            
-        # 创建出生年份分组
-        bins = [-float('inf')] + list(range(int(max_birth_year)-4, int(max_birth_year))) + [float('inf')]
-        labels = [f'{int(max_birth_year)-4}年及以前'] + [str(year) for year in range(int(max_birth_year)-3, int(max_birth_year)+1)]
+        # 使用当前年份（动态），而不是数据中的最大年份
+        # 这样可以确保始终显示"最近4年+5年及以前"的分组
+        current_year = pd.Timestamp.now().year
+
+        # 创建出生年份分组：5年及以前 + 最近4年
+        # 例如2025年：bins=[-inf, 2021, 2022, 2023, 2024, 2025]
+        #           labels=['2021年及以前', '2022', '2023', '2024', '2025']
+        # 区间：(-inf, 2021]→2021年及以前，(2021,2022]→2022，...，(2024,2025]→2025
+        bins = [-float('inf')] + list(range(current_year-4, current_year+1))
+        labels = [f'{current_year-4}年及以前'] + [str(year) for year in range(current_year-3, current_year+1)]
         
         df['birth_year_group'] = pd.cut(
             df['birth_year'],

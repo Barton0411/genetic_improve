@@ -1646,212 +1646,326 @@ def process_body_conformation_file(input_file: Path, project_path: Path, progres
 
 def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=None, progress_callback=None) -> Path:
     """
-    标准化配种记录数据文件
+    标准化配种记录数据文件 - 完全重写版本
+
+    核心策略：先备份配种日期列，处理其他列后再转换日期格式，确保数据不丢失
 
     参数:
-        input_file (Path): 输入的配种记录数据文件路径。
-        project_path (Path): 当前项目的路径。
-        cow_df (DataFrame, optional): 母牛数据的DataFrame，用于映射父号。
-        progress_callback (callable, optional): 进度回调函数，用于更新进度条或显示信息。
+        input_file (Path): 输入的配种记录数据文件路径
+        project_path (Path): 当前项目的路径
+        cow_df (DataFrame, optional): 母牛数据的DataFrame，用于映射父号
+        progress_callback (callable, optional): 进度回调函数
 
     返回:
-        Path: 标准化后的配种记录数据文件路径。
+        Path: 标准化后的配种记录数据文件路径
     """
-    print(f"[DEBUG-BREEDING-1] 开始处理配种记录文件: {input_file}")
-    
-    # 将标准化后的文件存储到 standardized_data 文件夹
+    import logging
+
+    print("=" * 80)
+    print("🔵 使用全新重写的 process_breeding_record_file (v1.2.0.13)")
+    print("=" * 80)
+    logging.info("使用全新重写的 process_breeding_record_file")
+
+    # ========== 第1步: 读取原始数据 ==========
+    print(f"\n【步骤1】读取原始文件: {input_file}")
     standardized_path = project_path / "standardized_data"
     standardized_path.mkdir(parents=True, exist_ok=True)
-    print(f"[DEBUG-BREEDING-2] 标准化路径: {standardized_path}")
-    
-    # 读取文件，根据文件类型选择读取方法
+
     try:
-        print(f"[DEBUG-BREEDING-3] 尝试读取配种记录文件: {input_file}")
         if input_file.suffix.lower() == '.csv':
-            df = pd.read_csv(input_file, dtype={'耳号': str, '母牛号': str, '冻精编号': str, '配种公牛号': str})
+            df_raw = pd.read_csv(input_file, dtype={'耳号': str, '母牛号': str, '冻精编号': str})
         else:
-            df = pd.read_excel(input_file, dtype={'耳号': str, '母牛号': str, '冻精编号': str, '配种公牛号': str})
-        print(f"[DEBUG-BREEDING-4] 成功读取配种记录文件，形状: {df.shape}")
+            # 🔧 关键修复：先读取，然后立即转换日期列为字符串
+            df_raw = pd.read_excel(input_file, dtype={'耳号': str, '母牛号': str, '冻精编号': str})
+        print(f"  ✓ 读取成功，原始数据形状: {df_raw.shape}")
+        print(f"  ✓ 包含列: {', '.join(df_raw.columns)}")
+
+        # 🔧 立即转换所有可能的日期列为字符串（在列名映射之前）
+        possible_date_columns = ['配种日期', '配种时间', '授精日期', '授精时间', 'breed_date', 'breeding_date',
+                                  '出生日期', '最近产犊日期', '最近发情日期', '初检日期', '创建日期']
+        for col in possible_date_columns:
+            if col in df_raw.columns:
+                # 如果是datetime类型，转换为字符串
+                if df_raw[col].dtype == 'datetime64[ns]' or pd.api.types.is_datetime64_any_dtype(df_raw[col]):
+                    df_raw[col] = df_raw[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+                    print(f"  🔧 已将列 '{col}' 从datetime转换为字符串")
+                # 如果是object类型但包含datetime对象，也转换
+                elif df_raw[col].dtype == 'object':
+                    def safe_datetime_to_str(val):
+                        if pd.isna(val):
+                            return val
+                        if isinstance(val, pd.Timestamp) or hasattr(val, 'strftime'):
+                            try:
+                                return val.strftime('%Y-%m-%d %H:%M:%S')
+                            except:
+                                return str(val)
+                        return val
+                    df_raw[col] = df_raw[col].apply(safe_datetime_to_str)
+                    print(f"  🔧 已清理列 '{col}' 中的datetime对象")
+
+        # 🔍 诊断：检查读取后配种日期列的情况
+        if '配种日期' in df_raw.columns:
+            print(f"  🔍 配种日期列读取后的数据类型: {df_raw['配种日期'].dtype}")
+            print(f"  🔍 配种日期前3个值: {df_raw['配种日期'].head(3).tolist()}")
+            print(f"  🔍 配种日期前3个值的类型: {[type(v).__name__ for v in df_raw['配种日期'].head(3)]}")
     except Exception as e:
-        error_msg = f"读取配种记录数据文件失败: {e}"
-        print(f"[DEBUG-BREEDING-ERROR] {error_msg}")
+        error_msg = f"读取配种记录文件失败: {e}"
+        print(f"  ✗ {error_msg}")
         raise ValueError(error_msg)
 
-    # 打印当前文件的列名，帮助调试
-    print(f"[DEBUG-BREEDING-COLUMNS] 文件包含的列: {list(df.columns)}")
-    
-    # 列名映射，处理可能的列名变化
+
+    # ========== 第2步: 列名映射 ==========
+    print(f"\n【步骤2】列名标准化")
     column_mappings = {
-        '耳号': ['耳号', '牛号', '母牛号', '母牛耳号', 'cow_id', 'ID', 'id'],
-        '配种日期': ['配种日期', '配种时间', '授精日期', '授精时间', 'breed_date', 'breeding_date'],
-        '冻精编号': ['冻精编号', '冻精号', '公牛号', '精液号', 'semen_id', 'bull_id'],
-        '冻精类型': ['冻精类型', '精液类型', '类型', 'semen_type', 'type']
+        '耳号': ['耳号', '牛号', '母牛号', '母牛耳号', 'cow_id'],
+        '配种日期': ['配种日期', '配种时间', '授精日期', '授精时间'],
+        '冻精编号': ['冻精编号', '冻精号', '公牛号', '精液号'],
+        '冻精类型': ['冻精类型', '精液类型', '类型']
     }
-    
-    # 尝试映射列名
+
     for target_col, possible_names in column_mappings.items():
-        if target_col not in df.columns:
+        if target_col not in df_raw.columns:
             for possible_name in possible_names:
-                if possible_name in df.columns:
-                    print(f"[DEBUG-BREEDING-MAPPING] 映射列名: {possible_name} -> {target_col}")
-                    df.rename(columns={possible_name: target_col}, inplace=True)
+                if possible_name in df_raw.columns:
+                    df_raw.rename(columns={possible_name: target_col}, inplace=True)
+                    print(f"  ✓ 映射列名: {possible_name} → {target_col}")
                     break
-    
-    # 数据标准化逻辑（根据用户提供的必需列进行处理）
+
+    # ========== 第3步: 检查必需列 ==========
+    print(f"\n【步骤3】检查必需列")
     required_columns = ['耳号', '配种日期', '冻精编号', '冻精类型']
-    missing_columns = [col for col in required_columns if col not in df.columns]
+    missing_columns = [col for col in required_columns if col not in df_raw.columns]
     if missing_columns:
-        error_msg = f"配种记录数据缺少以下必需列: {', '.join(missing_columns)}\n当前文件包含的列: {', '.join(df.columns)}"
-        print(f"[DEBUG-BREEDING-ERROR] {error_msg}")
+        error_msg = f"配种记录数据缺少以下必需列: {', '.join(missing_columns)}"
+        print(f"  ✗ {error_msg}")
         raise ValueError(error_msg)
+    print(f"  ✓ 所有必需列都存在")
 
-    # 删除缺失值
-    print(f"[DEBUG-BREEDING-5] 删除缺失值前记录数: {len(df)}")
-    df_cleaned = df.dropna(subset=required_columns)
-    print(f"[DEBUG-BREEDING-6] 删除缺失值后记录数: {len(df_cleaned)}")
+    # ========== 第4步: 删除缺失值 ==========
+    print(f"\n【步骤4】删除缺失值")
+    print(f"  - 原始记录数: {len(df_raw)}")
 
-    # 确保关键字段为字符串类型
-    print("[DEBUG-BREEDING-6.5] 确保ID字段为字符串类型...")
-    if '耳号' in df_cleaned.columns:
-        df_cleaned['耳号'] = df_cleaned['耳号'].astype(str)
-    if '母牛号' in df_cleaned.columns:
-        df_cleaned['母牛号'] = df_cleaned['母牛号'].astype(str)
-    if 'cow_id' in df_cleaned.columns:
-        df_cleaned['cow_id'] = df_cleaned['cow_id'].astype(str)
-    if '冻精编号' in df_cleaned.columns:
-        df_cleaned['冻精编号'] = df_cleaned['冻精编号'].astype(str)
-    if '配种公牛号' in df_cleaned.columns:
-        df_cleaned['配种公牛号'] = df_cleaned['配种公牛号'].astype(str)
+    # 🔍 诊断：显示每个关键列的缺失情况
+    print(f"  🔍 关键列缺失值统计:")
+    for col in required_columns:
+        missing_count = df_raw[col].isna().sum()
+        if missing_count > 0:
+            print(f"     - {col}: {missing_count} 条缺失 ({missing_count/len(df_raw)*100:.1f}%)")
 
-    # 处理 '冻精编号' 使用 format_naab_number
-    def apply_format_naab_number(x):
+    df_cleaned = df_raw.dropna(subset=required_columns).copy()
+    print(f"  - 删除缺失值后: {len(df_cleaned)}")
+    print(f"  - 删除了 {len(df_raw) - len(df_cleaned)} 条记录 ({(len(df_raw) - len(df_cleaned))/len(df_raw)*100:.1f}%)")
+
+
+    # ========== 第5步: 备份配种日期列（关键步骤！） ==========
+    print(f"\n【步骤5】🔐 备份配种日期列（确保数据安全）")
+    breed_date_backup = df_cleaned['配种日期'].copy()  # 创建深拷贝
+    print(f"  ✓ 已备份 {len(breed_date_backup)} 条配种日期记录")
+    print(f"  - 数据类型: {breed_date_backup.dtype}")
+    print(f"  - 非空记录: {breed_date_backup.notna().sum()}")
+    print(f"  - 样本数据（前3个）: {breed_date_backup.iloc[:3].tolist()}")
+
+    # 🔍 诊断：检查备份时索引273的值
+    if len(breed_date_backup) > 273:
+        val_273_backup = breed_date_backup.iloc[273]
+        print(f"  🔍 备份时索引273的值: {repr(val_273_backup)} (type: {type(val_273_backup).__name__})")
+
+    # 🔍 诊断：检查备份中的唯一值类型
+    sample_types = [type(v).__name__ for v in breed_date_backup.iloc[:10]]
+    print(f"  🔍 前10个值的类型: {set(sample_types)}")
+
+    # ========== 第6步: 处理ID字段类型 ==========
+    print(f"\n【步骤6】确保ID字段为字符串类型")
+    df_cleaned['耳号'] = df_cleaned['耳号'].astype(str)
+    df_cleaned['冻精编号'] = df_cleaned['冻精编号'].astype(str)
+    df_cleaned['冻精类型'] = df_cleaned['冻精类型'].astype(str)
+    print(f"  ✓ ID字段类型转换完成")
+
+    # ========== 第7步: 处理冻精编号格式化 ==========
+    print(f"\n【步骤7】格式化冻精编号")
+
+    def format_naab_safe(naab_id):
+        """安全的NAAB号格式化函数
+
+        重要：如果格式化失败，保留原值而不是清空！
+        这样即使是非标准NAAB号（如国内编号），也能保留在配种记录中。
+        """
         try:
-            # 防止空值或None
-            if pd.isna(x) or not x:
+            if pd.isna(naab_id) or not str(naab_id).strip():
                 return ''
-                
-            formatted_id, errors = format_naab_number(str(x))
-            if errors:
-                # 如果有错误，返回空字符串
-                print(f"[DEBUG-BREEDING-WARNING] 冻精编号格式错误: {x}, 错误: {errors}")
-                return ''
-            return formatted_id
-        except Exception as e:
-            print(f"[DEBUG-BREEDING-ERROR] 处理冻精编号时出错: {x}, 错误: {e}")
-            return ''
 
-    # 安全地处理每行数据
-    total = df_cleaned.shape[0]
-    try:
-        print(f"[DEBUG-BREEDING-7] 开始处理冻精编号，总行数: {total}")
-        for idx, row in df_cleaned.iterrows():
-            try:
-                df_cleaned.at[idx, '冻精编号'] = apply_format_naab_number(row['冻精编号'])
-                
-                # 只在特定间隔更新进度，减少回调频率
-                if progress_callback and idx % max(1, total // 10) == 0:
-                    progress = int((idx + 1) / total * 100)
-                    print(f"[DEBUG-BREEDING-8] 进度更新: {progress}%")
-                    progress_callback(progress)
-            except Exception as e:
-                print(f"[DEBUG-BREEDING-ERROR] 处理第 {idx} 行时出错: {e}")
-                # 继续处理下一行
-                continue
-    except Exception as e:
-        print(f"[DEBUG-BREEDING-ERROR] 处理冻精编号过程中出错: {e}")
-        # 继续执行，不抛出异常
+            original_str = str(naab_id).strip()
+            formatted_id, errors = format_naab_number(original_str)
 
-    # 处理 '配种日期' 转换为日期格式
-    try:
-        print(f"[DEBUG-BREEDING-9] 处理配种日期")
-        df_cleaned['配种日期'] = pd.to_datetime(df_cleaned['配种日期'], errors='coerce')
-    except Exception as e:
-        print(f"[DEBUG-BREEDING-ERROR] 处理配种日期时出错: {e}")
-        # 继续执行
+            # 如果格式化成功，返回格式化后的值
+            if formatted_id is not None:
+                return formatted_id
 
-    # 填充 NaN 为 ''
-    try:
-        print(f"[DEBUG-BREEDING-10] 填充空值")
-        df_cleaned.fillna('', inplace=True)
-    except Exception as e:
-        print(f"[DEBUG-BREEDING-ERROR] 填充空值时出错: {e}")
-        # 继续执行
+            # 如果格式化失败，保留原值（可能是非标准编号）
+            return original_str
 
-    # 添加父号列
-    try:
-        print(f"[DEBUG-BREEDING-11] 处理父号列")
-        # 检查cow_df是否有效
-        if cow_df is not None and not cow_df.empty:
-            # 确保 'cow_id' 和 'sire' 列存在
-            if 'cow_id' in cow_df.columns and 'sire' in cow_df.columns:
-                try:
-                    print(f"[DEBUG-BREEDING-12] 创建父号映射字典，母牛数据形状: {cow_df.shape}")
-                    # 确保cow_id列为字符串类型
-                    cow_df['cow_id'] = cow_df['cow_id'].astype(str)
-                    # 创建映射字典: cow_id -> sire
-                    sire_dict = dict(zip(cow_df['cow_id'], cow_df['sire']))
-                    print(f"[DEBUG-BREEDING-13] 创建了 {len(sire_dict)} 个映射项")
-                    
-                    # 确保配种记录的耳号列为字符串类型
-                    df_cleaned['耳号'] = df_cleaned['耳号'].astype(str)
-                    print(f"[DEBUG-BREEDING-14] 开始映射父号...")
-                    
-                    # 检查映射前的样本数据
-                    sample_ear_tags = df_cleaned['耳号'].head(5).tolist()
-                    print(f"[DEBUG-BREEDING-15] 样本耳号: {sample_ear_tags}")
-                    sample_matches = [sire_dict.get(tag, '未匹配') for tag in sample_ear_tags]
-                    print(f"[DEBUG-BREEDING-16] 样本映射结果: {sample_matches}")
-                    
-                    # 添加父号列
-                    df_cleaned['父号'] = df_cleaned['耳号'].map(sire_dict).fillna('')
-                    
-                    # 检查映射效果
-                    matched_count = (df_cleaned['父号'] != '').sum()
-                    print(f"[DEBUG-BREEDING-17] 父号映射完成，成功匹配 {matched_count}/{len(df_cleaned)} 条记录")
-                except Exception as e:
-                    print(f"[DEBUG-BREEDING-ERROR] 映射父号时出错: {e}")
-                    import traceback
-                    print(traceback.format_exc())
-                    df_cleaned['父号'] = ''  # 出错时设置为空字符串
+        except Exception:
+            # 异常情况也保留原值
+            return str(naab_id).strip() if not pd.isna(naab_id) else ''
+
+    # 使用Series.apply进行格式化，不影响DataFrame的其他列
+    formatted_naab_series = df_cleaned['冻精编号'].apply(format_naab_safe)
+    df_cleaned['冻精编号'] = formatted_naab_series
+
+    non_empty_count = (df_cleaned['冻精编号'] != '').sum()
+
+    # 统计标准NAAB号和非标准编号
+    standard_count = 0
+    non_standard_count = 0
+    for naab in df_cleaned['冻精编号']:
+        if naab and str(naab).strip():
+            formatted, errors = format_naab_number(str(naab))
+            if formatted is not None:
+                standard_count += 1
             else:
-                print(f"[DEBUG-BREEDING-WARNING] 母牛数据中缺少必要的列: cow_id或sire")
-                df_cleaned['父号'] = ''
-        else:
-            # 如果没有提供有效的cow_df，添加空的父号列
-            print(f"[DEBUG-BREEDING-WARNING] 未提供有效的母牛数据")
+                non_standard_count += 1
+
+    print(f"  ✓ 冻精编号格式化完成")
+    print(f"  - 总编号数: {non_empty_count}/{len(df_cleaned)}")
+    print(f"  - 标准NAAB号: {standard_count} ({standard_count/len(df_cleaned)*100:.1f}%)")
+    if non_standard_count > 0:
+        print(f"  - 非标准编号: {non_standard_count} ({non_standard_count/len(df_cleaned)*100:.1f}%) [已保留原值]")
+
+    # ========== 第8步: 恢复配种日期并转换为datetime ==========
+    print(f"\n【步骤8】🔓 恢复并转换配种日期")
+    # 从备份中恢复配种日期
+    df_cleaned['配种日期'] = breed_date_backup.copy()
+    print(f"  ✓ 已从备份恢复配种日期")
+    print(f"  - 恢复后非空数: {df_cleaned['配种日期'].notna().sum()}")
+    print(f"  - 恢复后数据类型: {df_cleaned['配种日期'].dtype}")
+
+    # 🔍 诊断：检查恢复后的数据样本
+    print(f"  🔍 恢复后样本数据（前5个）:")
+    for i in range(min(5, len(df_cleaned))):
+        val = df_cleaned['配种日期'].iloc[i]
+        print(f"     [{i}] {repr(val)} (type: {type(val).__name__})")
+
+    # 🔍 诊断：检查可能失败的记录（index=273）
+    if len(df_cleaned) > 273:
+        val_273 = df_cleaned['配种日期'].iloc[273]
+        print(f"  🔍 索引273的值: {repr(val_273)} (type: {type(val_273).__name__})")
+
+    # 🔧 使用自定义日期解析器，不依赖pandas的to_datetime
+    print(f"  🔧 使用自定义日期解析器...")
+    from datetime import datetime
+
+    def parse_date_manually(date_val):
+        """手动解析日期字符串为datetime对象"""
+        if pd.isna(date_val):
+            return pd.NaT
+
+        # 如果已经是datetime对象，直接返回
+        if isinstance(date_val, (datetime, pd.Timestamp)):
+            return pd.Timestamp(date_val)
+
+        # 转换为字符串并清理
+        date_str = str(date_val).strip()
+
+        # 尝试多种日期格式
+        date_formats = [
+            '%Y-%m-%d %H:%M:%S',    # 2025-10-11 17:43:02
+            '%Y-%m-%d',              # 2025-10-11
+            '%Y/%m/%d %H:%M:%S',    # 2025/10/11 17:43:02
+            '%Y/%m/%d',              # 2025/10/11
+            '%d-%m-%Y %H:%M:%S',    # 11-10-2025 17:43:02
+            '%d/%m/%Y %H:%M:%S',    # 11/10/2025 17:43:02
+        ]
+
+        for fmt in date_formats:
+            try:
+                dt = datetime.strptime(date_str, fmt)
+                return pd.Timestamp(dt)
+            except (ValueError, TypeError):
+                continue
+
+        # 如果所有格式都失败，返回NaT
+        print(f"      ⚠️  无法解析日期: {repr(date_str)}")
+        return pd.NaT
+
+    df_cleaned['配种日期'] = df_cleaned['配种日期'].apply(parse_date_manually)
+    successful_conversions = df_cleaned['配种日期'].notna().sum()
+    print(f"  ✓ datetime转换完成")
+    print(f"  - 成功转换: {successful_conversions}/{len(breed_date_backup)}")
+    print(f"  - 转换成功率: {successful_conversions/len(breed_date_backup)*100:.1f}%")
+
+    if successful_conversions < len(breed_date_backup) * 0.9:
+        print(f"  ⚠️  警告: 超过10%的日期转换失败")
+        # 🔍 诊断：找出转换失败的记录样本
+        failed_dates = df_cleaned[df_cleaned['配种日期'].isna()]
+        if len(failed_dates) > 0:
+            print(f"  🔍 转换失败的记录样本（前5个）:")
+            for idx in failed_dates.head(5).index:
+                original_val = breed_date_backup.loc[idx]
+                # 检查字符串的详细信息
+                if isinstance(original_val, str):
+                    print(f"     耳号={df_cleaned.loc[idx, '耳号']}, 原始值={repr(original_val)}")
+                    print(f"       - 长度: {len(original_val)}")
+                    print(f"       - 字节表示: {original_val.encode('utf-8')}")
+                    print(f"       - ASCII码: {[ord(c) for c in original_val[:10]]}")
+                else:
+                    print(f"     耳号={df_cleaned.loc[idx, '耳号']}, 原始值={repr(original_val)}, 类型={type(original_val).__name__}")
+
+    # ========== 第9步: 填充其他列的空值 ==========
+    print(f"\n【步骤9】填充其他列的空值")
+    for col in ['耳号', '冻精编号', '冻精类型']:
+        df_cleaned[col] = df_cleaned[col].fillna('')
+    print(f"  ✓ 非日期列空值填充完成")
+
+    # ========== 第10步: 添加父号列（从母牛数据映射） ==========
+    print(f"\n【步骤10】映射父号")
+    if cow_df is not None and not cow_df.empty and 'cow_id' in cow_df.columns and 'sire' in cow_df.columns:
+        try:
+            # 创建映射字典
+            cow_df['cow_id'] = cow_df['cow_id'].astype(str)
+            sire_dict = dict(zip(cow_df['cow_id'], cow_df['sire']))
+
+            # 映射父号
+            df_cleaned['父号'] = df_cleaned['耳号'].map(sire_dict).fillna('')
+            matched_count = (df_cleaned['父号'] != '').sum()
+            print(f"  ✓ 父号映射完成")
+            print(f"  - 成功匹配: {matched_count}/{len(df_cleaned)}")
+        except Exception as e:
+            print(f"  ✗ 父号映射失败: {e}")
             df_cleaned['父号'] = ''
-    except Exception as e:
-        print(f"[DEBUG-BREEDING-ERROR] 处理父号时出错: {e}")
-        import traceback
-        print(traceback.format_exc())
-        df_cleaned['父号'] = ''  # 确保父号列存在
+    else:
+        print(f"  - 未提供母牛数据，父号列设为空")
+        df_cleaned['父号'] = ''
 
-    # 重新排列列的顺序
-    try:
-        print(f"[DEBUG-BREEDING-18] 重新排列列顺序")
-        columns_to_keep = ['耳号', '父号', '冻精编号', '配种日期', '冻精类型']
-        # 确保所有必要的列都存在
-        for col in columns_to_keep:
-            if col not in df_cleaned.columns:
-                df_cleaned[col] = ''
-                
-        df_cleaned = df_cleaned[columns_to_keep]
-    except Exception as e:
-        print(f"[DEBUG-BREEDING-ERROR] 重新排列列时出错: {e}")
-        # 继续执行，不抛出异常
+    # ========== 第11步: 重新排列列顺序 ==========
+    print(f"\n【步骤11】重新排列列顺序")
+    columns_order = ['耳号', '父号', '冻精编号', '配种日期', '冻精类型']
+    df_final = df_cleaned[columns_order].copy()
+    print(f"  ✓ 列顺序: {' | '.join(columns_order)}")
 
-    # 保存标准化后的文件
+    # ========== 第12步: 保存文件 ==========
+    print(f"\n【步骤12】保存标准化文件")
     output_file = standardized_path / "processed_breeding_data.xlsx"
     try:
-        print(f"[DEBUG-BREEDING-19] 保存处理后的文件: {output_file}")
-        df_cleaned.to_excel(output_file, index=False)
-        print(f"[DEBUG-BREEDING-20] 文件保存成功")
+        df_final.to_excel(output_file, index=False)
+        print(f"  ✓ 文件已保存: {output_file}")
     except Exception as e:
-        error_msg = f"保存配种记录数据文件失败: {e}"
-        print(f"[DEBUG-BREEDING-ERROR] {error_msg}")
+        error_msg = f"保存文件失败: {e}"
+        print(f"  ✗ {error_msg}")
         raise ValueError(error_msg)
 
-    print(f"[DEBUG-BREEDING-21] 配种记录处理完成，返回文件路径: {output_file}")
+    # ========== 最终验证 ==========
+    print(f"\n{'='*80}")
+    print("📊 最终数据统计:")
+    print(f"  - 总记录数: {len(df_final)}")
+    print(f"  - 配种日期完整率: {df_final['配种日期'].notna().sum()}/{len(df_final)} ({df_final['配种日期'].notna().sum()/len(df_final)*100:.1f}%)")
+    print(f"  - 冻精编号填充率: {(df_final['冻精编号']!='').sum()}/{len(df_final)} ({(df_final['冻精编号']!='').sum()/len(df_final)*100:.1f}%)")
+    print(f"  - 父号匹配率: {(df_final['父号']!='').sum()}/{len(df_final)} ({(df_final['父号']!='').sum()/len(df_final)*100:.1f}%)")
+    print(f"{'='*80}\n")
+
+    # 调用进度回调
+    if progress_callback:
+        progress_callback(100, "配种记录处理完成")
+
     return output_file
 
 

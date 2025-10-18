@@ -45,14 +45,14 @@ class DataGenerator:
             # 添加性别限制，排除性别为"公"的记录
             merged_df = merged_df[merged_df['sex'] != '公']
             
-            # 获取牛群中的最大出生年份
-            max_birth_year = merged_df['birth_year'].max()
-            
+            # 使用当前年份（动态），确保始终显示"最近4年+5年及以前"
+            current_year = pd.Timestamp.now().year
+
             # 创建出生年份分组
             merged_df['birth_year_group'] = pd.cut(
                 merged_df['birth_year'],
-                bins=[-float('inf')] + list(range(max_birth_year-4, max_birth_year)) + [float('inf')],
-                labels=[f'{max_birth_year-4}年及以前'] + [str(year) for year in range(max_birth_year-3, max_birth_year+1)]
+                bins=[-float('inf')] + list(range(current_year-4, current_year+1)),
+                labels=[f'{current_year-4}年及以前'] + [str(year) for year in range(current_year-3, current_year+1)]
             )
             
             # 创建分析函数
@@ -150,14 +150,14 @@ class DataGenerator:
                 merged_cow_key_traits_scores['birth_date']
             )
             
-            # 获取牛群中的最大出生年份
-            max_birth_year = merged_cow_key_traits_scores['birth_date'].dt.year.max()
-            
+            # 使用当前年份（动态），确保始终显示"最近4年+5年及以前"
+            current_year = pd.Timestamp.now().year
+
             # 创建出生年份分组
             merged_cow_key_traits_scores['birth_year_group'] = pd.cut(
                 merged_cow_key_traits_scores['birth_date'].dt.year,
-                bins=[-float('inf')] + list(range(max_birth_year-4, max_birth_year)) + [float('inf')],
-                labels=[f'{max_birth_year-4}年及以前'] + [f'{year}年' for year in range(max_birth_year-3, max_birth_year+1)]
+                bins=[-float('inf')] + list(range(current_year-4, current_year+1)),
+                labels=[f'{current_year-4}年及以前'] + [f'{year}年' for year in range(current_year-3, current_year+1)]
             )
             
             # 创建分析函数
@@ -498,11 +498,12 @@ class DataGenerator:
             # 确保birth_date是日期类型
             df['birth_date'] = pd.to_datetime(df['birth_date'])
             
-            max_birth_year = df['birth_date'].dt.year.max()
+            # 使用当前年份（动态），确保始终显示"最近4年+5年及以前"
+            current_year = pd.Timestamp.now().year
             df['group'] = pd.cut(
                 df['birth_date'].dt.year,
-                bins=[-float('inf')] + list(range(max_birth_year-4, max_birth_year+1)),
-                labels=[f'{max_birth_year-4}年及以前'] + [f'{year}年' for year in range(max_birth_year-3, max_birth_year+1)]
+                bins=[-float('inf')] + list(range(current_year-4, current_year+1)),
+                labels=[f'{current_year-4}年及以前'] + [f'{year}年' for year in range(current_year-3, current_year+1)]
             )
             
             plt.figure(figsize=(12, 8))

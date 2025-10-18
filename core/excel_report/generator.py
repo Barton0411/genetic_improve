@@ -177,8 +177,11 @@ class ExcelReportGenerator:
         # Sheet 7: 配种记录明细（已实现）
         breeding_details = collect_breeding_detail_data(self.analysis_folder)
 
-        # Sheet 8-9: 待实现，暂时使用空数据
-        used_bulls_summary = {}
+        # Sheet 8: 已用公牛性状汇总分析（已实现）
+        from .data_collectors import collect_bull_usage_summary_data
+        used_bulls_summary = collect_bull_usage_summary_data(self.analysis_folder)
+
+        # Sheet 9: 已用公牛性状明细（待实现）
         used_bulls_detail = {}
 
         return {

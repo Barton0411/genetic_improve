@@ -3,10 +3,35 @@
 """
 
 # 版本号格式: 主版本号.次版本号.修订号.构建号 (xxx.xxx.xxx.xxx)
-VERSION = "1.2.0.11"
+VERSION = "1.2.0.13"
 
 # 版本历史
 VERSION_HISTORY = [
+    {
+        "version": "1.2.0.13",
+        "date": "2025-10-18",
+        "author": "Development Team",
+        "changes": [
+            "🐛 修复非标准NAAB号被清空的问题：保留原值而不是清空（如纯数字编号'41115672'）",
+            "🔧 优化format_naab_safe：即使格式化失败也保留原始编号，确保配种记录完整",
+            "📊 添加标准/非标准编号统计输出：区分标准NAAB号和非标准编号",
+            "🐛 修复年份分组逻辑：改为动态使用当前年份，始终显示最近4年+5年及以前",
+            "📅 修复2025年出生牛只不显示的问题：3个文件的年份分组全部改为动态",
+            "✨ 新增Sheet 8：已用公牛性状汇总分析（过去5年汇总表+加权平均）",
+            "📊 实现bull_usage_summary_collector：动态识别性状列，从processed_mated_bull_traits.xlsx收集数据",
+            "🔧 Sheet 8支持动态性状列：自动识别所有性状，不限于固定列表"
+        ]
+    },
+    {
+        "version": "1.2.0.12",
+        "date": "2025-10-12",
+        "author": "Development Team",
+        "changes": [
+            "🐛 修复配种记录处理中配种日期丢失的bug",
+            "🔧 优化fillna操作：跳过日期列，避免将NaT转换为空字符串",
+            "✅ 确保processed_breeding_data.xlsx中的配种日期完整保留"
+        ]
+    },
     {
         "version": "1.2.0.11",
         "date": "2025-10-12",
