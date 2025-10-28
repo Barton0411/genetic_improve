@@ -4,10 +4,7 @@
   "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.14/伊利奶牛选配_v1.2.0.14_mac.dmg",
   "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.14/伊利奶牛选配_v1.2.0.14_win.exe",
   "changes": [
-    "🐛 修复cow_id格式问题：全面修复pandas读取Excel时自动转换数字的问题",
-    "🔧 修复5个核心文件中的ID格式和merge操作导致的类型转换",
-    "✅ 彻底解决选配过程中cow_id变成数字导致匹配失败的问题",
-    "✨ 优化年份分组：系谱识别分析改为动态显示最近4年+5年及以前",
-    "📅 无需每年手动修改代码，自动适应未来年份"
+    "🐛 修复选配功能：解决部分母牛无法正确匹配公牛的问题",
+    "✨ 优化系谱识别分析：年份分组自动显示最近4年+更早年份数据"
   ]
 }
