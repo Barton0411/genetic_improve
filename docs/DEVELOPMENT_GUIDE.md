@@ -203,19 +203,130 @@ sudo systemctl restart genetic-auth-api genetic-data-api
 curl https://api.genepop.com/api/health
 ```
 
-### 客户端发布流程
+### 客户端发布流程（自动化）
+
+#### 发布步骤
 ```bash
 # 1. 更新版本号
 vim version.py
 
-# 2. 提交代码
-git add .
-git commit -m "Release v1.1.0.x"
-git push
+# 2. 更新version.json（用户友好的更新说明）
+vim version.json
 
-# 3. 触发构建
-./trigger_build.sh 1.1.0.x
+# 3. 提交代码并打标签
+git add .
+git commit -m "🚀 Release v1.2.0.x: 简短描述"
+git tag -a v1.2.0.x -m "Release v1.2.0.x: 详细说明"
+git push origin main && git push origin v1.2.0.x
+
+# 4. GitHub Actions自动执行（推送tag后自动触发）
+# ✅ 构建Windows安装包 (PyInstaller)
+# ✅ 构建macOS安装包 (DMG)
+# ✅ 上传到阿里云OSS
+# ✅ 创建GitHub Release
 ```
+
+#### GitHub Actions工作流程
+
+**触发条件**：推送tag（格式：`v*`，例如 `v1.2.0.14`）
+
+**执行任务**：
+1. **build-windows** - Windows环境构建
+   - 使用PyInstaller打包
+   - 生成 `伊利奶牛选配_v{VERSION}_win.exe`
+   - 保存为artifact
+
+2. **build-macos** - macOS环境构建
+   - 使用PyInstaller打包
+   - 生成 `伊利奶牛选配_v{VERSION}_mac.dmg`
+   - 保存为artifact
+
+3. **upload-to-oss** - 上传到阿里云OSS
+   - 下载构建产物
+   - 上传Windows安装包到：`releases/v{VERSION}/伊利奶牛选配_v{VERSION}_win.exe`
+   - 上传macOS安装包到：`releases/v{VERSION}/伊利奶牛选配_v{VERSION}_mac.dmg`
+   - 上传version.json到：`releases/latest/version.json`（软件更新检查）
+   - 备份version.json到：`releases/v{VERSION}/version.json`
+
+4. **create-release** - 创建GitHub Release
+   - 创建Release页面
+   - 附加安装包文件
+
+#### OSS文件结构
+```
+oss://genetic-improve/
+└── releases/
+    ├── latest/
+    │   └── version.json          # 软件更新检查读取此文件
+    ├── v1.2.0.14/
+    │   ├── 伊利奶牛选配_v1.2.0.14_win.exe
+    │   ├── 伊利奶牛选配_v1.2.0.14_mac.dmg
+    │   └── version.json          # 版本备份
+    └── v1.2.0.15/
+        ├── ...
+```
+
+#### 必需的GitHub Secrets配置
+
+在GitHub仓库设置中配置以下Secrets：
+- `ALIYUN_ACCESS_KEY_ID` - 阿里云AccessKey ID
+- `ALIYUN_ACCESS_KEY_SECRET` - 阿里云AccessKey Secret
+
+**配置路径**：
+```
+https://github.com/Barton0411/genetic_improve/settings/secrets/actions
+```
+
+**权限要求**：
+- RAM用户需要有 `AliyunOSSFullAccess` 权限
+- 或至少对 `genetic-improve` bucket有读写权限
+
+### version.json编写规范
+
+**重要原则**：version.json是给**最终用户**看的，不是给开发者看的！
+
+#### ✅ 正确示例
+```json
+{
+  "version": "1.2.0.14",
+  "force_update": false,
+  "mac_download_url": "https://...",
+  "win_download_url": "https://...",
+  "changes": [
+    "🐛 修复选配功能：解决部分母牛无法正确匹配公牛的问题",
+    "✨ 优化系谱识别分析：年份分组自动显示最近4年+更早年份数据"
+  ]
+}
+```
+
+#### ❌ 错误示例
+```json
+{
+  "changes": [
+    "🐛 修复cow_id格式问题：全面修复pandas读取Excel时自动转换数字的问题",
+    "🔧 修复5个核心文件中的ID格式和merge操作导致的类型转换",
+    "✅ 彻底解决选配过程中cow_id变成数字导致匹配失败的问题"
+  ]
+}
+```
+
+#### 编写要点
+1. **不要涉及技术细节**
+   - ❌ 不要提：cow_id、pandas、核心文件、类型转换、merge操作
+   - ✅ 应该说：选配功能、匹配问题、数据分析
+
+2. **只说明对用户操作的影响**
+   - ❌ "修复pandas读取Excel时自动转换数字的问题"
+   - ✅ "修复选配功能：解决部分母牛无法正确匹配公牛的问题"
+
+3. **保持简洁清晰**
+   - 每条更新说明控制在1-2行
+   - 使用emoji增强可读性（🐛修复 ✨优化 🎉新功能）
+   - 用户能直接理解对他们工作的影响
+
+4. **面向业务场景**
+   - 用户关心的是："选配是否准确"、"报告是否完整"、"功能是否好用"
+   - 用户不关心："哪个文件被修改了"、"用了什么技术"
 
 ---
 
