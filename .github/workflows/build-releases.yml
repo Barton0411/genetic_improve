@@ -413,70 +413,155 @@ jobs:
         path: 伊利奶牛选配_v*_mac.dmg
         retention-days: 30
 
-  # OSS上传步骤暂时禁用，需要先配置GitHub Secrets
-  # 配置方法：
-  # 1. 进入 https://github.com/Barton0411/genetic_improve/settings/secrets/actions
-  # 2. 添加 ALIYUN_ACCESS_KEY_ID 和 ALIYUN_ACCESS_KEY_SECRET
-  # 3. 取消下面的注释
-  
-  # upload-to-oss:
-  #   needs: [build-windows, build-macos] 
-  #   runs-on: ubuntu-latest
-  #   
-  #   steps:
-  #   - name: Checkout code
-  #     uses: actions/checkout@v4
-  #   
-  #   - name: Download changelog artifact
-  #     uses: actions/download-artifact@v4
-  #     with:
-  #       name: changelog-file
-  #       path: ./changelog
-  #   
-  #   - name: Get version
-  #     id: get_version
-  #     run: |
-  #       if [ "${{ github.event_name }}" == "push" ] && [[ "${{ github.ref }}" =~ refs/tags/.* ]]; then
-  #         VERSION=${GITHUB_REF#refs/tags/v}
-  #       else
-  #         VERSION="${{ github.event.inputs.version }}"
-  #       fi
-  #       echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-  #       echo "Detected version: $VERSION"
-  #   
-  #   - name: Setup OSS CLI
-  #     run: |
-  #       # 下载并安装阿里云OSS CLI工具
-  #       wget -q https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64 -O ossutil
-  #       chmod +x ossutil
-  #       
-  #       # 配置OSS CLI（使用GitHub Secrets中的密钥）
-  #       ./ossutil config -e oss-cn-beijing.aliyuncs.com -i "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" -k "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
-  #   
-  #   - name: Upload changelog to OSS
-  #     run: |
-  #       VERSION="${{ steps.get_version.outputs.VERSION }}"
-  #       
-  #       # 检查changelog文件是否存在
-  #       if [ -f "changelog/CHANGELOG_v${VERSION}.txt" ]; then
-  #         echo "📤 上传 CHANGELOG_v${VERSION}.txt 到 OSS..."
-  #         
-  #         # 上传到OSS releases目录
-  #         ./ossutil cp "changelog/CHANGELOG_v${VERSION}.txt" "oss://genetic-improve/releases/v${VERSION}/CHANGELOG.txt" --force
-  #         
-  #         # 验证上传
-  #         ./ossutil stat "oss://genetic-improve/releases/v${VERSION}/CHANGELOG.txt"
-  #         
-  #         echo "✅ Changelog 上传完成！"
-  #         echo "OSS URL: https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v${VERSION}/CHANGELOG.txt"
-  #       else
-  #         echo "❌ 未找到 changelog 文件: changelog/CHANGELOG_v${VERSION}.txt"
-  #         ls -la changelog/
-  #         exit 1
-  #       fi
+  upload-to-oss:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+
+    - name: List downloaded artifacts
+      run: |
+        echo "📦 列出所有下载的文件："
+        ls -laR
+        echo ""
+        echo "📂 目录结构："
+        tree -L 3 || find . -type f -print
+
+    - name: Get version
+      id: get_version
+      run: |
+        if [ "${{ github.event_name }}" == "push" ] && [[ "${{ github.ref }}" =~ refs/tags/.* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+        else
+          VERSION="${{ github.event.inputs.version }}"
+        fi
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "Detected version: $VERSION"
+
+    - name: Setup OSS CLI
+      run: |
+        # 下载并安装阿里云OSS CLI工具
+        wget -q https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64 -O ossutil
+        chmod +x ossutil
+
+        # 配置OSS CLI（使用GitHub Secrets中的密钥）
+        ./ossutil config -e oss-cn-beijing.aliyuncs.com -i "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" -k "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
+
+    - name: Upload Windows installer to OSS
+      run: |
+        VERSION="${{ steps.get_version.outputs.VERSION }}"
+        WIN_EXE="windows-installer/伊利奶牛选配_v${VERSION}_win.exe"
+
+        echo "📤 准备上传 Windows 安装包..."
+        echo "查找文件: $WIN_EXE"
+
+        # 验证文件存在
+        if [ ! -f "$WIN_EXE" ]; then
+          echo "❌ 错误：Windows安装包不存在: $WIN_EXE"
+          echo "当前目录内容："
+          ls -la windows-installer/
+          exit 1
+        fi
+
+        # 显示文件信息
+        FILE_SIZE=$(du -h "$WIN_EXE" | cut -f1)
+        echo "✅ 找到文件，大小: $FILE_SIZE"
+
+        # 上传到OSS
+        ./ossutil cp "$WIN_EXE" \
+          "oss://genetic-improve/releases/v${VERSION}/伊利奶牛选配_v${VERSION}_win.exe" --force
+
+        # 验证上传
+        ./ossutil stat "oss://genetic-improve/releases/v${VERSION}/伊利奶牛选配_v${VERSION}_win.exe"
+
+        echo "✅ Windows 安装包上传完成！"
+        echo "OSS URL: https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v${VERSION}/伊利奶牛选配_v${VERSION}_win.exe"
+
+    - name: Upload macOS DMG to OSS
+      run: |
+        VERSION="${{ steps.get_version.outputs.VERSION }}"
+        MAC_DMG="macos-release/伊利奶牛选配_v${VERSION}_mac.dmg"
+
+        echo "📤 准备上传 macOS DMG..."
+        echo "查找文件: $MAC_DMG"
+
+        # 验证文件存在
+        if [ ! -f "$MAC_DMG" ]; then
+          echo "❌ 错误：macOS DMG不存在: $MAC_DMG"
+          echo "当前目录内容："
+          ls -la macos-release/
+          exit 1
+        fi
+
+        # 显示文件信息
+        FILE_SIZE=$(du -h "$MAC_DMG" | cut -f1)
+        echo "✅ 找到文件，大小: $FILE_SIZE"
+
+        # 上传到OSS
+        ./ossutil cp "$MAC_DMG" \
+          "oss://genetic-improve/releases/v${VERSION}/伊利奶牛选配_v${VERSION}_mac.dmg" --force
+
+        # 验证上传
+        ./ossutil stat "oss://genetic-improve/releases/v${VERSION}/伊利奶牛选配_v${VERSION}_mac.dmg"
+
+        echo "✅ macOS DMG 上传完成！"
+        echo "OSS URL: https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v${VERSION}/伊利奶牛选配_v${VERSION}_mac.dmg"
+
+    - name: Upload changelog to OSS
+      run: |
+        VERSION="${{ steps.get_version.outputs.VERSION }}"
+
+        # 检查changelog文件是否存在
+        if [ -f "changelog-file/CHANGELOG_v${VERSION}.txt" ]; then
+          echo "📤 上传 CHANGELOG 到 OSS..."
+
+          # 上传到OSS releases目录
+          ./ossutil cp "changelog-file/CHANGELOG_v${VERSION}.txt" \
+            "oss://genetic-improve/releases/v${VERSION}/CHANGELOG.txt" --force
+
+          echo "✅ Changelog 上传完成！"
+          echo "OSS URL: https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v${VERSION}/CHANGELOG.txt"
+        else
+          echo "⚠️ 未找到 changelog 文件，跳过上传"
+          ls -la changelog-file/ || echo "changelog-file 目录不存在"
+        fi
+
+    - name: Update version.json and upload to OSS
+      run: |
+        VERSION="${{ steps.get_version.outputs.VERSION }}"
+        echo "📝 更新 version.json..."
+
+        # 读取version.json内容并上传
+        if [ -f "version.json" ]; then
+          echo "✅ 找到 version.json，上传到 OSS..."
+
+          # 上传version.json到latest目录（软件检查更新时读取这个）
+          ./ossutil cp "version.json" "oss://genetic-improve/releases/latest/version.json" --force
+
+          # 同时备份到当前版本目录
+          ./ossutil cp "version.json" \
+            "oss://genetic-improve/releases/v${VERSION}/version.json" --force
+
+          echo "✅ version.json 上传完成！"
+          echo "Latest URL: https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/latest/version.json"
+          echo "Version URL: https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v${VERSION}/version.json"
+
+          # 显示version.json内容
+          echo "📄 version.json 内容："
+          cat version.json
+        else
+          echo "❌ 未找到 version.json 文件"
+          exit 1
+        fi
 
   create-release:
-    needs: [build-windows, build-macos]  # 移除upload-to-oss依赖
+    needs: [build-windows, build-macos, upload-to-oss]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     
