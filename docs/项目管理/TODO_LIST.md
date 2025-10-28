@@ -51,16 +51,56 @@
 
 **功能描述:**
 - 添加修改密码功能（当前只有注册功能）
-- 注册功能优化：移除邀请码要求（已实现）
+- 注册功能优化：移除邀请码要求或允许跳过
 - 添加用户说明：非伊利系统人员账号将不定期失效
 
-**任务:**
-- [ ] 设计密码修改界面
-- [ ] 实现密码修改API接口 `PUT /api/auth/change_password`
-- [ ] 添加密码强度验证
-- [ ] 注册页面添加用户协议说明
+**当前架构:**
+- 认证方式：API认证（`/api/auth/login`）
+- 密码存储：PolarDB `id-pw` 表（明文存储）
+- Token：JWT，24小时有效期
+- 注册验证：需要邀请码验证
+
+**任务清单:**
+
+#### 后端API（服务器端 - api/auth_api.py）
+- [ ] 添加修改密码API接口 `PUT /api/auth/change_password`
+  - 需要JWT认证（已登录用户）
+  - 验证旧密码
+  - 更新`id-pw`表中的PW字段
+- [ ] 注册接口优化 `POST /api/auth/register`
+  - 选项A：允许空邀请码（跳过验证）
+  - 选项B：创建通用邀请码（如"YILI2025"）
+- [ ] （可选）密码强度验证
+  - 最小长度限制
+  - 复杂度要求
+
+#### 客户端（本地代码）
+- [ ] 设计修改密码界面 `gui/change_password_dialog.py`
+  - 输入：旧密码、新密码、确认新密码
+  - 验证：新密码与确认密码一致
+- [ ] AuthService添加修改密码方法 `auth/auth_service.py`
+  - `change_password(old_password, new_password)`
+- [ ] APIClient添加修改密码请求 `api/api_client.py`
+  - `change_password(old_password, new_password)`
+- [ ] 注册页面添加用户协议说明 `gui/register_dialog.py`
   - "⚠️ 注意：如果您不是伊利系统人员，账号可能会不定期失效"
-- [ ] 测试密码修改流程
+- [ ] 主界面添加"修改密码"菜单项
+
+#### 测试
+- [ ] 测试修改密码流程（旧密码验证→更新→重新登录）
+- [ ] 测试注册流程（邀请码优化后）
+- [ ] 测试密码强度验证
+
+**数据库表结构:**
+```sql
+-- id-pw 表（已存在）
+CREATE TABLE `id-pw` (
+    ID VARCHAR(50) PRIMARY KEY,    -- 用户名
+    PW VARCHAR(255) NOT NULL,      -- 密码（当前明文）
+    name VARCHAR(100),             -- 姓名
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
 
 **优先原因:**
 - 用户基本功能完善
