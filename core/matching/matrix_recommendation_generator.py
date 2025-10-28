@@ -46,7 +46,10 @@ class MatrixRecommendationGenerator:
                 self.last_error = error_msg
                 return False
             self.cow_data = pd.read_excel(cow_file)
-            
+            # 确保cow_id保持为字符串格式（修复pandas自动转换为数字的问题）
+            if 'cow_id' in self.cow_data.columns:
+                self.cow_data['cow_id'] = self.cow_data['cow_id'].astype(str)
+
             # 检查母牛得分列 - 查找任何包含 '_index' 或 'Index' 的列
             index_cols = [col for col in self.cow_data.columns if '_index' in col.lower() or 'index' in col.lower()]
             
@@ -83,7 +86,10 @@ class MatrixRecommendationGenerator:
                 self.last_error = error_msg
                 return False
             self.bull_data = pd.read_excel(bull_file)
-            
+            # 确保bull_id保持为字符串格式（修复pandas自动转换为数字的问题）
+            if 'bull_id' in self.bull_data.columns:
+                self.bull_data['bull_id'] = self.bull_data['bull_id'].astype(str)
+
             # 加载公牛性状数据（从数据库或其他文件）
             if not self._load_bull_traits():
                 return False
@@ -128,6 +134,11 @@ class MatrixRecommendationGenerator:
             # 使用最新的文件
             latest_file = max(possible_files, key=lambda x: x.stat().st_mtime)
             self.inbreeding_data = pd.read_excel(latest_file)
+            # 确保母牛号和公牛号保持为字符串格式
+            if '母牛号' in self.inbreeding_data.columns:
+                self.inbreeding_data['母牛号'] = self.inbreeding_data['母牛号'].astype(str)
+            if '原始备选公牛号' in self.inbreeding_data.columns:
+                self.inbreeding_data['原始备选公牛号'] = self.inbreeding_data['原始备选公牛号'].astype(str)
             logger.info(f"从 {latest_file.name} 加载了近交系数数据")
             
             # 验证数据完整性
@@ -190,6 +201,9 @@ class MatrixRecommendationGenerator:
                 return False
 
             bull_scores_df = pd.read_excel(bull_scores_file)
+            # 确保bull_id保持为字符串格式
+            if 'bull_id' in bull_scores_df.columns:
+                bull_scores_df['bull_id'] = bull_scores_df['bull_id'].astype(str)
 
             # 查找指数列（类似母牛的处理方式）
             index_cols = [col for col in bull_scores_df.columns if '_index' in col.lower() or 'index' in col.lower()]
@@ -906,8 +920,17 @@ class MatrixRecommendationGenerator:
     def save_matrices(self, matrices: Dict[str, pd.DataFrame], output_file: Path):
         """保存所有矩阵到Excel文件"""
         try:
+            # 确保所有矩阵的索引（母牛号）保持为字符串格式
+            processed_matrices = {}
+            for sheet_name, df in matrices.items():
+                df_copy = df.copy()
+                # 如果索引是母牛号，转换为字符串
+                if df_copy.index.name in ['cow_id', '母牛号', '耳号'] or any(isinstance(idx, (int, float)) for idx in df_copy.index):
+                    df_copy.index = df_copy.index.astype(str)
+                processed_matrices[sheet_name] = df_copy
+
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                for sheet_name, df in matrices.items():
+                for sheet_name, df in processed_matrices.items():
                     df.to_excel(writer, sheet_name=sheet_name)
                     
                     # 调整列宽

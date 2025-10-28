@@ -4,6 +4,31 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-cn/1.0.0/)，本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [1.2.0.14] - 2025-10-28 🐛 修复ID格式和年份分组
+
+### 🐛 Bug修复
+- **cow_id格式问题全面修复**
+  - 修复pandas读取Excel时自动将数字字符串转换为整数的问题
+  - 修复5个核心文件：group_manager.py, matrix_recommendation_generator.py, complete_mating_executor.py, cycle_based_matcher.py, auto_grouping_dialog.py
+  - 所有pd.read_excel()后立即转换cow_id/bull_id为字符串
+  - 修复merge操作导致的类型转换：在merge前后都确保ID为字符串格式
+  - 彻底解决选配过程中cow_id变成数字导致匹配失败的问题
+
+### ✨ 功能优化
+- **年份分组动态化**
+  - 优化generate_pedigree_analysis.py：改为动态年份分组
+  - 系谱识别分析结果自动显示最近4年+5年及以前
+  - 与pedigree_analysis.py等文件保持一致
+  - 无需每年手动修改代码
+
+### 📝 技术细节
+- 在所有读取Excel的地方立即转换ID列为字符串类型
+- 使用pd.Timestamp.now().year动态获取当前年份
+- 动态生成年份bins和labels，适应未来年份
+- 确保整个选配流程中ID始终为字符串格式
+
+---
+
 ## [1.2.0.8] - 2025-10-11 📊 Excel报告Sheet 5-7完成
 
 ### ✅ 完成功能

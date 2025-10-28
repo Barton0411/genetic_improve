@@ -112,6 +112,10 @@ class CompleteMatingExecutor:
                 if strategy_file.exists():
                     try:
                         strategy_df = pd.read_excel(strategy_file)
+                        # 确保相关ID列保持为字符串格式（如果存在）
+                        for col in ['cow_id', '母牛号', 'bull_id', '公牛号']:
+                            if col in strategy_df.columns:
+                                strategy_df[col] = strategy_df[col].astype(str)
                         logger.info(f"从 {strategy_file} 加载策略表成功")
                         break
                     except Exception as e:
@@ -249,6 +253,12 @@ class CompleteMatingExecutor:
                 try:
                     # 读取原文件
                     original_df = pd.read_excel(index_file)
+                    # 确保cow_id保持为字符串格式（修复pandas读取时自动转换的问题）
+                    if 'cow_id' in original_df.columns:
+                        original_df['cow_id'] = original_df['cow_id'].astype(str)
+                    # 确保all_grouped_cows的cow_id也是字符串
+                    if 'cow_id' in all_grouped_cows.columns:
+                        all_grouped_cows['cow_id'] = all_grouped_cows['cow_id'].astype(str)
                     # 更新group列
                     original_df = original_df.drop('group', axis=1, errors='ignore')
                     # 合并新的分组信息（使用完整的分组数据）
@@ -257,6 +267,9 @@ class CompleteMatingExecutor:
                         on='cow_id',
                         how='left'
                     )
+                    # 再次确保cow_id保持为字符串格式（修复merge后可能的类型变化）
+                    if 'cow_id' in original_df.columns:
+                        original_df['cow_id'] = original_df['cow_id'].astype(str)
                     # 保存回文件
                     original_df.to_excel(index_file, index=False)
                     logger.info(f"已更新分组信息到: {index_file}")
@@ -371,6 +384,9 @@ class CompleteMatingExecutor:
             if report_path.exists():
                 try:
                     existing_report = pd.read_excel(report_path)
+                    # 确保母牛号保持为字符串格式
+                    if '母牛号' in existing_report.columns:
+                        existing_report['母牛号'] = existing_report['母牛号'].astype(str)
                     # 检查报告是否为空或没有'母牛号'列
                     if len(existing_report) > 0 and '母牛号' in existing_report.columns:
                         # 智能合并：空值不替换已有的选配结果
@@ -380,6 +396,10 @@ class CompleteMatingExecutor:
                         logger.info("现有报告为空或格式不正确，将创建新报告")
                 except Exception as e:
                     logger.warning(f"读取现有报告失败: {e}，将创建新报告")
+
+            # 确保母牛号保持为字符串格式
+            if '母牛号' in final_report.columns:
+                final_report['母牛号'] = final_report['母牛号'].astype(str)
 
             with pd.ExcelWriter(report_path, engine='openpyxl') as writer:
                 final_report.to_excel(writer, sheet_name='选配结果', index=False)
@@ -410,6 +430,11 @@ class CompleteMatingExecutor:
             if possible_files:
                 latest_file = max(possible_files, key=lambda x: x.stat().st_mtime)
                 self.cached_inbreeding_df = pd.read_excel(latest_file)
+                # 确保母牛号和公牛号保持为字符串格式
+                if '母牛号' in self.cached_inbreeding_df.columns:
+                    self.cached_inbreeding_df['母牛号'] = self.cached_inbreeding_df['母牛号'].astype(str)
+                if '原始备选公牛号' in self.cached_inbreeding_df.columns:
+                    self.cached_inbreeding_df['原始备选公牛号'] = self.cached_inbreeding_df['原始备选公牛号'].astype(str)
                 logger.info(f"已缓存约束数据文件: {latest_file.name}")
             else:
                 logger.warning("未找到约束数据文件")
@@ -419,6 +444,9 @@ class CompleteMatingExecutor:
             bull_file = self.project_path / "standardized_data" / "processed_bull_data.xlsx"
             if bull_file.exists():
                 self.cached_bull_data = pd.read_excel(bull_file)
+                # 确保bull_id保持为字符串格式
+                if 'bull_id' in self.cached_bull_data.columns:
+                    self.cached_bull_data['bull_id'] = self.cached_bull_data['bull_id'].astype(str)
                 # 分别缓存性控和常规公牛（使用semen_type列）
                 self.cached_sexed_bulls = self.cached_bull_data[self.cached_bull_data['semen_type'] == '性控'].copy()
                 self.cached_regular_bulls = self.cached_bull_data[self.cached_bull_data['semen_type'] == '常规'].copy()

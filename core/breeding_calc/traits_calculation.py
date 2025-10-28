@@ -856,6 +856,11 @@ class TraitsCalculation(BaseCowCalculation):
         """
         while True:
             try:
+                # 确保 cow_id 列保持为字符串类型（修复格式变化问题）
+                if 'cow_id' in df.columns:
+                    df = df.copy()  # 创建副本避免修改原始数据
+                    df['cow_id'] = df['cow_id'].astype(str)
+
                 if apply_formatting and any(col.endswith('_source') for col in df.columns):
                     # 使用save_with_formatting应用格式
                     return self.save_with_formatting(df, output_path)

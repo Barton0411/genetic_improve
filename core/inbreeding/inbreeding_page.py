@@ -3404,11 +3404,21 @@ class InbreedingPage(QWidget):
             with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
                 # 导出配对明细表
                 if not self.detail_model.df.empty:
-                    self.detail_model.df.to_excel(writer, sheet_name='配对明细表', index=False)
+                    df_detail = self.detail_model.df.copy()
+                    # 确保母牛号和公牛号保持为字符串格式
+                    for col in ['母牛号', 'cow_id', '公牛号', 'bull_id', 'NAAB']:
+                        if col in df_detail.columns:
+                            df_detail[col] = df_detail[col].astype(str)
+                    df_detail.to_excel(writer, sheet_name='配对明细表', index=False)
 
                 # 导出异常明细表
                 if not self.abnormal_model.df.empty:
-                    self.abnormal_model.df.to_excel(writer, sheet_name='异常明细表', index=False)
+                    df_abnormal = self.abnormal_model.df.copy()
+                    # 确保母牛号和公牛号保持为字符串格式
+                    for col in ['母牛号', 'cow_id', '公牛号', 'bull_id', 'NAAB']:
+                        if col in df_abnormal.columns:
+                            df_abnormal[col] = df_abnormal[col].astype(str)
+                    df_abnormal.to_excel(writer, sheet_name='异常明细表', index=False)
 
                 # 导出统计表
                 if not self.stats_model.df.empty:

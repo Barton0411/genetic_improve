@@ -73,6 +73,9 @@ class GroupManager:
         if not self.index_file.exists():
             raise FileNotFoundError("请先进行牛只指数计算排名")
         self.cow_data = pd.read_excel(self.index_file)
+        # 确保cow_id保持为字符串格式（修复pandas自动转换为数字的问题）
+        if 'cow_id' in self.cow_data.columns:
+            self.cow_data['cow_id'] = self.cow_data['cow_id'].astype(str)
         
     def load_strategy(self, strategy_name: str):
         """加载分组策略"""
@@ -328,6 +331,9 @@ class GroupManager:
 
         try:
             df = pd.read_excel(self.index_file)
+            # 确保cow_id保持为字符串格式（修复pandas自动转换为数字的问题）
+            if 'cow_id' in df.columns:
+                df['cow_id'] = df['cow_id'].astype(str)
             if progress_callback:
                 progress_callback.update_info(f"成功读取指数文件: {self.index_file.name}")
                 progress_callback.update_info(f"原始数据: {len(df)} 条记录")

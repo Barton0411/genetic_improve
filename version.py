@@ -3,10 +3,24 @@
 """
 
 # 版本号格式: 主版本号.次版本号.修订号.构建号 (xxx.xxx.xxx.xxx)
-VERSION = "1.2.0.13"
+VERSION = "1.2.0.14"
 
 # 版本历史
 VERSION_HISTORY = [
+    {
+        "version": "1.2.0.14",
+        "date": "2025-10-28",
+        "author": "Development Team",
+        "changes": [
+            "🐛 修复cow_id格式问题：全面修复pandas读取Excel时自动转换数字的问题",
+            "🔧 修复5个核心文件：group_manager.py, matrix_recommendation_generator.py, complete_mating_executor.py, cycle_based_matcher.py, auto_grouping_dialog.py",
+            "✅ 所有pd.read_excel()后立即转换cow_id/bull_id为字符串，确保格式一致",
+            "🔧 修复merge操作导致的类型转换：在merge前后都确保ID为字符串格式",
+            "✨ 优化generate_pedigree_analysis.py：改为动态年份分组，与其他文件保持一致",
+            "📅 系谱识别分析结果现在自动显示最近4年+5年及以前，无需每年修改代码",
+            "🎯 彻底解决选配过程中cow_id变成数字导致匹配失败的问题"
+        ]
+    },
     {
         "version": "1.2.0.13",
         "date": "2025-10-18",

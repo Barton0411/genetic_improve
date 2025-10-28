@@ -546,13 +546,20 @@ class AutoGroupingDialog(QDialog):
                         # 如果index_df中已有group列，先删除
                         if 'group' in index_df.columns:
                             index_df = index_df.drop(columns=['group'])
-                        
+
                         # 只保留group列进行更新
                         group_col = df[['cow_id', 'group']]
-                        
+
+                        # 确保cow_id在merge前为字符串类型，避免merge后类型变化
+                        index_df['cow_id'] = index_df['cow_id'].astype(str)
+                        group_col['cow_id'] = group_col['cow_id'].astype(str)
+
                         # 将group列合并到原始指数文件
                         index_df = pd.merge(index_df, group_col, on='cow_id', how='left')
-                        
+
+                        # 再次确保cow_id保持为字符串格式（修复自动分组后格式变化问题）
+                        index_df['cow_id'] = index_df['cow_id'].astype(str)
+
                         # 保存更新后的文件
                         index_df.to_excel(index_file, index=False)
                         

@@ -270,6 +270,10 @@ class IndexCalculation(BaseCowCalculation):
             df = df.sort_values(f'{weight_name}_index', ascending=False)
             df['ranking'] = range(1, len(df) + 1)
 
+            # 5.5 确保 cow_id 列保持为字符串类型（修复格式变化问题）
+            if 'cow_id' in df.columns:
+                df['cow_id'] = df['cow_id'].astype(str)
+
             # 6. 保存结果（应用格式化）
             output_path = project_path / "analysis_results" / f"{self.output_prefix}_cow_index_scores.xlsx"
             if not self.save_results_with_retry(df, output_path, apply_formatting=True):
@@ -577,6 +581,11 @@ class IndexCalculation(BaseCowCalculation):
 
         while True:
             try:
+                # 确保 cow_id 列保持为字符串类型（修复格式变化问题）
+                if 'cow_id' in df.columns:
+                    df = df.copy()  # 创建副本避免修改原始数据
+                    df['cow_id'] = df['cow_id'].astype(str)
+
                 if apply_formatting and any('_source' in col for col in df.columns):
                     # 使用save_with_formatting应用格式
                     return self.save_with_formatting(df, output_path)

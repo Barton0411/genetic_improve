@@ -177,12 +177,15 @@ class ExcelReportGenerator:
         # Sheet 7: 配种记录明细（已实现）
         breeding_details = collect_breeding_detail_data(self.analysis_folder)
 
-        # Sheet 8: 已用公牛性状汇总分析（已实现）
+        # Sheet 8 & 9: 已用公牛性状汇总分析和配种明细（已实现）
         from .data_collectors import collect_bull_usage_summary_data
-        used_bulls_summary = collect_bull_usage_summary_data(self.analysis_folder)
+        bulls_data = collect_bull_usage_summary_data(self.analysis_folder)
 
-        # Sheet 9: 已用公牛性状明细（待实现）
-        used_bulls_detail = {}
+        # Sheet 8和Sheet 9共用同一个数据源
+        # - Sheet 8使用汇总数据（year_type_summary, overall_summary, year_bull_summary）
+        # - Sheet 9使用明细数据（breeding_detail）
+        used_bulls_summary = bulls_data
+        used_bulls_detail = bulls_data  # 同一数据源，不同Sheet使用不同字段
 
         return {
             # Sheets 1-4: 牧场和牛群分析（已完成）

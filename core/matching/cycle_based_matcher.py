@@ -38,6 +38,9 @@ class CycleBasedMatcher:
             if index_file.exists():
                 try:
                     index_df = pd.read_excel(index_file)
+                    # 确保cow_id保持为字符串格式（修复pandas读取时自动转换的问题）
+                    if 'cow_id' in index_df.columns:
+                        index_df['cow_id'] = index_df['cow_id'].astype(str)
                     # 合并指数得分
                     if 'cow_id' in index_df.columns and 'Combine Index Score' in index_df.columns:
                         # 确保cow_id是字符串类型
@@ -56,12 +59,18 @@ class CycleBasedMatcher:
             # 加载公牛数据
             if bull_data_path.exists():
                 self.bull_data = pd.read_excel(bull_data_path)
-                
+                # 确保bull_id保持为字符串格式
+                if 'bull_id' in self.bull_data.columns:
+                    self.bull_data['bull_id'] = self.bull_data['bull_id'].astype(str)
+
                 # 加载公牛指数得分
                 bull_index_file = project_path / "analysis_results" / "processed_index_bull_scores.xlsx"
                 if bull_index_file.exists():
                     try:
                         bull_index_df = pd.read_excel(bull_index_file)
+                        # 确保bull_id保持为字符串格式
+                        if 'bull_id' in bull_index_df.columns:
+                            bull_index_df['bull_id'] = bull_index_df['bull_id'].astype(str)
                         # 查找指数列（可能是 xxx_index 格式）
                         index_columns = [col for col in bull_index_df.columns if col.endswith('_index')]
                         

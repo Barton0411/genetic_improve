@@ -34,25 +34,18 @@ def generate_pedigree_analysis_result(project_path: Path) -> bool:
         # 只保留母牛（排除公牛）
         df = df[df['sex'] == '母'].copy()
 
-        # 定义年份分组
-        def get_year_group(year):
-            if pd.isna(year):
-                return '未知'
-            year = int(year)
-            if year <= 2020:
-                return '2020年及以前'
-            elif year == 2021:
-                return '2021'
-            elif year == 2022:
-                return '2022'
-            elif year == 2023:
-                return '2023'
-            elif year >= 2024:
-                return '2024'
-            else:
-                return '未知'
+        # 使用当前年份动态生成年份分组（最近4年 + 5年及以前）
+        # 例如2025年：bins=[-inf, 2021, 2022, 2023, 2024, 2025]
+        #           labels=['2021年及以前', '2022', '2023', '2024', '2025']
+        current_year = pd.Timestamp.now().year
+        bins = [-float('inf')] + list(range(current_year-4, current_year+1))
+        labels = [f'{current_year-4}年及以前'] + [str(year) for year in range(current_year-3, current_year+1)]
 
-        df['birth_year_group'] = df['birth_year'].apply(get_year_group)
+        df['birth_year_group'] = pd.cut(
+            df['birth_year'],
+            bins=bins,
+            labels=labels
+        )
 
         # 按是否在场和年份分组统计
         result_list = []
@@ -63,7 +56,8 @@ def generate_pedigree_analysis_result(project_path: Path) -> bool:
             else:
                 group_df = df[df['是否在场'] == status]
 
-            for year_group in ['2020年及以前', '2021', '2022', '2023', '2024']:
+            # 使用动态生成的年份标签
+            for year_group in labels:
                 year_df = group_df[group_df['birth_year_group'] == year_group]
 
                 if len(year_df) == 0:
@@ -95,7 +89,8 @@ def generate_pedigree_analysis_result(project_path: Path) -> bool:
 
         # 按是否在场和年份排序
         status_order = {'是': 1, '否': 2, '总计': 3}
-        year_order = {'2020年及以前': 1, '2021': 2, '2022': 3, '2023': 4, '2024': 5}
+        # 动态创建年份排序映射
+        year_order = {year_label: i+1 for i, year_label in enumerate(labels)}
 
         result_df['status_sort'] = result_df['是否在场'].map(status_order)
         result_df['year_sort'] = result_df['birth_year_group'].map(year_order)
@@ -105,6 +100,10 @@ def generate_pedigree_analysis_result(project_path: Path) -> bool:
         # 保存结果
         output_file = project_path / "analysis_results" / "系谱识别分析结果.xlsx"
         output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # 确保cow_id保持为字符串格式
+        if 'cow_id' in result_df.columns:
+            result_df['cow_id'] = result_df['cow_id'].astype(str)
 
         result_df.to_excel(output_file, index=False)
 
