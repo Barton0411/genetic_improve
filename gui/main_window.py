@@ -528,13 +528,17 @@ class MainWindow(QMainWindow):
 
     def create_nav_panel(self, layout):
         nav_frame = QFrame()
+        # 使用渐变背景：从 #456ba0 到 #2c5282
         nav_frame.setStyleSheet("""
             QFrame {
-                background-color: #2c3e50;
-                border: none;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #456ba0, stop:1 #2c5282);
+                border-right: 2px solid rgba(0, 0, 0, 0.15);
             }
         """)
         nav_layout = QVBoxLayout(nav_frame)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setSpacing(0)
         
         # 修改导航项结构，使用嵌套列表表示父子关系
         nav_items = [
@@ -551,21 +555,35 @@ class MainWindow(QMainWindow):
         self.nav_list = QListWidget()
         self.nav_list.setStyleSheet("""
             QListWidget {
-                background-color: #2c3e50;
+                background: transparent;
                 border: none;
+                font-size: 14px;
+                outline: none;
             }
             QListWidget::item {
-                color: white;
-                padding: 10px;
-                margin: 2px 0px;
+                color: rgba(255, 255, 255, 0.85);
+                padding: 12px 20px;
+                margin: 3px 10px;
+                border: none;
+                font-weight: 500;
+                background-color: transparent;
+                border-radius: 8px;
             }
             QListWidget::item:selected {
-                background-color: #34495e;
+                background-color: #f5f7fa;
+                color: #456ba0;
             }
             QListWidget::item:hover {
-                background-color: #3498db;
+                background-color: rgba(255, 255, 255, 0.2);
+                color: white;
+            }
+            QListWidget::item:selected:hover {
+                background-color: #f5f7fa;
+                color: #456ba0;
             }
         """)
+        # 设置尺寸策略，让列表可以扩展填充空间
+        self.nav_list.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
         # 修改添加导航项的逻辑
         for text, icon, subitems in nav_items:
@@ -585,19 +603,19 @@ class MainWindow(QMainWindow):
                 self.nav_list.addItem(sub_item)
 
         nav_layout.addWidget(self.nav_list)
-        layout.addWidget(nav_frame)
 
-        # 连接导航信号
-        self.nav_list.currentRowChanged.connect(self.on_nav_item_changed)
-        
-        # 在侧边栏底部添加版本信息
+        # 添加弹性空间，将版本信息推到底部
+        nav_layout.addStretch()
+
+        # 在侧边栏最底部添加版本信息
         version_label = QLabel(f"版本: v{self.version}")
         version_label.setStyleSheet("""
             QLabel {
-                color: #95a5a6;
+                color: rgba(255, 255, 255, 0.6);
                 font-size: 12px;
                 padding: 10px;
-                background-color: #2c3e50;
+                background: transparent;
+                border-top: 1px solid rgba(255, 255, 255, 0.15);
             }
         """)
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -606,10 +624,10 @@ class MainWindow(QMainWindow):
         self.db_version_label = QLabel("数据库版本: 检查中...")
         self.db_version_label.setStyleSheet("""
             QLabel {
-                color: #7f8c8d;
+                color: rgba(255, 255, 255, 0.6);
                 font-size: 11px;
                 padding: 5px 10px;
-                background-color: #2c3e50;
+                background: transparent;
             }
         """)
         self.db_version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -619,15 +637,16 @@ class MainWindow(QMainWindow):
         about_btn = QPushButton("关于")
         about_btn.setStyleSheet("""
             QPushButton {
-                background-color: transparent;
-                color: #95a5a6;
-                border: 1px solid #34495e;
-                padding: 5px;
-                margin: 5px 10px;
+                background-color: rgba(255, 255, 255, 0.2);
+                color: rgba(255, 255, 255, 0.85);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                padding: 6px 12px;
+                margin: 5px 10px 10px 10px;
                 font-size: 12px;
+                border-radius: 6px;
             }
             QPushButton:hover {
-                background-color: #34495e;
+                background-color: rgba(255, 255, 255, 0.3);
                 color: white;
             }
         """)
@@ -636,6 +655,11 @@ class MainWindow(QMainWindow):
         nav_layout.addWidget(version_label)
         nav_layout.addWidget(self.db_version_label)
         nav_layout.addWidget(about_btn)
+
+        layout.addWidget(nav_frame)
+
+        # 连接导航信号
+        self.nav_list.currentRowChanged.connect(self.on_nav_item_changed)
 
     def create_genetic_analysis_page(self):
         page = QWidget()
@@ -1103,32 +1127,46 @@ class MainWindow(QMainWindow):
 
     def update_nav_selected_style(self):
         """
-        用户确认选择后更改选中项的样式表，以使选中项颜色更显眼
+        用户确认选择后更改选中项的样式表，以使选中项颜色更显眼（渐变蓝配色）
         """
         self.nav_list.setStyleSheet("""
             QListWidget {
-                background-color: #2c3e50;
+                background: transparent;
                 border: none;
-                outline: none; /* 移除列表焦点框 */
+                outline: none;
+                font-size: 14px;
             }
-                                    
+
             QListWidget:focus {
-                outline: none; /* 移除获得焦点时的虚线轮廓 */
+                outline: none;
                 border: none;
             }
 
             QListWidget::item {
-                color: white;
-                padding: 10px;
-                margin: 2px 0px;
+                color: rgba(255, 255, 255, 0.85);
+                padding: 12px 20px;
+                margin: 3px 10px;
+                border: none;
+                font-weight: 500;
+                background-color: transparent;
+                border-radius: 8px;
             }
             QListWidget::item:selected {
-                background-color: #3498db; /* 明亮的蓝色背景 */
-                outline: none; /* 移除选中项的虚线框 */
+                background-color: #f5f7fa;
+                color: #456ba0;
+                outline: none;
+            }
+            QListWidget::item:hover {
+                background-color: rgba(255, 255, 255, 0.2);
+                color: white;
+            }
+            QListWidget::item:selected:hover {
+                background-color: #f5f7fa;
+                color: #456ba0;
             }
 
             QListWidget::item:focus {
-                outline: none; /* 移除项目获得焦点时的虚线框 */
+                outline: none;
             }
         """)
 
