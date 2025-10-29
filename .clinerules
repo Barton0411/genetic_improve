@@ -1,0 +1,167 @@
+# 项目开发规则
+
+## 版本发布规范
+
+### 版本号更新流程（必须严格遵守）
+
+当需要发布新版本时，**必须**按以下顺序更新所有相关文件：
+
+#### 1. 更新 version.py
+- 位置：`/version.py`
+- 更新内容：
+  - `VERSION` 变量（格式：`"主版本.次版本.修订号.构建号"`）
+  - `VERSION_HISTORY` 列表（在最前面添加新版本记录）
+  - 新版本记录必须包含：
+    - `version`: 版本号字符串
+    - `date`: 发布日期（格式：YYYY-MM-DD）
+    - `author`: "Development Team"
+    - `changes`: 变更列表（使用emoji前缀）
+
+#### 2. 更新 CHANGELOG.md
+- 位置：`/CHANGELOG.md`
+- 在文件开头（第6行之后）添加新版本条目
+- 格式：
+  ```markdown
+  ## [版本号] - 日期 📋 简短描述
+
+  ### 分类标题（如：🎨 界面优化、🔧 问题修复等）
+  - 详细说明
+  ```
+
+#### 3. 更新 version.json（重要！）
+- 位置：`/version.json`
+- **这是最容易遗漏的文件**
+- 必须更新内容：
+  - `version`: 版本号（必须与version.py一致）
+  - `mac_download_url`: macOS下载链接（包含新版本号）
+  - `win_download_url`: Windows下载链接（包含新版本号）
+  - `changes`: 变更列表（3-4条主要更新，用普通用户能理解的语言）
+  - `force_update`: 是否强制更新（true/false）
+
+- URL格式：
+  ```
+  https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v{版本号}/伊利奶牛选配_v{版本号}_{平台}.{扩展名}
+  ```
+
+- **变更说明（changes）编写规则**：
+  - 用普通用户能理解的语言，不要写技术术语
+  - 不要提及颜色代码（如#456ba0）、CSS、代码文件名等技术细节
+  - 不要让用户看出是AI生成的
+  - 不要使用emoji表情符号
+  - 示例对比：
+    - ❌ 错误："导航栏渐变蓝设计：从#456ba0到#2c5282的专业渐变背景"
+    - ✅ 正确："更新了软件界面配色，导航栏采用蓝色风格"
+    - ❌ 错误："修复Sheet 8图表重叠问题：调整进度图表和散点图间距"
+    - ✅ 正确："修复了Excel报告中图表显示重叠的问题"
+
+#### 4. 提交和推送流程
+
+```bash
+# 1. 添加所有更新的文件
+git add version.py CHANGELOG.md version.json [其他修改的文件]
+
+# 2. 创建提交（使用规范的commit message）
+git commit -m "🎨 v{版本号}: 简短标题
+
+### 主要更新分类
+- 更新点1
+- 更新点2
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+
+# 3. 推送到main分支
+git push origin main
+
+# 4. 创建版本标签
+git tag -a v{版本号} -m "v{版本号}: 简短描述"
+
+# 5. 推送标签（触发GitHub Actions自动构建）
+git push origin v{版本号}
+```
+
+### 版本更新检查清单
+
+发布新版本前，确认以下所有项：
+- [ ] version.py 中的 VERSION 已更新
+- [ ] version.py 中的 VERSION_HISTORY 已添加新条目
+- [ ] CHANGELOG.md 已添加新版本条目
+- [ ] **version.json 的 version 字段已更新**
+- [ ] **version.json 的 mac_download_url 已更新版本号**
+- [ ] **version.json 的 win_download_url 已更新版本号**
+- [ ] **version.json 的 changes 列表已更新**
+- [ ] 所有文件的版本号保持一致
+- [ ] 变更日志描述清晰准确
+- [ ] 已提交所有更改到git
+- [ ] 已推送到main分支
+- [ ] 已创建并推送版本标签
+
+### 版本号规则
+
+格式：`主版本.次版本.修订号.构建号` (例如: 1.2.0.15)
+
+- **主版本号**: 重大架构变更或功能重构
+- **次版本号**: 新功能添加或重要改进
+- **修订号**: 问题修复和小幅优化
+- **构建号**: 日常构建和测试版本
+
+### Emoji使用规范
+
+- 🎨 界面优化、设计改进
+- ✨ 新功能
+- 🔧 问题修复、技术改进
+- 📊 数据相关、图表优化
+- 🎯 用户体验改进
+- 🔄 重构、流程优化
+- 🐛 Bug修复
+- 📝 文档更新
+- 🚀 性能优化
+- 🔒 安全修复
+- 🌈 视觉体验提升
+
+## Git提交规范
+
+### Commit Message格式
+
+```
+<emoji> <type>: <subject>
+
+<body>
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+### Type类型
+- feat: 新功能
+- fix: 修复bug
+- docs: 文档更新
+- style: 代码格式调整
+- refactor: 重构
+- perf: 性能优化
+- test: 测试相关
+- chore: 构建/工具变动
+
+## 代码风格
+
+### Python代码
+- 使用4个空格缩进
+- 遵循PEP 8规范
+- 函数和方法添加docstring
+- 复杂逻辑添加注释
+
+### 文件命名
+- Python文件：snake_case（小写+下划线）
+- 类名：PascalCase（大驼峰）
+- 常量：UPPER_CASE（全大写+下划线）
+
+## 重要提醒
+
+⚠️ **version.json 是GitHub Actions上传到OSS的关键文件，客户端通过读取OSS上的version.json来检查更新。如果忘记更新此文件，用户将无法正确获取新版本信息！**
+
+每次版本更新时，AI助手必须：
+1. 主动检查并更新version.json
+2. 在提交前再次确认version.json内容正确
+3. 确保version.json与version.py的版本号完全一致
