@@ -10,7 +10,8 @@ from PyQt6.QtCore import (
     Qt, QDir, QUrl, pyqtSignal, QThread, QTimer, QEvent
 )
 from PyQt6.QtGui import (
-    QFileSystemModel, QDesktopServices, QBrush, QPalette, QPixmap, QColor, QFont, QIcon
+    QFileSystemModel, QDesktopServices, QBrush, QPalette, QPixmap, QColor, QFont, QIcon,
+    QLinearGradient
 )
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
@@ -528,11 +529,19 @@ class MainWindow(QMainWindow):
 
     def create_nav_panel(self, layout):
         nav_frame = QFrame()
-        # 使用渐变背景：从 #456ba0 到 #2c5282
+        # 设置渐变背景（使用QPalette更可靠）
+        nav_frame.setAutoFillBackground(True)
+        palette = nav_frame.palette()
+        gradient = QLinearGradient(0, 0, 0, 1)
+        gradient.setCoordinateMode(QLinearGradient.CoordinateMode.ObjectBoundingMode)
+        gradient.setColorAt(0, QColor("#456ba0"))
+        gradient.setColorAt(1, QColor("#2c5282"))
+        palette.setBrush(QPalette.ColorRole.Window, QBrush(gradient))
+        nav_frame.setPalette(palette)
+
+        # 设置边框
         nav_frame.setStyleSheet("""
             QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #456ba0, stop:1 #2c5282);
                 border-right: 2px solid rgba(0, 0, 0, 0.15);
             }
         """)
