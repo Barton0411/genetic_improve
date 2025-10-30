@@ -22,11 +22,19 @@ a = Analysis(
         ('data/databases/bull_library.db', 'data/databases'),
         # 添加配置文件
         ('config', 'config'),
+        # 添加模板文件
+        ('templates', 'templates'),
+        # 添加阿里云登录模块
+        ('aliyun_login_module', 'aliyun_login_module'),
+        # 添加启动视频和图片
+        ('startup.mp4', '.'),
+        ('homepage.jpg', '.'),
+        ('PPT模版.pptx', '.'),
     ],
     hiddenimports=[
         # PyQt6 相关模块
         'PyQt6.QtCore',
-        'PyQt6.QtGui', 
+        'PyQt6.QtGui',
         'PyQt6.QtWidgets',
         'PyQt6.QtMultimedia',
         'PyQt6.QtMultimediaWidgets',
@@ -36,40 +44,69 @@ a = Analysis(
         'PyQt6.QtSql',
         'PyQt6.QtSvg',
         'PyQt6.QtSvgWidgets',
-        
+
         # 数据库相关
         'sqlalchemy',
         'pymysql',
         'cryptography',
-        
+
         # 数据处理
         'pandas',
         'numpy',
         'openpyxl',
         'xlrd',
         'xlsxwriter',
-        
+
         # 科学计算
         'scipy',
         'scikit-learn',
         'matplotlib',
         'seaborn',
         'networkx',
-        
+
         # 其他
         'python-pptx',
         'opencv-python',
         'Pillow',
         'requests',
         'joblib',
-        
+
+        # 确保包含更多必要模块
+        'concurrent.futures',
+        'multiprocessing',
+        'threading',
+        'queue',
+        'collections',
+        'itertools',
+        'functools',
+        'pathlib',
+        'json',
+        'csv',
+        'xml.etree.ElementTree',
+        'xml.dom.minidom',
+        'urllib.parse',
+        'urllib.request',
+        'html.parser',
+
         # 项目模块
         'gui.main_window',
-        'gui.login_dialog', 
+        'gui.login_dialog',
         'gui.splash_screen',
+        'gui.matching_worker',
+        'gui.recommendation_worker',
+        'gui.auto_grouping_dialog',
+        'gui.allocation_dialog',
         'core.matching.complete_mating_executor',
         'core.grouping.group_manager',
+        'core.breeding_calc',
+        'core.data.processor',
+        'core.data.update_manager',
+        'core.inbreeding',
+        'core.report',
+        'core.services',
         'aliyun_login_module.login_service',
+        'aliyun_login_module.database_config',
+        'config.settings',
     ],
     hookspath=[],
     hooksconfig={},
