@@ -59,8 +59,8 @@ class RegionGroup(QGroupBox):
 
     def init_ui(self):
         layout = QHBoxLayout()
-        layout.setContentsMargins(10, 15, 10, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(8, 10, 8, 8)
+        layout.setSpacing(6)
 
         # 创建牧场按钮
         for farm in self.farms:
@@ -72,22 +72,22 @@ class RegionGroup(QGroupBox):
         layout.addStretch()
         self.setLayout(layout)
 
-        # 样式
+        # 样式 - 更紧凑的设计
         self.setStyleSheet("""
             QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
+                font-size: 13px;
+                font-weight: 500;
                 color: #606266;
                 border: 1px solid #e4e7ed;
                 border-radius: 4px;
-                margin-top: 10px;
-                padding-top: 10px;
+                margin-top: 8px;
+                padding-top: 8px;
                 background-color: white;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
+                left: 8px;
+                padding: 0 4px;
             }
         """)
 
@@ -128,63 +128,55 @@ class AreaWidget(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(0, 0, 0, 10)
-        self.main_layout.setSpacing(0)
+        self.main_layout = QHBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 8)
+        self.main_layout.setSpacing(10)
 
-        # 创建可折叠的容器
-        container = QFrame()
-        container.setStyleSheet("""
-            QFrame {
-                background-color: white;
-                border: 2px solid #409eff;
-                border-radius: 8px;
-            }
-        """)
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.setSpacing(0)
-
-        # 标题栏
-        title_widget = QWidget()
-        title_widget.setStyleSheet("""
-            QWidget {
-                background-color: #409eff;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-            }
-        """)
-        title_layout = QHBoxLayout(title_widget)
-        title_layout.setContentsMargins(15, 12, 15, 12)
-
+        # 左侧：大区标签（小框）
         title_label = QLabel(f"🌏 {self.area_name}")
-        title_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
-        title_layout.addWidget(title_label)
+        title_label.setFixedWidth(120)
+        title_label.setStyleSheet("""
+            QLabel {
+                background-color: white;
+                border: 1px solid #dcdfe6;
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-size: 14px;
+                font-weight: bold;
+                color: #303133;
+            }
+        """)
+        self.main_layout.addWidget(title_label)
 
+        # 右侧：展开/收起按钮（小框）
         self.toggle_btn = QPushButton("展开 ▼")
+        self.toggle_btn.setFixedWidth(80)
         self.toggle_btn.setStyleSheet("""
             QPushButton {
-                background-color: rgba(255, 255, 255, 0.2);
-                color: white;
-                border: 1px solid rgba(255, 255, 255, 0.5);
+                background-color: white;
+                color: #606266;
+                border: 1px solid #dcdfe6;
                 border-radius: 4px;
-                padding: 5px 15px;
+                padding: 8px 10px;
                 font-size: 13px;
             }
             QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.3);
+                background-color: #ecf5ff;
+                border-color: #409eff;
+                color: #409eff;
             }
         """)
         self.toggle_btn.clicked.connect(self.toggle_content)
-        title_layout.addWidget(self.toggle_btn)
+        self.main_layout.addWidget(self.toggle_btn)
 
-        container_layout.addWidget(title_widget)
+        # 填充剩余空间（灰色背景）
+        self.main_layout.addStretch()
 
-        # 内容区域
+        # 创建内容区域（折叠时不显示）
         self.content_widget = QWidget()
         self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(15, 15, 15, 15)
-        self.content_layout.setSpacing(10)
+        self.content_layout.setContentsMargins(0, 5, 0, 5)
+        self.content_layout.setSpacing(8)
 
         # 创建区域分组
         for region in self.area_data['regions']:
@@ -194,9 +186,29 @@ class AreaWidget(QWidget):
             self.content_layout.addWidget(region_group)
 
         self.content_widget.setVisible(False)  # 默认折叠
+
+        # 创建垂直容器，将标题栏和内容区域组合
+        self.container = QWidget()
+        self.container.setStyleSheet("background-color: #f5f7fa;")
+        container_layout = QVBoxLayout(self.container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(8)
+
+        # 先添加水平标题栏
+        title_container = QWidget()
+        title_container_layout = QHBoxLayout(title_container)
+        title_container_layout.setContentsMargins(0, 0, 0, 0)
+        title_container_layout.addWidget(title_label)
+        title_container_layout.addWidget(self.toggle_btn)
+        title_container_layout.addStretch()
+
+        container_layout.addWidget(title_container)
         container_layout.addWidget(self.content_widget)
 
-        self.main_layout.addWidget(container)
+        # 替换self的布局为垂直布局
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 8)
+        self.main_layout.addWidget(self.container)
 
     def toggle_content(self):
         """切换展开/折叠状态"""

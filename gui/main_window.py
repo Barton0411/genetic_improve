@@ -552,7 +552,7 @@ class MainWindow(QMainWindow):
         
         # 修改导航项结构，使用嵌套列表表示父子关系
         nav_items = [
-            ("伊起牛牧场数据选择", "platform", []),  # 新增：数据平台对接
+            ("伊起牛牧场数据对接", "platform", []),  # 新增：数据平台对接
             ("育种项目管理", "folder", []),
             ("数据上传", "upload", []),
             ("关键育种性状分析", "chart", []),
@@ -1224,22 +1224,24 @@ class MainWindow(QMainWindow):
         current_item = self.nav_list.item(index)
         if current_item:
             text = current_item.text().strip()
-            
+
             # 根据导航文本切换页面
-            if text == "育种项目管理":
-                self.content_stack.setCurrentIndex(0)  
+            if text == "伊起牛牧场数据对接":
+                self.content_stack.setCurrentIndex(0)  # 牧场数据对接
+            elif text == "育种项目管理":
+                self.content_stack.setCurrentIndex(1)  # 项目管理
             elif text == "数据上传":
-                self.content_stack.setCurrentIndex(1)  
+                self.content_stack.setCurrentIndex(2)  # 数据上传
             elif text == "关键育种性状分析":
-                self.content_stack.setCurrentIndex(2)
+                self.content_stack.setCurrentIndex(3)  # 性状分析
             elif text == "牛只指数计算排名":
-                self.content_stack.setCurrentIndex(3)
+                self.content_stack.setCurrentIndex(4)  # 指数排名
             elif text == "近交系数及隐性基因分析":
-                self.content_stack.setCurrentIndex(4)
+                self.content_stack.setCurrentIndex(5)  # 近交分析
             elif text == "个体选配":
-                self.content_stack.setCurrentIndex(5)  # 添加个体选配页面的索引
+                self.content_stack.setCurrentIndex(6)  # 个体选配
             elif text == "自动化生成":
-                self.content_stack.setCurrentIndex(6)  # 自动化生成页面
+                self.content_stack.setCurrentIndex(7)  # 自动化生成
 
             # 切换到个体选配页面时刷新冻精预览
             if text == "个体选配" and hasattr(self, 'load_semen_preview'):
