@@ -4,9 +4,9 @@
   "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.15/伊利奶牛选配_v1.2.0.15_mac.dmg",
   "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.15/伊利奶牛选配_v1.2.0.15_win.exe",
   "changes": [
-    "更新了软件界面配色，导航栏采用蓝色风格",
-    "优化了菜单选中效果，更容易看清当前在哪个功能",
-    "修复了Excel报告中图表显示重叠的问题",
-    "调整了散点图的排列方式，上下排列更清晰"
+    "优化导航栏界面配色方案，提升视觉体验",
+    "改进菜单选中状态显示效果",
+    "修复Excel报告中图表重叠显示问题",
+    "优化散点图布局排列方式"
   ]
 }
