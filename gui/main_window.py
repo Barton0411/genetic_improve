@@ -27,6 +27,7 @@ import pandas as pd
 import numpy as np
 
 from core.inbreeding.inbreeding_page import InbreedingPage
+from gui.farm_selection_page import FarmSelectionPage
 warnings.filterwarnings("ignore", category=UserWarning)
 from config.settings import Settings
 from core.breeding_calc.cow_traits_calc import CowKeyTraitsPage
@@ -551,6 +552,7 @@ class MainWindow(QMainWindow):
         
         # 修改导航项结构，使用嵌套列表表示父子关系
         nav_items = [
+            ("伊起牛牧场数据选择", "platform", []),  # 新增：数据平台对接
             ("育种项目管理", "folder", []),
             ("数据上传", "upload", []),
             ("关键育种性状分析", "chart", []),
@@ -796,16 +798,17 @@ class MainWindow(QMainWindow):
         
         # 创建内容栈
         self.content_stack = QStackedWidget(container)
-        
+
         # 按顺序添加页面，每个页面只添加一次
-        self.create_project_page()         # 第0页：项目管理
-        self.create_upload_page()          # 第1页：数据上传 
-        genetic_analysis_page = self.create_genetic_analysis_page()  # 第2页：关键育种性状分析
+        self.content_stack.addWidget(FarmSelectionPage())  # 第0页：伊起牛牧场数据选择
+        self.create_project_page()         # 第1页：项目管理
+        self.create_upload_page()          # 第2页：数据上传
+        genetic_analysis_page = self.create_genetic_analysis_page()  # 第3页：关键育种性状分析
         self.content_stack.addWidget(genetic_analysis_page)
-        self.content_stack.addWidget(self.index_calculation_page)    # 第3页：指数计算排名
-        self.content_stack.addWidget(self.inbreeding_page)          # 第4页：近交分析页面
-        self.content_stack.addWidget(self.create_mating_page())     # 第5页：个体选配页面
-        self.content_stack.addWidget(self.create_report_generation_page())  # 第6页：自动化生成页面
+        self.content_stack.addWidget(self.index_calculation_page)    # 第4页：指数计算排名
+        self.content_stack.addWidget(self.inbreeding_page)          # 第5页：近交分析页面
+        self.content_stack.addWidget(self.create_mating_page())     # 第6页：个体选配页面（原第5页）
+        self.content_stack.addWidget(self.create_report_generation_page())  # 第7页：自动化生成页面（原第6页）
 
         # 设置所有页面的背景为透明
         for i in range(self.content_stack.count()):
