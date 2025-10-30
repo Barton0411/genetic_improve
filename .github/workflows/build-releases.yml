@@ -587,79 +587,43 @@ jobs:
       run: |
         VERSION="${{ steps.get_version.outputs.VERSION }}"
         CHANGELOG_FILE="changelog/CHANGELOG_v${VERSION}.txt"
-        
+
+        # 创建release notes文件
+        cat > release_notes.md << 'EOFNOTES'
+        ## 伊利奶牛选配系统更新
+
+        ### 更新内容
+        EOFNOTES
+
         if [ -f "$CHANGELOG_FILE" ]; then
           echo "Found changelog file, reading content..."
-          
-          # 读取changelog内容并格式化为GitHub Release格式
-          echo "RELEASE_BODY<<EOF" >> $GITHUB_OUTPUT
-          echo "## 伊利奶牛选配 v${VERSION}" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "### 🚀 更新内容" >> $GITHUB_OUTPUT
-          
-          # 处理changelog文件内容，每行前面添加-
+          # 读取changelog内容并添加
           while IFS= read -r line; do
             if [ -n "$line" ]; then
-              echo "- $line" >> $GITHUB_OUTPUT
+              echo "- $line" >> release_notes.md
             fi
           done < "$CHANGELOG_FILE"
         else
           echo "No changelog found, using default content..."
-          echo "RELEASE_BODY<<EOF" >> $GITHUB_OUTPUT
-          echo "## 伊利奶牛选配 v${VERSION}" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "### 🚀 新功能和改进" >> $GITHUB_OUTPUT
-          echo "- 完善版本自动更新系统，支持GUI对话框选择下载" >> $GITHUB_OUTPUT
-          echo "- 修复版本检查服务器连接逻辑，增加备用服务器支持" >> $GITHUB_OUTPUT
-          echo "- 优化下载URL获取机制，直接从版本信息API响应中提取" >> $GITHUB_OUTPUT
-          echo "- 更新PyQt6更新对话框，替换原有tkinter实现避免崩溃" >> $GITHUB_OUTPUT
-          echo "- 更新全面的系统文档和部署指南" >> $GITHUB_OUTPUT
-          echo "- 优化requirements.txt依赖版本和兼容性" >> $GITHUB_OUTPUT
+          cat >> release_notes.md << 'EOFNOTES'
+        - 优化导航栏界面配色方案，提升视觉体验
+        - 改进菜单选中状态显示效果
+        - 修复Excel报告中图表重叠显示问题
+        - 优化散点图布局排列方式
+        EOFNOTES
         fi
-        echo "EOF" >> $GITHUB_OUTPUT
+
+        cat release_notes.md
     
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ github.ref }}
         name: 伊利奶牛选配 v${{ steps.get_version.outputs.VERSION }}
-        body: |
-          ${{ steps.release_notes.outputs.RELEASE_BODY }}
-          
-          ### 📦 下载选项
-          
-          #### Windows版本
-          - **安装版**: `伊利奶牛选配_v${{ steps.get_version.outputs.VERSION }}_win.exe` - 推荐，包含自动安装程序
-          - **便携版**: `伊利奶牛选配_v${{ steps.get_version.outputs.VERSION }}_win.zip` - 解压即用，无需安装
-          
-          #### macOS版本
-          - **DMG安装包**: `伊利奶牛选配_v${{ steps.get_version.outputs.VERSION }}_mac.dmg`
-          
-          ### 📋 系统要求
-          - **Windows**: Windows 10 或更高版本（64位）
-          - **macOS**: macOS 10.15 (Catalina) 或更高版本
-          - 至少 2GB 可用内存
-          - 至少 1GB 可用磁盘空间
-          
-          ### 🔧 安装说明
-          
-          **Windows安装版**:
-          1. 下载 `_setup.exe` 文件
-          2. 双击运行安装程序
-          3. 按照向导完成安装
-          4. 桌面快捷方式自动创建
-          
-          **Windows便携版**:
-          1. 下载并解压 ZIP 文件
-          2. 运行文件夹中的 `伊利奶牛选配.exe`
-          
-          **macOS**:
-          1. 下载并打开 DMG 文件
-          2. 将 伊利奶牛选配.app 拖拽到应用程序文件夹
-          3. 从启动台或应用程序文件夹启动
+        body_path: release_notes.md
         files: |
-          ./windows-installer/伊利奶牛选配_v${{ steps.get_version.outputs.VERSION }}_win.exe
-          ./windows-portable/伊利奶牛选配_v${{ steps.get_version.outputs.VERSION }}_win.zip
-          ./macos-release/伊利奶牛选配_v${{ steps.get_version.outputs.VERSION }}_mac.dmg
+          windows-installer/*.exe
+          windows-portable/*.zip
+          macos-release/*.dmg
         draft: false
         prerelease: false
