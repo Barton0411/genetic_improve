@@ -9,7 +9,7 @@ US_PROGENY_STANDARDS = {
     'MILK': 200,
     'PROT': 20,
     'UDC': 0,
-    'RFI': 100,
+    'FE': 100,
     'PL': 1.5,
     'DPR': -2
 }
@@ -21,7 +21,7 @@ US_GENOMIC_STANDARDS = {
     'MILK': 300,
     'PROT': 30,
     'UDC': 0,
-    'RFI': 100,
+    'FE': 100,
     'PL': 1.5,
     'DPR': -2
 }
@@ -43,7 +43,7 @@ QUALITY_STANDARD_TABLE = {
             'MILK': '≥200',
             'PROT': '≥20',
             'UDC': '≥0',
-            'RFI': '≥100',
+            'FE': '≥100',
             'PL': '≥1.5',
             'DPR': '≥-2',
             'genes': 'HH1-HH6\nHMW'
@@ -56,7 +56,7 @@ QUALITY_STANDARD_TABLE = {
             'MILK': '≥300',
             'PROT': '≥30',
             'UDC': '≥0',
-            'RFI': '≥100',
+            'FE': '≥100',
             'PL': '≥1.5',
             'DPR': '≥-2',
             'genes': 'HH1-HH6\nHMW'
