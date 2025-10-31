@@ -4,13 +4,13 @@
   "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.16/伊利奶牛选配_v1.2.0.16_mac.dmg",
   "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.16/伊利奶牛选配_v1.2.0.16_win.exe",
   "changes": [
-    "1. <b>功能</b>：Sheet 10表头国际化，显示中英文对照",
+    "1. <b>功能</b>：Sheet 10表头国际化，使用系统标准翻译",
     "2. <b>优化</b>：进度条平滑动画，每50ms更新一次",
     "3. <b>优化</b>：进度条持续移动，避免卡住不动",
     "4. <b>优化</b>：数据收集阶段细分为9个步骤报告进度",
     "5. <b>优化</b>：Sheet 1A复制过程每100行报告一次进度",
     "6. <b>界面</b>：进度对话框窗口置顶显示",
-    "7. <b>界面</b>：进度消息显示在详细日志文本框",
-    "8. <b>修复</b>：防御性错误处理，避免对话框访问错误"
+    "7. <b>修复</b>：修正技术标准配置，FE/RFI正确区分",
+    "8. <b>修复</b>：修正性状翻译，使用标准术语"
   ]
 }

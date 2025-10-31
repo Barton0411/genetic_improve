@@ -9,7 +9,8 @@
 ### ✨ 新功能
 - **Sheet 10表头国际化**
   - 备选公牛排名表头改为中英文对照显示
-  - 示例：`排名\nRanking`、`公牛号\nBull ID`、`TPI\n(综合生产指数)`
+  - 使用系统标准翻译（来自key_traits_page.py）
+  - 示例：`TPI\n育种综合指数`、`FE\n饲料效率指数`、`RFI\n剩余饲料采食量`
   - 所有27列都配置了中英文映射
   - 支持多行表头自动换行
 
@@ -23,6 +24,16 @@
     - Sheet 1A：每复制100行报告一次（18%-24%）
   - **窗口置顶**：进度对话框始终保持在主窗口之上
   - **详细日志**：所有进度消息显示在底部文本框
+
+### 🐛 Bug修复
+- **修正技术标准配置**
+  - 技术标准表使用FE（饲料效率指数）而非RFI（剩余饲料采食量）
+  - 更新US_PROGENY_STANDARDS和US_GENOMIC_STANDARDS配置
+  - 确保性状名称与翻译一致
+- **修正性状翻译**
+  - RFI正确翻译为"剩余饲料采食量"
+  - FE正确翻译为"饲料效率指数"
+  - FS翻译为"饲料节约指数"
 
 ### 🔧 技术改进
 - **BaseSheetBuilder架构升级**
@@ -38,10 +49,12 @@
 ### 📝 文件变更
 - `gui/progress.py`: 添加QTimer平滑动画和窗口置顶
 - `gui/main_window.py`: 改进错误处理
+- `gui/excel_report_worker.py`: 新增Worker线程
 - `core/excel_report/generator.py`: 细粒度进度报告
 - `core/excel_report/sheet_builders/base_builder.py`: 添加进度回调支持
 - `core/excel_report/sheet_builders/sheet1a_builder.py`: 复制过程进度报告
 - `core/excel_report/sheet_builders/sheet10_builder.py`: 中英文表头映射
+- `core/excel_report/config/bull_quality_standards.py`: 修正FE/RFI配置
 
 ---
 
