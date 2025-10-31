@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 import logging
 import glob
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from core.data.update_manager import LOCAL_DB_PATH
 
 logger = logging.getLogger(__name__)
@@ -98,6 +98,8 @@ def _supplement_traits_from_db(df: pd.DataFrame, required_traits: list) -> pd.Da
     """
     从数据库中补充缺失的性状数据
 
+    如果数据库中也不存在某个性状，则添加空列（值为None）
+
     Args:
         df: 包含bull_id列的DataFrame
         required_traits: 需要的性状列表
@@ -122,36 +124,60 @@ def _supplement_traits_from_db(df: pd.DataFrame, required_traits: list) -> pd.Da
             logger.warning("没有公牛ID，无法补充数据")
             return df
 
-        # 连接数据库
+        # 连接数据库，检查哪些列存在
         engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
 
-        # 构建查询（使用short_name匹配bull_id）
-        placeholders = ','.join(['?' for _ in bull_ids])
-        trait_cols_str = ','.join([f'"{t}"' for t in missing_traits])
+        # 获取数据库中的列名（正确的表名是bull_library）
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT * FROM bull_library LIMIT 0"))
+            db_columns = set(result.keys())
 
-        query = f"""
-        SELECT short_name as bull_id, {trait_cols_str}
-        FROM bull_data
-        WHERE short_name IN ({placeholders})
-        """
+        # 分离：数据库中存在的性状 vs 不存在的性状
+        traits_in_db = [t for t in missing_traits if t in db_columns]
+        traits_not_in_db = [t for t in missing_traits if t not in db_columns]
 
-        # 执行查询
-        df_db = pd.read_sql_query(query, engine, params=bull_ids)
-        logger.info(f"从数据库获取到 {len(df_db)} 头公牛的数据")
+        df_result = df.copy()
 
-        # 合并数据
-        df_result = df.merge(df_db, on='bull_id', how='left')
+        # 对于数据库中存在的性状，从数据库查询
+        if traits_in_db:
+            logger.info(f"从数据库查询的性状: {traits_in_db}")
 
-        # 记录补充情况
-        for trait in missing_traits:
-            if trait in df_result.columns:
+            placeholders = ','.join([f"'{bid}'" for bid in bull_ids])
+            trait_cols_str = ','.join([f'"{t}"' for t in traits_in_db])
+
+            # 使用正确的表名bull_library和列名"BULL NAAB"
+            query = f"""
+            SELECT "BULL NAAB" as bull_id, {trait_cols_str}
+            FROM bull_library
+            WHERE "BULL NAAB" IN ({placeholders})
+            """
+
+            df_db = pd.read_sql_query(query, engine)
+            logger.info(f"从数据库获取到 {len(df_db)} 头公牛的数据")
+
+            # 合并数据
+            df_result = df_result.merge(df_db, on='bull_id', how='left')
+
+            # 记录补充情况
+            for trait in traits_in_db:
                 non_null_count = df_result[trait].notna().sum()
                 logger.info(f"  {trait}: 补充了 {non_null_count}/{len(df_result)} 个值")
+
+        # 对于数据库中不存在的性状，添加空列
+        if traits_not_in_db:
+            logger.warning(f"数据库中不存在的性状（添加空列）: {traits_not_in_db}")
+            for trait in traits_not_in_db:
+                df_result[trait] = None
+                logger.info(f"  {trait}: 添加空列（数据库中无此性状）")
 
         return df_result
 
     except Exception as e:
         logger.error(f"从数据库补充性状失败: {e}", exc_info=True)
+        # 即使失败，也要确保所有required_traits都有列（即使是空的）
+        for trait in required_traits:
+            if trait not in df.columns:
+                df[trait] = None
         return df
 
 

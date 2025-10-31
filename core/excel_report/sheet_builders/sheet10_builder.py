@@ -13,7 +13,70 @@ from ..config.bull_quality_standards import (
     DEFECT_GENES, QUALITY_STANDARD_TABLE
 )
 
+# 导入系统标准翻译字典
+from core.breeding_calc.key_traits_page import TRAITS_TRANSLATION
+
 logger = logging.getLogger(__name__)
+
+
+# 基因翻译字典
+GENE_TRANSLATIONS = {
+    'HH1': '荷斯坦繁殖缺陷1型',
+    'HH2': '荷斯坦繁殖缺陷2型',
+    'HH3': '荷斯坦繁殖缺陷3型',
+    'HH4': '荷斯坦繁殖缺陷4型',
+    'HH5': '荷斯坦繁殖缺陷5型',
+    'HH6': '荷斯坦繁殖缺陷6型',
+    'MW': '早发肌无力',
+    'HMW': '早发肌无力-单倍型',
+    'BLAD': '牛白细胞粘附缺陷病',
+    'Chondrodysplasia': '软骨发育异常',
+    'Citrullinemia': '瓜氨酸血症',
+    'DUMPS': '尿苷单磷酸合成酶缺乏',
+    'Factor XI': '凝血因子XI缺乏',
+    'CVM': '犊牛脊椎畸形综合征',
+    'Brachyspina': '短脊椎综合症征',
+    'Mulefoot': '单趾畸形',
+    'Cholesterol deficiency': '胆固醇缺乏症'
+}
+
+
+def _build_header_map(columns: list) -> dict:
+    """
+    动态构建表头映射，使用系统标准翻译
+
+    Args:
+        columns: DataFrame的列名列表
+
+    Returns:
+        表头映射字典 {英文列名: 中英文表头}
+    """
+    header_map = {}
+
+    # 固定列的翻译
+    fixed_translations = {
+        'ranking': '排名\nRanking',
+        'bull_id': '公牛号\nBull ID',
+        'semen_type': '精液类型\nSemen Type',
+        '测试_index': '育种指数\nBreeding Index',
+        '支数': '支数\nDoses'
+    }
+
+    for col in columns:
+        if col in fixed_translations:
+            # 固定列：使用预定义翻译
+            header_map[col] = fixed_translations[col]
+        elif col in GENE_TRANSLATIONS:
+            # 基因列：使用基因翻译
+            header_map[col] = f'{col}\n{GENE_TRANSLATIONS[col]}'
+        elif col in TRAITS_TRANSLATION:
+            # 性状列：使用系统标准翻译
+            header_map[col] = f'{col}\n{TRAITS_TRANSLATION[col]}'
+        else:
+            # 未知列：保持原样
+            header_map[col] = col
+
+    return header_map
 
 
 class Sheet10Builder(BaseSheetBuilder):
@@ -24,38 +87,6 @@ class Sheet10Builder(BaseSheetBuilder):
     1. 按育种指数排名表
     2. 包含主要育种性状值
     """
-
-    # 中英文表头映射（使用系统标准翻译）
-    HEADER_MAP = {
-        'ranking': '排名\nRanking',
-        'bull_id': '公牛号\nBull ID',
-        'semen_type': '精液类型\nSemen Type',
-        '测试_index': '育种指数\nBreeding Index',
-        '支数': '支数\nDoses',
-        'TPI': 'TPI\n育种综合指数',
-        'NM$': 'NM$\n净利润值',
-        'MILK': 'MILK\n产奶量',
-        'FAT': 'FAT\n乳脂量',
-        'FAT %': 'FAT%\n乳脂率',
-        'PROT': 'PROT\n乳蛋白量',
-        'PROT%': 'PROT%\n乳蛋白率',
-        'SCS': 'SCS\n体细胞指数',
-        'PL': 'PL\n生产寿命',
-        'DPR': 'DPR\n女儿怀孕率',
-        'PTAT': 'PTAT\n体型综合指数',
-        'UDC': 'UDC\n乳房综合指数',
-        'FLC': 'FLC\n肢蹄综合指数',
-        'RFI': 'RFI\n剩余饲料采食量',
-        'FE': 'FE\n饲料效率指数',
-        'FS': 'FS\n饲料节约指数',
-        'HH1': 'HH1\n(缺陷基因)',
-        'HH2': 'HH2\n(缺陷基因)',
-        'HH3': 'HH3\n(缺陷基因)',
-        'HH4': 'HH4\n(缺陷基因)',
-        'HH5': 'HH5\n(缺陷基因)',
-        'HH6': 'HH6\n(缺陷基因)',
-        'MW': 'MW\n(缺陷基因)'
-    }
 
     def build(self, data: dict):
         """
@@ -220,6 +251,9 @@ class Sheet10Builder(BaseSheetBuilder):
         """
         current_row = start_row
 
+        # 动态生成表头映射（使用系统标准翻译）
+        header_map = _build_header_map(df.columns.tolist())
+
         # 标题
         title_cell = self.ws.cell(row=current_row, column=1, value="备选公牛排名")
         title_cell.font = Font(size=14, bold=True, color="FFFFFF")
@@ -238,10 +272,10 @@ class Sheet10Builder(BaseSheetBuilder):
         self.ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=num_cols)
         current_row += 1
 
-        # 表头 - 使用中英文映射
+        # 表头 - 使用动态生成的中英文映射
         for col_idx, col_name in enumerate(df.columns, 1):
-            # 获取中英文表头，如果没有映射则使用原列名
-            header_text = self.HEADER_MAP.get(col_name, col_name)
+            # 获取中英文表头（动态翻译）
+            header_text = header_map.get(col_name, col_name)
             cell = self.ws.cell(row=current_row, column=col_idx, value=header_text)
             self.style_manager.apply_header_style(cell)
             # 设置自动换行以显示多行表头
