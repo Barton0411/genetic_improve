@@ -9,6 +9,8 @@ from pathlib import Path
 import pandas as pd
 import logging
 import glob
+from sqlalchemy import create_engine
+from core.data.update_manager import LOCAL_DB_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +92,67 @@ def _extract_bull_genes(analysis_folder: Path) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"提取基因信息失败: {e}", exc_info=True)
         return pd.DataFrame()
+
+
+def _supplement_traits_from_db(df: pd.DataFrame, required_traits: list) -> pd.DataFrame:
+    """
+    从数据库中补充缺失的性状数据
+
+    Args:
+        df: 包含bull_id列的DataFrame
+        required_traits: 需要的性状列表
+
+    Returns:
+        补充了缺失性状的DataFrame
+    """
+    try:
+        # 检查哪些性状缺失
+        missing_traits = [t for t in required_traits if t not in df.columns]
+
+        if not missing_traits:
+            logger.info("所有需要的性状都已存在")
+            return df
+
+        logger.info(f"需要从数据库补充的性状: {missing_traits}")
+
+        # 获取所有bull_id
+        bull_ids = df['bull_id'].unique().tolist()
+
+        if not bull_ids:
+            logger.warning("没有公牛ID，无法补充数据")
+            return df
+
+        # 连接数据库
+        engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
+
+        # 构建查询（使用short_name匹配bull_id）
+        placeholders = ','.join(['?' for _ in bull_ids])
+        trait_cols_str = ','.join([f'"{t}"' for t in missing_traits])
+
+        query = f"""
+        SELECT short_name as bull_id, {trait_cols_str}
+        FROM bull_data
+        WHERE short_name IN ({placeholders})
+        """
+
+        # 执行查询
+        df_db = pd.read_sql_query(query, engine, params=bull_ids)
+        logger.info(f"从数据库获取到 {len(df_db)} 头公牛的数据")
+
+        # 合并数据
+        df_result = df.merge(df_db, on='bull_id', how='left')
+
+        # 记录补充情况
+        for trait in missing_traits:
+            if trait in df_result.columns:
+                non_null_count = df_result[trait].notna().sum()
+                logger.info(f"  {trait}: 补充了 {non_null_count}/{len(df_result)} 个值")
+
+        return df_result
+
+    except Exception as e:
+        logger.error(f"从数据库补充性状失败: {e}", exc_info=True)
+        return df
 
 
 def collect_bull_ranking_data(analysis_folder) -> dict:
@@ -174,7 +237,14 @@ def collect_bull_ranking_data(analysis_folder) -> dict:
         if rename_map:
             df_merged = df_merged.rename(columns=rename_map)
 
-        # 5. 提取并合并基因信息
+        # 5. 从数据库补充技术标准中需要的性状（如FE）
+        from ..config.bull_quality_standards import US_PROGENY_STANDARDS
+        required_traits = list(US_PROGENY_STANDARDS.keys())
+        logger.info(f"技术标准要求的性状: {required_traits}")
+
+        df_merged = _supplement_traits_from_db(df_merged, required_traits)
+
+        # 6. 提取并合并基因信息
         df_genes = _extract_bull_genes(analysis_path)
 
         if not df_genes.empty:
@@ -186,23 +256,34 @@ def collect_bull_ranking_data(analysis_folder) -> dict:
             )
             logger.info(f"合并基因信息: {len(df_genes)} 头公牛")
 
-        # 获取性状列（从traits文件中来）
-        trait_cols = ['NM$', 'TPI', 'MILK', 'FAT', 'FAT %', 'PROT', 'PROT%',
-                      'SCS', 'PL', 'DPR', 'PTAT', 'UDC', 'FLC', 'RFI', 'FS', 'Eval Date']
+        # 动态获取基因列
+        from ..config.bull_quality_standards import DEFECT_GENES
+        gene_cols = DEFECT_GENES
 
-        # 基因列
-        gene_cols = ['HH1', 'HH2', 'HH3', 'HH4', 'HH5', 'HH6', 'MW']
+        # 动态构建最终列顺序
+        # 1. 固定列（排名、ID、类型等）
+        fixed_cols = ['ranking', 'bull_id', 'semen_type', '测试_index', '支数']
 
-        # 构建最终列顺序
-        final_cols = ['ranking', 'bull_id', 'semen_type', '测试_index', '支数']
-        # 添加存在的性状列
-        for col in trait_cols:
-            if col in df_merged.columns:
-                final_cols.append(col)
+        # 2. 性状列（从DataFrame中动态获取，排除固定列和基因列）
+        exclude_cols = set(fixed_cols + gene_cols)
+        trait_cols = [col for col in df_merged.columns
+                     if col not in exclude_cols and col not in ['Eval Date']]
+
+        # 3. 添加Eval Date到最后（如果存在）
+        if 'Eval Date' in df_merged.columns:
+            trait_cols.append('Eval Date')
+
+        # 4. 构建最终列顺序：固定列 + 性状列 + 基因列
+        final_cols = fixed_cols.copy()
+        final_cols.extend(trait_cols)
+
         # 添加存在的基因列
         for col in gene_cols:
             if col in df_merged.columns:
                 final_cols.append(col)
+
+        logger.info(f"动态识别到 {len(trait_cols)} 个性状列")
+        logger.info(f"性状列: {trait_cols}")
 
         # 选择并排序列
         df_merged = df_merged[final_cols]
