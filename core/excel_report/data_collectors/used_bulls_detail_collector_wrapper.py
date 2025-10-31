@@ -9,12 +9,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def collect_used_bulls_detail_data(analysis_folder: Path) -> dict:
+def collect_used_bulls_detail_data(analysis_folder) -> dict:
     """
     收集Sheet 9所需的所有数据
 
     Args:
-        analysis_folder: analysis_results文件夹路径
+        analysis_folder: analysis_results文件夹路径（字符串或Path对象）
 
     Returns:
         包含以下键的字典:
@@ -26,7 +26,9 @@ def collect_used_bulls_detail_data(analysis_folder: Path) -> dict:
         # 使用数据收集器收集数据
         from .used_bulls_detail_collector import UsedBullsDetailCollector
 
-        collector = UsedBullsDetailCollector(analysis_folder.parent)  # project_path
+        # 确保analysis_folder是Path对象
+        analysis_path = Path(analysis_folder) if isinstance(analysis_folder, str) else analysis_folder
+        collector = UsedBullsDetailCollector(analysis_path.parent)  # project_path
         data = collector.collect()
 
         logger.info(f"Sheet 9数据收集完成: {len(data.get('year_range', []))}年数据")
