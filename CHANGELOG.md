@@ -4,6 +4,47 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-cn/1.0.0/)，本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [1.2.0.16] - 2025-10-31 ⚡ 进度条优化与表头国际化
+
+### ✨ 新功能
+- **Sheet 10表头国际化**
+  - 备选公牛排名表头改为中英文对照显示
+  - 示例：`排名\nRanking`、`公牛号\nBull ID`、`TPI\n(综合生产指数)`
+  - 所有27列都配置了中英文映射
+  - 支持多行表头自动换行
+
+### ⚡ 性能优化
+- **Excel报告生成进度条全面优化**
+  - **平滑动画**：进度条每50ms更新，使用自适应速度
+  - **持续移动**：即使到达目标值也会缓慢增长（每秒约2%），避免卡住
+  - **细粒度进度**：
+    - 数据收集阶段：9个细分步骤（5%-14%）
+    - Sheet生成：每个Sheet前后都报告进度
+    - Sheet 1A：每复制100行报告一次（18%-24%）
+  - **窗口置顶**：进度对话框始终保持在主窗口之上
+  - **详细日志**：所有进度消息显示在底部文本框
+
+### 🔧 技术改进
+- **BaseSheetBuilder架构升级**
+  - 添加`progress_callback`参数支持
+  - 所有Sheet构建器可访问进度回调
+- **Sheet1ABuilder优化**
+  - 大文件复制过程中实时报告进度
+  - 显示具体进度：`复制原始数据: X/总数行`
+- **防御性错误处理**
+  - 进度对话框访问添加None检查和RuntimeError捕获
+  - 避免对话框关闭后的访问错误
+
+### 📝 文件变更
+- `gui/progress.py`: 添加QTimer平滑动画和窗口置顶
+- `gui/main_window.py`: 改进错误处理
+- `core/excel_report/generator.py`: 细粒度进度报告
+- `core/excel_report/sheet_builders/base_builder.py`: 添加进度回调支持
+- `core/excel_report/sheet_builders/sheet1a_builder.py`: 复制过程进度报告
+- `core/excel_report/sheet_builders/sheet10_builder.py`: 中英文表头映射
+
+---
+
 ## [1.2.0.15] - 2025-10-29 🎨 导航栏渐变蓝设计
 
 ### 🎨 界面优化

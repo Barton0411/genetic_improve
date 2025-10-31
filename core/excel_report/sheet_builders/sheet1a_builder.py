@@ -41,8 +41,15 @@ class Sheet1ABuilder(BaseSheetBuilder):
             # 在目标workbook中创建新sheet
             target_ws = self.wb.create_sheet("牧场牛群原始数据")
 
+            # 计算总行数用于进度报告
+            total_rows = source_ws.max_row
+            logger.info(f"开始复制原始数据，共 {total_rows} 行")
+
             # 复制所有单元格的值和格式
+            row_count = 0
+            last_progress = 18  # Sheet 1A 的起始进度
             for row in source_ws.iter_rows():
+                row_count += 1
                 for cell in row:
                     target_cell = target_ws[cell.coordinate]
                     # 复制值
@@ -55,6 +62,14 @@ class Sheet1ABuilder(BaseSheetBuilder):
                         target_cell.number_format = cell.number_format
                         target_cell.protection = cell.protection.copy()
                         target_cell.alignment = cell.alignment.copy()
+
+                # 每复制100行报告一次进度（从18%到24%，共6%范围）
+                if row_count % 100 == 0 and self.progress_callback:
+                    progress_pct = row_count / total_rows  # 0-1
+                    current_progress = 18 + int(progress_pct * 6)  # 18-24%
+                    if current_progress > last_progress:
+                        self.progress_callback(current_progress, f"复制原始数据: {row_count}/{total_rows}行")
+                        last_progress = current_progress
 
             # 复制列宽
             for col_letter in source_ws.column_dimensions:

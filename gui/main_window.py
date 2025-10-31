@@ -3806,72 +3806,97 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "生成失败", f"生成PPT报告时发生错误：\n{str(e)}")
 
     def on_generate_excel_report(self):
-        """生成Excel综合报告"""
+        """生成Excel综合报告（使用后台线程）"""
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
 
         try:
-            from core.excel_report import ExcelReportGenerator
+            from PyQt6.QtCore import QThread
+            from gui.excel_report_worker import ExcelReportWorker
 
             # 获取用户名（从设置或默认值）
             service_staff = getattr(self, 'username', '未指定')
 
             # 创建进度对话框
-            progress_dialog = ProgressDialog(self)
-            progress_dialog.setWindowTitle("生成Excel综合报告")
-            progress_dialog.set_task_info("正在生成Excel综合报告...")
-            progress_dialog.show()
-            QApplication.processEvents()
+            self.excel_progress_dialog = ProgressDialog(self)
+            self.excel_progress_dialog.setWindowTitle("生成Excel综合报告")
+            self.excel_progress_dialog.set_task_info("准备生成报告...")
+            self.excel_progress_dialog.show()
 
-            # 创建Excel报告生成器
-            generator = ExcelReportGenerator(self.selected_project_path, service_staff)
+            # 创建Worker和线程
+            self.excel_worker = ExcelReportWorker(self.selected_project_path, service_staff)
+            self.excel_thread = QThread()
 
-            # 生成报告
-            progress_dialog.update_progress(50)
-            QApplication.processEvents()
+            # 将Worker移到线程
+            self.excel_worker.moveToThread(self.excel_thread)
 
-            success, result = generator.generate()
+            # 连接信号
+            self.excel_thread.started.connect(self.excel_worker.run)
+            self.excel_worker.progress.connect(self._on_excel_progress)
+            self.excel_worker.finished.connect(self._on_excel_finished)
+            self.excel_worker.finished.connect(self.excel_thread.quit)
+            self.excel_worker.finished.connect(self.excel_worker.deleteLater)
+            self.excel_thread.finished.connect(self.excel_thread.deleteLater)
 
-            progress_dialog.close()
-
-            if success:
-                # 生成成功
-                reply = QMessageBox.information(
-                    self,
-                    "生成成功",
-                    f"Excel综合报告已生成！\n\n文件位置：\n{result}\n\n是否立即打开查看？",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes
-                )
-
-                if reply == QMessageBox.StandardButton.Yes:
-                    try:
-                        from pathlib import Path
-                        QDesktopServices.openUrl(QUrl.fromLocalFile(str(result)))
-                    except Exception as e:
-                        QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}")
-            else:
-                # 生成失败
-                error_msg = result
-
-                # 检查是否是缺少必要文件
-                if "缺少必要文件" in error_msg:
-                    message = f"{error_msg}\n\n提示：请先完成以下分析：\n"
-                    message += "• 系谱识别分析\n"
-                    message += "• 育种性状分析\n"
-                    message += "• 公牛使用分析（如果需要）\n"
-                    message += "\n这些分析会生成Excel报告所需的数据文件。"
-
-                    QMessageBox.warning(self, "缺少必要文件", message)
-                else:
-                    QMessageBox.critical(self, "生成失败", f"生成Excel报告时发生错误：\n{error_msg}")
+            # 启动线程
+            self.excel_thread.start()
 
         except Exception as e:
-            progress_dialog.close()
-            QMessageBox.critical(self, "生成失败", f"生成Excel报告时发生错误：\n{str(e)}")
+            QMessageBox.critical(self, "生成失败", f"启动Excel报告生成时发生错误：\n{str(e)}")
             import traceback
             traceback.print_exc()
+
+    def _on_excel_progress(self, progress: int, message: str):
+        """处理Excel生成进度更新"""
+        if hasattr(self, 'excel_progress_dialog') and self.excel_progress_dialog is not None:
+            try:
+                self.excel_progress_dialog.update_progress(progress)
+                self.excel_progress_dialog.set_task_info(message)
+            except RuntimeError:
+                # Dialog may have been deleted
+                pass
+
+    def _on_excel_finished(self, success: bool, result: str):
+        """处理Excel生成完成"""
+        # 关闭进度对话框
+        if hasattr(self, 'excel_progress_dialog') and self.excel_progress_dialog is not None:
+            try:
+                self.excel_progress_dialog.close()
+            except RuntimeError:
+                pass
+            self.excel_progress_dialog = None
+
+        if success:
+            # 生成成功
+            reply = QMessageBox.information(
+                self,
+                "生成成功",
+                f"Excel综合报告已生成！\n\n文件位置：\n{result}\n\n是否立即打开查看？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(result)))
+                except Exception as e:
+                    QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}")
+        else:
+            # 生成失败
+            error_msg = result
+
+            # 检查是否是缺少必要文件
+            if "缺少必要文件" in error_msg:
+                message = f"{error_msg}\n\n提示：请先完成以下分析：\n"
+                message += "• 系谱识别分析\n"
+                message += "• 育种性状分析\n"
+                message += "• 公牛使用分析（如果需要）\n"
+                message += "\n这些分析会生成Excel报告所需的数据文件。"
+
+                QMessageBox.warning(self, "缺少必要文件", message)
+            else:
+                QMessageBox.critical(self, "生成失败", f"生成Excel报告时发生错误：\n{error_msg}")
 
     def load_benchmark_farms(self):
         """加载对比数据（对比牧场+外部参考数据）到表格"""

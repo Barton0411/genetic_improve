@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 class BaseSheetBuilder(ABC):
     """Sheet构建器基类"""
 
-    def __init__(self, workbook: Workbook, style_manager, chart_builder):
+    def __init__(self, workbook: Workbook, style_manager, chart_builder, progress_callback=None):
         """
         初始化Sheet构建器
 
@@ -19,10 +19,12 @@ class BaseSheetBuilder(ABC):
             workbook: Excel工作簿对象
             style_manager: 样式管理器
             chart_builder: 图表构建器
+            progress_callback: 进度回调函数 callback(progress: int, message: str)
         """
         self.wb = workbook
         self.style_manager = style_manager
         self.chart_builder = chart_builder
+        self.progress_callback = progress_callback
         self.ws = None
 
     @abstractmethod
