@@ -386,17 +386,16 @@ class FarmSelectionPage(QWidget):
     def filter_farms(self, text):
         """搜索过滤"""
         if not text:
-            # 显示所有
+            # 清空搜索时，显示所有但不自动展开
             for widget in self.area_widgets:
                 widget.setVisible(True)
-                for group in widget.region_groups:
-                    group.setVisible(True)
-                    for btn in group.farm_buttons:
+                for region_group in widget.region_groups:
+                    region_group.setVisible(True)
+                    for btn in region_group.farm_buttons:
                         btn.setVisible(True)
             return
 
         text = text.lower()
-        has_match = False
 
         for area_widget in self.area_widgets:
             area_has_match = False
@@ -407,18 +406,22 @@ class FarmSelectionPage(QWidget):
                     if text in btn.farm_code.lower() or text in btn.farm_name.lower():
                         btn.setVisible(True)
                         region_has_match = True
-                        has_match = True
                     else:
                         btn.setVisible(False)
 
+                # 控制区域的可见性
                 region_group.setVisible(region_has_match)
+
+                # 如果有匹配结果，自动展开该区域
+                if region_has_match and not region_group.is_expanded:
+                    region_group.toggle_content()
+
                 if region_has_match:
                     area_has_match = True
 
-            area_widget.setVisible(area_has_match)
-            # 如果有匹配结果，自动展开该大区
-            if area_has_match and text:
-                area_widget.expand()
+            # 大区始终可见（因为是固定2x2布局），但可以根据需要调整
+            # 如果想要隐藏没有匹配的大区，取消下面这行的注释
+            # area_widget.setVisible(area_has_match)
 
     def confirm_selection(self):
         """确认选择"""
