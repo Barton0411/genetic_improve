@@ -12,7 +12,9 @@ from .mating_collector import collect_mating_data
 from .gene_collector import collect_gene_data, collect_breeding_genes_data
 from .breeding_inbreeding_collector import collect_breeding_inbreeding_data
 from .breeding_detail_collector import collect_breeding_detail_data
-from .bull_usage_collector import collect_bull_usage_data, collect_bull_usage_summary_data  # Sheet 8
+from .bull_usage_collector import collect_bull_usage_data, collect_bull_usage_summary_data  # Sheet 8 (旧版)
+from .used_bulls_summary_collector_wrapper import collect_used_bulls_summary_data  # Sheet 8 (v1.2.2新版)
+from .used_bulls_detail_collector_wrapper import collect_used_bulls_detail_data  # Sheet 9 (v1.2.2新版)
 
 # v1.1兼容（保留旧函数）
 from .inbreeding_collector import collect_inbreeding_data
@@ -31,7 +33,9 @@ __all__ = [
     'collect_breeding_genes_data',  # Sheet 5 v1.2
     'collect_breeding_inbreeding_data',  # Sheet 6 v1.2
     'collect_breeding_detail_data',  # Sheet 7 v1.2
-    'collect_bull_usage_summary_data',  # Sheet 8 v1.2
+    'collect_bull_usage_summary_data',  # Sheet 8 v1.2 (旧版)
+    'collect_used_bulls_summary_data',  # Sheet 8 v1.2.2 (新版)
+    'collect_used_bulls_detail_data',  # Sheet 9 v1.2.2 (新版)
 
     # v1.1兼容
     'collect_gene_data',

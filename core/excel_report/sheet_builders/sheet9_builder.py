@@ -1,11 +1,12 @@
 """
-Sheet 9构建器: 配种事件明细
-v1.2.1版本 - 按年份分组的配种事件明细记录
+Sheet 9构建器: 已用公牛性状明细
+v1.2.2版本 - 按年份分组的公牛使用明细
 
-每次配种一行，包含：耳号、配种日期、冻精编号、冻精类型、各性状
+每年一个表格，包含该年使用的所有公牛及其性状
 """
 
 from .base_builder import BaseSheetBuilder
+from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
 import pandas as pd
 import logging
@@ -15,152 +16,208 @@ logger = logging.getLogger(__name__)
 
 class Sheet9Builder(BaseSheetBuilder):
     """
-    Sheet 9: 配种事件明细
+    Sheet 9: 已用公牛性状明细
 
-    显示所有配种事件的详细记录：
-    - 按年份分组显示
-    - 每次配种一行（耳号、配种日期、冻精编号、冻精类型、各性状）
-    - 包括未识别公牛的配种记录（性状显示"-"）
+    按年份展示每年使用的冻精明细:
+    - 每年一个表格
+    - 包含冻精编号、配种类型、使用次数、所有性状
+    - 表格末尾添加统计行
+    - 年份从新到旧排列
     """
 
     def build(self, data: dict):
         """
-        构建Sheet 9: 配种事件明细
+        构建Sheet 9: 已用公牛性状明细
 
         Args:
-            data: 包含配种明细数据（来自bull_usage_collector）
-                - breeding_detail: 配种事件明细DataFrame
-                - trait_columns: 性状列名列表
-                - all_years: 所有年份列表
+            data: 包含以下键的字典:
+                - yearly_details: 字典，键为年份，值为该年的公牛明细DataFrame
+                - trait_columns: 性状列列表
+                - year_range: 年份范围列表（倒序）
         """
         try:
-            logger.info("开始构建Sheet 9: 配种事件明细")
-
-            # 创建Sheet
-            self._create_sheet("配种事件明细")
-            logger.info("✓ Sheet创建成功")
-
-            # 获取数据
-            breeding_detail = data.get('breeding_detail')
-            trait_columns = data.get('trait_columns', [])
-            all_years = data.get('all_years', [])
-
-            if breeding_detail is None or breeding_detail.empty:
-                logger.warning("配种明细数据为空，跳过构建")
-                cell = self.ws.cell(row=1, column=1, value="暂无配种记录")
-                self.style_manager.apply_title_style(cell)
+            # 检查数据
+            if not data or 'yearly_details' not in data:
+                logger.warning("Sheet9: 缺少数据，跳过生成")
                 return
 
-            logger.info(f"✓ 数据准备完成：{len(breeding_detail)} 条配种记录，{len(all_years)} 个年份")
+            # 创建Sheet
+            self._create_sheet("已用公牛性状明细")
+            logger.info("构建Sheet 9: 已用公牛性状明细")
+
+            yearly_details = data.get('yearly_details', {})
+            trait_columns = data.get('trait_columns', [])
+            year_range = data.get('year_range', [])
+
+            if not yearly_details:
+                logger.warning("Sheet9: 没有年度数据")
+                return
 
             current_row = 1
 
-            # 按年份分组构建明细表
-            if all_years and '配种年份' in breeding_detail.columns:
-                for year in all_years:
-                    year_data = breeding_detail[breeding_detail['配种年份'] == year]
+            # 按年份（从新到旧）构建表格
+            for idx, year in enumerate(year_range):
+                detail_df = yearly_details.get(year)
 
-                    if not year_data.empty:
-                        current_row = self._build_year_detail_table(
-                            current_row, year, year_data, trait_columns
-                        )
-                        current_row += 3  # 年份之间空3行
-            else:
-                # 如果没有年份信息，直接显示所有数据
-                current_row = self._build_year_detail_table(
-                    current_row, "全部", breeding_detail, trait_columns
+                if detail_df is None or detail_df.empty:
+                    logger.warning(f"  {year}年: 无数据，跳过")
+                    continue
+
+                logger.info(f"  构建{year}年表格: {len(detail_df)}头公牛, {detail_df['使用次数'].sum()}配次")
+
+                current_row = self._build_year_table(
+                    year, detail_df, trait_columns, current_row
                 )
+                current_row += 3  # 每个表格之间空3行
 
-            # === 设置列宽 ===
-            max_cols = len(trait_columns) + 5  # 耳号+日期+编号+类型+年份+性状
-            for col_idx in range(1, max_cols + 1):
-                col_letter = get_column_letter(col_idx)
-                if col_idx == 1:  # 耳号
-                    self.ws.column_dimensions[col_letter].width = 15
-                elif col_idx == 2:  # 配种日期
-                    self.ws.column_dimensions[col_letter].width = 12
-                elif col_idx == 3:  # 冻精编号
-                    self.ws.column_dimensions[col_letter].width = 15
-                else:
-                    self.ws.column_dimensions[col_letter].width = 12
+            # 设置列宽
+            self._set_default_column_widths(trait_columns)
 
-            # === 冻结首行 ===
-            self._freeze_panes('A3')
+            # 冻结首行
+            self._freeze_panes('A2')
 
-            logger.info(f"✓ Sheet 9构建完成：{len(breeding_detail)} 条配种记录")
+            logger.info("✓ Sheet 9构建完成")
 
         except Exception as e:
             logger.error(f"构建Sheet 9失败: {e}", exc_info=True)
             raise
 
-    def _build_year_detail_table(self, start_row: int, year: str,
-                                  year_data: pd.DataFrame, trait_columns: list) -> int:
+    def _build_year_table(
+        self,
+        year: int,
+        detail_df: pd.DataFrame,
+        trait_columns: list,
+        start_row: int
+    ) -> int:
         """
-        构建单个年份的配种明细表
+        构建单个年份的表格
 
         Args:
+            year: 年份
+            detail_df: 该年的公牛明细DataFrame
+            trait_columns: 性状列列表
             start_row: 起始行号
-            year: 年份（或"全部"）
-            year_data: 该年份的配种数据
-            trait_columns: 性状列名列表
 
         Returns:
             下一个可用行号
         """
         current_row = start_row
 
-        # 标题
-        title_text = f"{year}年配种明细" if str(year).isdigit() else "配种明细"
-        cell = self.ws.cell(row=current_row, column=1, value=title_text)
-        self.style_manager.apply_title_style(cell)
+        # 标题行
+        total_bulls = len(detail_df)
+        total_times = int(detail_df['使用次数'].sum())
+        title = f"{year}年已用公牛明细（{total_bulls}头公牛，{total_times}配次）"
+
+        title_cell = self.ws.cell(row=current_row, column=1, value=title)
+        title_cell.font = Font(size=14, bold=True)
+        title_cell.alignment = Alignment(horizontal='left', vertical='center')
         current_row += 1
 
-        # 表头
-        headers = ['耳号', '配种日期', '冻精编号', '冻精类型'] + trait_columns
-        if '配种年份' in year_data.columns:
-            headers.insert(4, '配种年份')  # 如果有年份列，插入到冻精类型之后
+        # 表头行
+        headers = ['冻精编号', '配种类型', '使用次数'] + trait_columns
 
-        self._write_header(current_row, headers, start_col=1)
+        for col_idx, header in enumerate(headers, start=1):
+            cell = self.ws.cell(row=current_row, column=col_idx, value=header)
+            self.style_manager.apply_header_style(cell)
         current_row += 1
 
         # 数据行
-        for idx, row in year_data.iterrows():
-            values = [
-                row.get('耳号', ''),
-                row.get('配种日期', ''),
-                row.get('冻精编号', ''),
-                row.get('冻精类型', '')
-            ]
+        for _, row_data in detail_df.iterrows():
+            for col_idx, col_name in enumerate(headers, start=1):
+                value = row_data.get(col_name)
 
-            if '配种年份' in year_data.columns:
-                values.append(row.get('配种年份', ''))
+                cell = self.ws.cell(row=current_row, column=col_idx, value=value)
 
-            # 添加性状值
-            for trait in trait_columns:
-                val = row.get(trait)
-                values.append(val if pd.notna(val) else '-')
+                # 根据列类型设置样式
+                if col_name == '冻精编号':
+                    self.style_manager.apply_data_style(cell, alignment='left')
+                elif col_name == '配种类型':
+                    self.style_manager.apply_data_style(cell, alignment='center')
+                elif col_name == '使用次数':
+                    if isinstance(value, (int, float)):
+                        cell.value = int(value)
+                    self.style_manager.apply_data_style(cell, alignment='center')
+                else:
+                    # 性状列
+                    if col_name == 'Eval Date':
+                        # 日期列
+                        self.style_manager.apply_data_style(cell, alignment='center')
+                    elif isinstance(value, (int, float)) and pd.notna(value):
+                        # 数值列，保留2位小数
+                        self.style_manager.apply_data_style(cell, alignment='center')
+                        cell.number_format = '0.00'
+                    else:
+                        self.style_manager.apply_data_style(cell, alignment='center')
 
-            self._write_data_row(current_row, values, start_col=1, alignment='center')
             current_row += 1
 
-        # 汇总行
-        total_count = len(year_data)
-        total_cols = 4 if '配种年份' not in year_data.columns else 5
-        total_row = ['合计', f"{total_count}条记录"] + ['-'] * (total_cols - 2)
+        # 统计行
+        stat_row_data = {
+            '冻精编号': f'小计({total_bulls}头)',
+            '配种类型': '-',
+            '使用次数': total_times
+        }
 
-        # 计算性状平均值（如果有）
+        # 计算各性状平均值（加权平均，按使用次数加权）
         for trait in trait_columns:
-            if trait in year_data.columns and pd.api.types.is_numeric_dtype(year_data[trait]):
-                valid_values = year_data[trait].dropna()
-                if len(valid_values) > 0:
-                    total_row.append(valid_values.mean())
-                else:
-                    total_row.append('-')
+            if trait == 'Eval Date':
+                stat_row_data[trait] = '-'
             else:
-                total_row.append('-')
+                # 计算加权平均（按使用次数加权）
+                if trait in detail_df.columns:
+                    valid_data = detail_df[[trait, '使用次数']].dropna(subset=[trait])
+                    if len(valid_data) > 0:
+                        weighted_avg = (
+                            valid_data[trait] * valid_data['使用次数']
+                        ).sum() / valid_data['使用次数'].sum()
+                        stat_row_data[trait] = weighted_avg
+                    else:
+                        stat_row_data[trait] = None
+                else:
+                    stat_row_data[trait] = None
 
-        self._write_total_row(current_row, total_row, start_col=1)
+        # 写入统计行
+        for col_idx, col_name in enumerate(headers, start=1):
+            value = stat_row_data.get(col_name)
+            cell = self.ws.cell(row=current_row, column=col_idx, value=value)
+
+            # 样式
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type='solid')
+
+            # 格式
+            if col_name == '冻精编号':
+                self.style_manager.apply_data_style(cell, alignment='left')
+                cell.font = Font(bold=True)
+                cell.fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type='solid')
+            elif col_name == '配种类型':
+                self.style_manager.apply_data_style(cell, alignment='center')
+            elif col_name == '使用次数':
+                self.style_manager.apply_data_style(cell, alignment='center')
+            elif col_name == 'Eval Date':
+                self.style_manager.apply_data_style(cell, alignment='center')
+            else:
+                # 性状列
+                if isinstance(value, (int, float)) and pd.notna(value):
+                    self.style_manager.apply_data_style(cell, alignment='center')
+                    cell.number_format = '0.00'
+                else:
+                    self.style_manager.apply_data_style(cell, alignment='center')
+
         current_row += 1
 
-        logger.info(f"  ✓ {year}年明细表构建完成：{total_count} 条记录")
         return current_row
+
+    def _set_default_column_widths(self, trait_columns: list):
+        """设置默认列宽"""
+        col_widths = {
+            1: 18,  # 冻精编号
+            2: 12,  # 配种类型
+            3: 12,  # 使用次数
+        }
+
+        # 性状列默认宽度
+        for col_idx in range(4, len(trait_columns) + 4):
+            col_widths[col_idx] = 15
+
+        self._set_column_widths(col_widths)
