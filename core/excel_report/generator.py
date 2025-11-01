@@ -86,80 +86,88 @@ class ExcelReportGenerator:
             self._report_progress(15, "开始生成报告...")
             logger.info("\nStep 3: 生成Sheet...")
 
-            # Sheets 1-4: 牧场和牛群分析（已完成）
-            # 每个Sheet约占5%的进度，从15%到95%
-            self._report_progress(16, "[1/17] 生成牧场基础信息...")
-            logger.info("  [1/15] 生成Sheet 1: 牧场基础信息")
+            # Sheet 1: 牧场基础信息
+            self._report_progress(16, "[1/17] 生成Sheet 1...")
+            logger.info("  [1/17] 生成Sheet 1: 牧场基础信息")
             self._build_sheet1(data['farm_info'])
             self._report_progress(18, "✓ Sheet 1 完成")
 
-            self._report_progress(18, "[2/17] 生成牧场牛群原始数据...")
-            logger.info("  [2/15] 生成Sheet 1A: 牧场牛群原始数据")
+            # Sheet 2: 牧场牛群原始数据
+            self._report_progress(18, "[2/17] 生成Sheet 2...")
+            logger.info("  [2/17] 生成Sheet 2: 牧场牛群原始数据")
             self._build_sheet1a(data['farm_info'])
-            self._report_progress(25, "✓ Sheet 1A 完成")
+            self._report_progress(25, "✓ Sheet 2 完成")
 
-            self._report_progress(26, "[3/17] 生成系谱识别分析...")
-            logger.info("  [3/15] 生成Sheet 2: 系谱识别分析")
+            # Sheet 3: 系谱识别分析
+            self._report_progress(26, "[3/17] 生成Sheet 3...")
+            logger.info("  [3/17] 生成Sheet 3: 系谱识别分析")
             self._build_sheet2(data['pedigree'])
-            self._report_progress(30, "✓ Sheet 2 完成")
+            self._report_progress(30, "✓ Sheet 3 完成")
 
-            self._report_progress(31, "[4/17] 生成系谱识别明细...")
-            logger.info("  [4/15] 生成Sheet 2明细: 全群母牛系谱识别明细")
+            # Sheet 4: 全群母牛系谱识别明细
+            self._report_progress(31, "[4/17] 生成Sheet 4...")
+            logger.info("  [4/17] 生成Sheet 4: 全群母牛系谱识别明细")
             self._build_sheet2_detail(data['pedigree'])
-            self._report_progress(36, "✓ Sheet 2明细 完成")
+            self._report_progress(36, "✓ Sheet 4 完成")
 
-            self._report_progress(37, "[5/17] 生成育种性状分析...")
-            logger.info("  [5/15] 生成Sheet 3: 育种性状分析")
+            # Sheets 5-8: 育种性状分析（4个子表）
+            self._report_progress(37, "[5-8/17] 生成Sheet 5-8...")
+            logger.info("  [5-8/17] 生成Sheet 5-8: 育种性状分析")
             self._build_sheet3(data['traits'])
-            self._report_progress(43, "✓ Sheet 3 完成")
+            self._report_progress(43, "✓ Sheet 5-8 完成")
 
-            self._report_progress(44, "[6/17] 生成母牛指数分析...")
-            logger.info("  [6/15] 生成Sheet 4: 母牛指数分析")
+            # Sheets 9-10: 母牛指数分析（2个子表）
+            self._report_progress(44, "[9-10/17] 生成Sheet 9-10...")
+            logger.info("  [9-10/17] 生成Sheet 9-10: 母牛指数分析")
             self._build_sheet4(data['cow_index'])
-            self._report_progress(50, "✓ Sheet 4 完成")
+            self._report_progress(50, "✓ Sheet 9-10 完成")
 
-            # Sheets 5-7: 配种记录分析（v1.2新规划）
-            self._report_progress(51, "[7/17] 生成隐性基因分析...")
-            logger.info("  [7/15] 生成Sheet 5: 配种记录-隐性基因分析")
+            # Sheet 11: 配种记录-隐性基因分析
+            self._report_progress(51, "[11/17] 生成Sheet 11...")
+            logger.info("  [11/17] 生成Sheet 11: 配种记录-隐性基因分析")
             self._build_sheet5(data.get('breeding_genes', {}))
-            self._report_progress(55, "✓ Sheet 5 完成")
+            self._report_progress(55, "✓ Sheet 11 完成")
 
-            self._report_progress(56, "[8/17] 生成近交系数分析...")
-            logger.info("  [8/15] 生成Sheet 6: 配种记录-近交系数分析")
+            # Sheet 12: 配种记录-近交系数分析
+            self._report_progress(56, "[12/17] 生成Sheet 12...")
+            logger.info("  [12/17] 生成Sheet 12: 配种记录-近交系数分析")
             self._build_sheet6(data.get('breeding_inbreeding', {}))
-            self._report_progress(60, "✓ Sheet 6 完成")
+            self._report_progress(60, "✓ Sheet 12 完成")
 
-            self._report_progress(61, "[9/17] 生成配种记录明细...")
-            logger.info("  [9/15] 生成Sheet 7: 配种记录-隐性基因及近交系数明细")
+            # Sheet 13: 配种记录明细
+            self._report_progress(61, "[13/17] 生成Sheet 13...")
+            logger.info("  [13/17] 生成Sheet 13: 配种记录明细")
             self._build_sheet7(data.get('breeding_details', {}))
-            self._report_progress(65, "✓ Sheet 7 完成")
+            self._report_progress(65, "✓ Sheet 13 完成")
 
-            # Sheets 8-9: 已用公牛分析（v1.2新规划）
-            self._report_progress(66, "[10/17] 生成已用公牛汇总...")
-            logger.info("  [10/15] 生成Sheet 8: 已用公牛性状汇总分析")
+            # Sheet 14: 已用公牛性状汇总分析
+            self._report_progress(66, "[14/17] 生成Sheet 14...")
+            logger.info("  [14/17] 生成Sheet 14: 已用公牛性状汇总分析")
             self._build_sheet8(data.get('used_bulls_summary', {}))
-            self._report_progress(70, "✓ Sheet 8 完成")
+            self._report_progress(70, "✓ Sheet 14 完成")
 
-            self._report_progress(71, "[11/17] 生成已用公牛明细...")
-            logger.info("  [11/15] 生成Sheet 9: 已用公牛性状明细")
+            # Sheet 15: 已用公牛性状明细
+            self._report_progress(71, "[15/17] 生成Sheet 15...")
+            logger.info("  [15/17] 生成Sheet 15: 已用公牛性状明细")
             self._build_sheet9(data.get('used_bulls_detail', {}))
-            self._report_progress(75, "✓ Sheet 9 完成")
+            self._report_progress(75, "✓ Sheet 15 完成")
 
-            # Sheets 10-11: 备选公牛和选配结果（v1.2新规划）
-            self._report_progress(76, "[12/17] 生成备选公牛排名...")
-            logger.info("  [12/15] 生成Sheet 10: 备选公牛排名")
+            # Sheet 16: 备选公牛排名
+            self._report_progress(76, "[16/17] 生成Sheet 16...")
+            logger.info("  [16/17] 生成Sheet 16: 备选公牛排名")
             self._build_sheet10(data.get('bull_ranking', {}))
-            self._report_progress(80, "✓ Sheet 10 完成")
+            self._report_progress(80, "✓ Sheet 16 完成")
 
+            # Sheet 17: 选配推荐结果
             if data.get('mating'):
-                self._report_progress(81, "[13/17] 生成选配推荐结果...")
-                logger.info("  [13/15] 生成Sheet 11: 选配推荐结果")
+                self._report_progress(81, "[17/17] 生成Sheet 17...")
+                logger.info("  [17/17] 生成Sheet 17: 选配推荐结果")
                 self._build_sheet11(data['mating'])
-                self._report_progress(85, "✓ Sheet 11 完成")
+                self._report_progress(85, "✓ Sheet 17 完成")
             else:
-                self._report_progress(81, "[13/17] 跳过选配数据...")
-                logger.info("  [13/15] Sheet 11: 无选配数据，跳过")
-                self._report_progress(85, "✓ 跳过选配")
+                self._report_progress(81, "[17/17] 跳过Sheet 17...")
+                logger.info("  [17/17] Sheet 17: 无选配数据，跳过")
+                self._report_progress(85, "✓ 跳过Sheet 17")
 
             self._report_progress(86, "✓ 所有Sheet生成完成")
             logger.info("✓ 所有Sheet生成完成")
