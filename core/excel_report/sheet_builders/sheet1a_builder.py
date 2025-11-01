@@ -1,22 +1,22 @@
 """
-Sheet 1A构建器: 牧场牛群原始数据
-直接复制原始Excel文件内容
+Sheet 2构建器: 牧场牛群原始数据
+使用统一格式的明细表样式
 """
 
 from .base_builder import BaseSheetBuilder
-from openpyxl import load_workbook
 from pathlib import Path
+import pandas as pd
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class Sheet1ABuilder(BaseSheetBuilder):
-    """Sheet 1A: 牧场牛群原始数据（直接复制原始Excel）"""
+    """Sheet 2: 牧场牛群原始数据（使用统一明细表格式）"""
 
     def build(self, data: dict):
         """
-        构建Sheet 1A - 直接复制原始Excel文件的内容
+        构建Sheet 2 - 使用统一明细表格式显示原始数据
 
         Args:
             data: {
@@ -24,7 +24,7 @@ class Sheet1ABuilder(BaseSheetBuilder):
             }
         """
         try:
-            logger.info("构建Sheet 1A: 牧场牛群原始数据")
+            logger.info("构建Sheet 2: 牧场牛群原始数据")
 
             raw_file_path = data.get('raw_file_path')
             if not raw_file_path or not Path(raw_file_path).exists():
@@ -34,63 +34,38 @@ class Sheet1ABuilder(BaseSheetBuilder):
                 self.ws.cell(row=1, column=1, value="暂无原始数据")
                 return
 
-            # 加载原始Excel文件
-            source_wb = load_workbook(raw_file_path)
-            source_ws = source_wb.active  # 获取第一个sheet
+            # 创建Sheet
+            self._create_sheet("牧场牛群原始数据")
 
-            # 在目标workbook中创建新sheet
-            target_ws = self.wb.create_sheet("牧场牛群原始数据")
+            # 使用pandas读取Excel文件（更快更简单）
+            logger.info(f"读取原始数据文件: {Path(raw_file_path).name}")
+            df = pd.read_excel(raw_file_path)
 
-            # 计算总行数用于进度报告
-            total_rows = source_ws.max_row
-            logger.info(f"开始复制原始数据，共 {total_rows} 行")
+            total_rows = len(df)
+            total_cols = len(df.columns)
+            logger.info(f"原始数据: {total_rows} 行 × {total_cols} 列")
 
-            # 复制所有单元格的值和格式
-            row_count = 0
-            last_progress = 18  # Sheet 1A 的起始进度
-            for row in source_ws.iter_rows():
-                row_count += 1
-                for cell in row:
-                    target_cell = target_ws[cell.coordinate]
-                    # 复制值
-                    target_cell.value = cell.value
-                    # 复制格式
-                    if cell.has_style:
-                        target_cell.font = cell.font.copy()
-                        target_cell.border = cell.border.copy()
-                        target_cell.fill = cell.fill.copy()
-                        target_cell.number_format = cell.number_format
-                        target_cell.protection = cell.protection.copy()
-                        target_cell.alignment = cell.alignment.copy()
+            # 报告进度
+            if self.progress_callback:
+                self.progress_callback(18, f"写入数据...")
 
-                # 每复制100行报告一次进度（从18%到24%，共6%范围）
-                if row_count % 100 == 0 and self.progress_callback:
-                    progress_pct = row_count / total_rows  # 0-1
-                    current_progress = 18 + int(progress_pct * 6)  # 18-24%
-                    if current_progress > last_progress:
-                        self.progress_callback(current_progress, f"复制原始数据: {row_count}/{total_rows}行")
-                        last_progress = current_progress
+            # 设置默认列宽（统一12）
+            column_widths = {i: 12 for i in range(1, total_cols + 1)}
 
-            # 复制列宽
-            for col_letter in source_ws.column_dimensions:
-                if col_letter in source_ws.column_dimensions:
-                    target_ws.column_dimensions[col_letter].width = source_ws.column_dimensions[col_letter].width
+            # 使用快速方法写入数据
+            current_row = self._write_dataframe_fast(
+                df,
+                start_row=1,
+                data_alignment='center',
+                column_widths=column_widths,
+                progress_callback_interval=500
+            )
 
-            # 复制行高
-            for row_num in source_ws.row_dimensions:
-                if row_num in source_ws.row_dimensions:
-                    target_ws.row_dimensions[row_num].height = source_ws.row_dimensions[row_num].height
+            # 冻结首行
+            self._freeze_panes('A2')
 
-            # 复制合并单元格
-            for merged_cell_range in source_ws.merged_cells.ranges:
-                target_ws.merge_cells(str(merged_cell_range))
-
-            # 冻结窗格
-            if source_ws.freeze_panes:
-                target_ws.freeze_panes = source_ws.freeze_panes
-
-            logger.info(f"✓ Sheet 1A构建完成，已复制原始Excel文件")
+            logger.info(f"✓ Sheet 2构建完成: {total_rows}行 × {total_cols}列")
 
         except Exception as e:
-            logger.error(f"构建Sheet 1A失败: {e}", exc_info=True)
+            logger.error(f"构建Sheet 2失败: {e}", exc_info=True)
             raise

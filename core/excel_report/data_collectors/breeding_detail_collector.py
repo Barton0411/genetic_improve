@@ -11,7 +11,7 @@ import glob
 logger = logging.getLogger(__name__)
 
 
-def collect_breeding_detail_data(analysis_folder: Path) -> dict:
+def collect_breeding_detail_data(analysis_folder: Path, cache=None) -> dict:
     """
     收集配种记录明细数据 (Sheet 7)
 
@@ -19,6 +19,7 @@ def collect_breeding_detail_data(analysis_folder: Path) -> dict:
 
     Args:
         analysis_folder: 分析结果文件夹路径
+        cache: DataCache实例（可选），用于缓存已读取的Excel文件
 
     Returns:
         数据字典:
@@ -40,8 +41,11 @@ def collect_breeding_detail_data(analysis_folder: Path) -> dict:
         latest_file = max(files, key=lambda x: Path(x).name)
         logger.info(f"读取文件: {latest_file}")
 
-        # 2. 读取Excel文件
-        df = pd.read_excel(latest_file)
+        # 2. 读取Excel文件（使用缓存）
+        if cache:
+            df = cache.get_excel(latest_file)
+        else:
+            df = pd.read_excel(latest_file)
 
         logger.info(f"成功读取配种记录明细数据: {len(df)}行, {len(df.columns)}列")
 

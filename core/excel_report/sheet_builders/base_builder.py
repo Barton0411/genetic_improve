@@ -181,3 +181,62 @@ class BaseSheetBuilder(ABC):
         cell = self.ws.cell(row=row, column=col, value=value)
         self.style_manager.apply_data_style(cell, alignment)
         return cell
+
+    def _write_dataframe_fast(self, df, start_row: int = 1, headers: list = None,
+                             data_alignment='center', column_widths: dict = None,
+                             progress_callback_interval: int = 500):
+        """
+        快速写入DataFrame数据（批量方式，性能优化）
+
+        Args:
+            df: DataFrame数据
+            start_row: 起始行号
+            headers: 自定义表头列表（如果为None则使用df.columns）
+            data_alignment: 数据对齐方式 ('left', 'center', 'right')
+            column_widths: 列宽字典 {列号: 宽度}
+            progress_callback_interval: 进度报告间隔（每N行）
+
+        Returns:
+            下一个可用行号
+        """
+        import pandas as pd
+
+        current_row = start_row
+
+        # 1. 写入表头
+        if headers is None:
+            headers = list(df.columns)
+
+        self._write_header(current_row, headers)
+        current_row += 1
+
+        # 2. 批量写入数据（只写值，不逐行应用样式）
+        total_rows = len(df)
+        last_progress_row = 0
+
+        for idx, row_data in enumerate(df.itertuples(index=False), start=0):
+            for col_idx, value in enumerate(row_data, start=1):
+                # 只写入值，不设置样式（大幅提速）
+                self.ws.cell(row=current_row, column=col_idx, value=value)
+
+            current_row += 1
+
+            # 报告进度（减少频率）
+            if self.progress_callback and (idx + 1) % progress_callback_interval == 0:
+                if current_row > last_progress_row:
+                    # 这里可以添加进度回调，但暂时跳过避免影响主流程
+                    last_progress_row = current_row
+
+        # 3. 批量应用样式（一次性设置整个区域）
+        if total_rows > 0:
+            # 对数据区域应用统一样式
+            for row in self.ws.iter_rows(min_row=start_row+1, max_row=current_row-1,
+                                        min_col=1, max_col=len(headers)):
+                for cell in row:
+                    self.style_manager.apply_data_style(cell, data_alignment)
+
+        # 4. 设置列宽
+        if column_widths:
+            self._set_column_widths(column_widths)
+
+        return current_row

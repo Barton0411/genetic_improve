@@ -78,9 +78,16 @@ class ExcelReportGenerator:
             # 2. 收集所有数据 (5-15%)
             self._report_progress(5, "正在收集数据...")
             logger.info("\nStep 2: 收集数据...")
-            data = self._collect_all_data()
+            # 创建数据缓存实例，避免重复读取相同文件
+            from .utils import DataCache
+            cache = DataCache()
+            data = self._collect_all_data(cache)
             self._report_progress(14, "✓ 数据收集完成")
             logger.info("✓ 数据收集完成")
+
+            # 输出缓存统计信息
+            stats = cache.get_cache_stats()
+            logger.info(f"数据缓存统计: 缓存了 {stats['cached_files']} 个文件")
 
             # 3. 生成各个Sheet (15-95%)
             self._report_progress(15, "开始生成报告...")
@@ -199,9 +206,12 @@ class ExcelReportGenerator:
             logger.error(f"✗ 生成Excel报告失败: {e}", exc_info=True)
             return False, str(e)
 
-    def _collect_all_data(self) -> dict:
+    def _collect_all_data(self, cache) -> dict:
         """
         收集所有需要的数据 (v1.2)
+
+        Args:
+            cache: DataCache实例，用于缓存已读取的Excel文件
 
         Returns:
             数据字典
@@ -223,16 +233,17 @@ class ExcelReportGenerator:
         )
 
         # Sheet 5: 配种记录-隐性基因分析（已实现）
+        # 注意：这三个collector读取同一个文件，使用cache可避免重复读取
         self._report_progress(6, "收集配种基因数据...")
-        breeding_genes = collect_breeding_genes_data(self.analysis_folder)
+        breeding_genes = collect_breeding_genes_data(self.analysis_folder, cache)
 
         # Sheet 6: 配种记录-近交系数分析（已实现）
         self._report_progress(7, "收集近交系数数据...")
-        breeding_inbreeding = collect_breeding_inbreeding_data(self.analysis_folder)
+        breeding_inbreeding = collect_breeding_inbreeding_data(self.analysis_folder, cache)
 
         # Sheet 7: 配种记录明细（已实现）
         self._report_progress(8, "收集配种明细数据...")
-        breeding_details = collect_breeding_detail_data(self.analysis_folder)
+        breeding_details = collect_breeding_detail_data(self.analysis_folder, cache)
 
         # Sheet 8: 已用公牛性状汇总分析（v1.2.2新版 - 动态性状+折线图）
         self._report_progress(9, "收集已用公牛汇总...")

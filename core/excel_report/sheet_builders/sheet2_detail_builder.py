@@ -72,22 +72,11 @@ class Sheet2DetailBuilder(BaseSheetBuilder):
             available_columns = [col for col in required_columns if col in detail_df.columns]
             detail_df = detail_df[available_columns].copy()
 
-            current_row = 1
-
-            # 1. 表头（直接开始，不要标题）
-            # 使用中文表头（如果有映射的话）
+            # 1. 准备中文表头
             headers = list(detail_df.columns)
             chinese_headers = [COLUMN_NAME_MAPPING.get(col, col) for col in headers]
-            self._write_header(current_row, chinese_headers)
-            current_row += 1
 
-            # 2. 数据行
-            for idx, row in detail_df.iterrows():
-                values = list(row)
-                self._write_data_row(current_row, values, alignment='center')
-                current_row += 1
-
-            # 3. 设置列宽
+            # 2. 准备列宽
             column_widths = {}
             for col_idx, header in enumerate(headers, start=1):
                 if header in ['cow_id', 'sire', 'dam', 'mgs', 'mgd', 'mmgs']:
@@ -107,7 +96,14 @@ class Sheet2DetailBuilder(BaseSheetBuilder):
                 else:
                     column_widths[col_idx] = 12
 
-            self._set_column_widths(column_widths)
+            # 3. 使用快速方法写入数据
+            current_row = self._write_dataframe_fast(
+                detail_df,
+                start_row=1,
+                headers=chinese_headers,
+                data_alignment='center',
+                column_widths=column_widths
+            )
 
             # 4. 冻结首行
             self._freeze_panes('A2')

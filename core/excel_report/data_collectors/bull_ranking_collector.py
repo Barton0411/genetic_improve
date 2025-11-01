@@ -263,14 +263,62 @@ def collect_bull_ranking_data(analysis_folder) -> dict:
         if rename_map:
             df_merged = df_merged.rename(columns=rename_map)
 
-        # 5. 从数据库补充技术标准中需要的性状（如FE）
+        # 5. 补充'支数'列（从原始公牛数据读取）
+        if '支数' not in df_merged.columns:
+            logger.info("'支数'列缺失，尝试从原始公牛数据补充...")
+            # 查找原始公牛数据文件
+            bull_files = list(analysis_path.parent.glob("raw_data/bull_*.xlsx"))
+            if not bull_files:
+                bull_files = list(analysis_path.parent.glob("raw_data/bull_complete.xlsx"))
+
+            if bull_files:
+                try:
+                    # 读取第一个找到的公牛文件
+                    bull_file = bull_files[0]
+                    logger.info(f"从原始文件读取支数: {bull_file.name}")
+                    df_bull_raw = pd.read_excel(bull_file)
+
+                    # 确保有必要的列
+                    if 'bull_id' in df_bull_raw.columns:
+                        # 准备支数列
+                        inventory_col = None
+                        if '支数' in df_bull_raw.columns:
+                            inventory_col = '支数'
+                        elif 'inventory' in df_bull_raw.columns:
+                            inventory_col = 'inventory'
+
+                        if inventory_col:
+                            # 只提取bull_id和支数
+                            df_inventory = df_bull_raw[['bull_id', inventory_col]].copy()
+                            df_inventory.columns = ['bull_id', '支数_temp']
+
+                            # 合并支数数据
+                            df_merged = df_merged.merge(df_inventory, on='bull_id', how='left')
+                            df_merged['支数'] = df_merged['支数_temp']
+                            df_merged = df_merged.drop('支数_temp', axis=1)
+
+                            logger.info(f"✓ 已从原始文件补充'支数'列")
+                        else:
+                            logger.warning("原始公牛文件中也没有'支数'或'inventory'列")
+                            df_merged['支数'] = None
+                    else:
+                        logger.warning("原始公牛文件中缺少'bull_id'列")
+                        df_merged['支数'] = None
+                except Exception as e:
+                    logger.error(f"从原始文件读取支数失败: {e}")
+                    df_merged['支数'] = None
+            else:
+                logger.warning("未找到原始公牛数据文件")
+                df_merged['支数'] = None
+
+        # 6. 从数据库补充技术标准中需要的性状（如FE）
         from ..config.bull_quality_standards import US_PROGENY_STANDARDS
         required_traits = list(US_PROGENY_STANDARDS.keys())
         logger.info(f"技术标准要求的性状: {required_traits}")
 
         df_merged = _supplement_traits_from_db(df_merged, required_traits)
 
-        # 6. 提取并合并基因信息
+        # 7. 提取并合并基因信息
         df_genes = _extract_bull_genes(analysis_path)
 
         if not df_genes.empty:

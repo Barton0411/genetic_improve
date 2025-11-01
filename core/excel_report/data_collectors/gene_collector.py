@@ -32,12 +32,13 @@ GENE_TRANSLATIONS = {
 }
 
 
-def collect_breeding_genes_data(analysis_folder: Path) -> dict:
+def collect_breeding_genes_data(analysis_folder: Path, cache=None) -> dict:
     """
     收集配种记录中的隐性基因纯合分析数据 (Sheet 5 v1.2)
 
     Args:
         analysis_folder: 分析结果文件夹路径
+        cache: DataCache实例（可选），用于缓存已读取的Excel文件
 
     Returns:
         数据字典:
@@ -79,8 +80,11 @@ def collect_breeding_genes_data(analysis_folder: Path) -> dict:
         latest_file = max(files, key=lambda x: Path(x).name)
         logger.info(f"读取文件: {latest_file}")
 
-        # 2. 读取数据
-        df = pd.read_excel(latest_file)
+        # 2. 读取数据（使用缓存）
+        if cache:
+            df = cache.get_excel(latest_file)
+        else:
+            df = pd.read_excel(latest_file)
 
         # 确保有配种日期列
         if '配种日期' not in df.columns:

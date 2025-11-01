@@ -113,43 +113,17 @@ class Sheet9Builder(BaseSheetBuilder):
         title_cell.alignment = Alignment(horizontal='left', vertical='center')
         current_row += 1
 
-        # 表头行
+        # 表头行和数据行（使用快速方法）
         headers = ['冻精编号', '配种类型', '使用次数'] + trait_columns
 
-        for col_idx, header in enumerate(headers, start=1):
-            cell = self.ws.cell(row=current_row, column=col_idx, value=header)
-            self.style_manager.apply_header_style(cell)
-        current_row += 1
-
-        # 数据行
-        for _, row_data in detail_df.iterrows():
-            for col_idx, col_name in enumerate(headers, start=1):
-                value = row_data.get(col_name)
-
-                cell = self.ws.cell(row=current_row, column=col_idx, value=value)
-
-                # 根据列类型设置样式
-                if col_name == '冻精编号':
-                    self.style_manager.apply_data_style(cell, alignment='left')
-                elif col_name == '配种类型':
-                    self.style_manager.apply_data_style(cell, alignment='center')
-                elif col_name == '使用次数':
-                    if isinstance(value, (int, float)):
-                        cell.value = int(value)
-                    self.style_manager.apply_data_style(cell, alignment='center')
-                else:
-                    # 性状列
-                    if col_name == 'Eval Date':
-                        # 日期列
-                        self.style_manager.apply_data_style(cell, alignment='center')
-                    elif isinstance(value, (int, float)) and pd.notna(value):
-                        # 数值列，保留2位小数
-                        self.style_manager.apply_data_style(cell, alignment='center')
-                        cell.number_format = '0.00'
-                    else:
-                        self.style_manager.apply_data_style(cell, alignment='center')
-
-            current_row += 1
+        # 使用快速方法写入数据
+        current_row = self._write_dataframe_fast(
+            detail_df[headers],
+            start_row=current_row,
+            headers=headers,
+            data_alignment='center',
+            column_widths=None  # 后面统一设置
+        )
 
         # 统计行
         stat_row_data = {

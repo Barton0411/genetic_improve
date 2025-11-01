@@ -4,6 +4,40 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-cn/1.0.0/)，本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [1.2.0.17] - 2025-11-01 📊 分布分析统计表优化
+
+### ✨ 新功能
+- **统计表指标增强**
+  - 统计表新增最小值、最大值指标
+  - 添加详细指标说明和分析建议
+  - 包含变异系数、Q1-Q3等统计指标的使用说明
+
+### ⚡ 性能优化
+- **正态分布图动态范围调整**
+  - Y轴范围动态调整为曲线最高点的2倍，确保图形不被截断
+  - X轴范围基于每个图表数据动态计算，使用10%边距
+
+### 🔧 界面优化
+- **统计表格式统一**
+  - 整体正态分布图统计表转置：指标作为列，分组作为行
+  - 与其他多分组统计表格式保持一致
+  - 五等份分析表转置：分组作为列，指标作为行
+  - 提高表格可读性和一致性
+
+### 🐛 Bug修复
+- **修复统计表缺失问题**
+  - 修正Sheet 3-2（NM$分布分析）整体正态分布图统计表缺失
+  - 修正Sheet 3-3（TPI分布分析）整体正态分布图统计表缺失
+  - 修正Sheet 4（育种指数分布分析）整体正态分布图统计表缺失
+  - 确保所有正态分布图都配有完整的统计信息
+
+### 📝 文件变更
+- 修改: `core/excel_report/sheet_builders/sheet3_nm_distribution_builder.py`
+- 修改: `core/excel_report/sheet_builders/sheet3_tpi_distribution_builder.py`
+- 修改: `core/excel_report/sheet_builders/sheet4_index_distribution_builder.py`
+
+---
+
 ## [1.2.0.16] - 2025-10-31 ⚡ 进度条优化与表头国际化
 
 ### ✨ 新功能

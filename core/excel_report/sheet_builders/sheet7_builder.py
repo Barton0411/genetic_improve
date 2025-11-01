@@ -42,21 +42,8 @@ class Sheet7Builder(BaseSheetBuilder):
             self._create_sheet("配种记录-隐性基因及近交系数明细")
             logger.info("构建Sheet 7: 配种记录-隐性基因及近交系数明细")
 
-            # 写入表头
-            for col_idx, col_name in enumerate(df.columns, start=1):
-                cell = self.ws.cell(row=1, column=col_idx, value=col_name)
-                self.style_manager.apply_header_style(cell)
-
-            # 写入数据
-            for row_idx, row_data in enumerate(df.itertuples(index=False), start=2):
-                for col_idx, value in enumerate(row_data, start=1):
-                    cell = self.ws.cell(row=row_idx, column=col_idx, value=value)
-                    self.style_manager.apply_data_style(cell, alignment='center')
-
-            # 冻结首行
-            self._freeze_panes('A2')
-
-            # 设置列宽（根据内容自动调整）
+            # 准备列宽
+            column_widths = {}
             for col_idx, col_name in enumerate(df.columns, start=1):
                 # 基础列宽
                 if '(' in str(col_name):  # 带括号的基因列，较窄
@@ -70,7 +57,18 @@ class Sheet7Builder(BaseSheetBuilder):
                 else:
                     width = 12
 
-                self.ws.column_dimensions[self._get_column_letter(col_idx)].width = width
+                column_widths[col_idx] = width
+
+            # 使用快速方法写入数据
+            current_row = self._write_dataframe_fast(
+                df,
+                start_row=1,
+                data_alignment='center',
+                column_widths=column_widths
+            )
+
+            # 冻结首行
+            self._freeze_panes('A2')
 
             logger.info(f"✓ Sheet 7构建完成: {len(df)}行 × {len(df.columns)}列")
 
