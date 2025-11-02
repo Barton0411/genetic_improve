@@ -558,7 +558,6 @@ class MainWindow(QMainWindow):
             ("关键育种性状分析", "chart", []),
             ("牛只指数计算排名", "chart", []),
             ("近交系数及隐性基因分析", "analysis", []),
-            ("体型外貌评定", "body", []),
             ("个体选配", "match", []),
             ("自动化生成", "report", [])
         ]

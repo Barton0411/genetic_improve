@@ -38,6 +38,8 @@ class MatingProgressDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(500)
         self.setFixedHeight(200)
+        # 添加最小化按钮
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowMinimizeButtonHint)
         
         layout = QVBoxLayout(self)
         

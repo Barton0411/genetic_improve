@@ -35,8 +35,8 @@ class ProgressDialog(QDialog):
         self.setWindowTitle(self.title_text)
         self.setMinimumWidth(400)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
-        # 设置窗口保持在最上层
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        # 添加最小化按钮，移除强制置顶
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowMinimizeButtonHint)
         
         layout = QVBoxLayout(self)
         layout.setSpacing(10)

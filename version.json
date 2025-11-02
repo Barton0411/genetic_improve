@@ -1,15 +1,10 @@
 {
-  "version": "1.2.0.17",
+  "version": "1.2.0.18",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.17/伊利奶牛选配_v1.2.0.17_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.17/伊利奶牛选配_v1.2.0.17_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.18/伊利奶牛选配_v1.2.0.18_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.18/伊利奶牛选配_v1.2.0.18_win.exe",
   "changes": [
-    "1. <b>修复</b>：修正Sheet 3-2/3-3/4整体正态分布图统计表缺失问题",
-    "2. <b>优化</b>：统计表格式转置，指标作为列，分组作为行，与其他统计表格式统一",
-    "3. <b>优化</b>：五等份分析表转置，分组作为列，指标作为行，提高可读性",
-    "4. <b>优化</b>：正态分布图Y轴范围动态调整为曲线最高点的2倍",
-    "5. <b>功能</b>：统计表新增最小值、最大值指标",
-    "6. <b>功能</b>：添加详细指标说明和分析建议（变异系数、Q1-Q3等）",
-    "7. <b>优化</b>：正态分布图X轴范围基于每个图表数据动态计算"
+    "1. <b>修复</b>：恢复个体选配导航功能（移除未实现的体型外貌评定菜单项）",
+    "2. <b>优化</b>：进度条窗口现支持移动和最小化，不再强制置顶"
   ]
 }
