@@ -867,6 +867,7 @@ class CompleteMatingExecutor:
         2. 对于在新报告中的母牛，按组处理：
            - 性控组：如果新的1选性控不为空，整组替换；否则整组保留
            - 常规组：如果新的1选常规不为空，整组替换；否则整组保留
+        3. 保留旧报告中存在但新报告中不存在的列（如育种指数等）
         """
         # 定义选配组
         sexed_group = ['1选性控', '2选性控', '3选性控', '性控备注']
@@ -913,6 +914,28 @@ class CompleteMatingExecutor:
                         logger.debug(f"母牛 {cow_id} 的常规组保留原有数据（1选常规为空）")
                     else:
                         logger.debug(f"母牛 {cow_id} 的常规组使用新数据（1选常规={new_first_regular}）")
+
+                # **关键修复1：保留旧报告中存在但新报告中不存在的列**
+                # 这些列可能包括育种指数（NM$_score等）和其他重要数据
+                extra_cols = set(old_row.index) - set(new_row.index)
+                if extra_cols:
+                    logger.debug(f"母牛 {cow_id} 从旧报告补充 {len(extra_cols)} 个额外列")
+                    for col in extra_cols:
+                        new_row[col] = old_row[col]
+
+                # **关键修复2：对于新报告中值为空但旧报告中有值的列，保留旧值**
+                # 这解决了母牛指数得分等列在增量更新时被空值覆盖的问题
+                # 排除选配相关的列（这些列应该允许更新为空）
+                exclude_cols = sexed_group + regular_group + ['分组']
+                for col in set(old_row.index) & set(new_row.index):
+                    if col not in exclude_cols:
+                        new_val = new_row[col]
+                        old_val = old_row[col]
+                        # 如果新值为空但旧值不为空，保留旧值
+                        if (pd.isna(new_val) or (isinstance(new_val, str) and new_val.strip() == '')) and \
+                           not (pd.isna(old_val) or (isinstance(old_val, str) and old_val.strip() == '')):
+                            new_row[col] = old_row[col]
+                            logger.debug(f"母牛 {cow_id} 的列 {col} 保留旧值（新值为空）")
 
             merged_rows.append(new_row)
 

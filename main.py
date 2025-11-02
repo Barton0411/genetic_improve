@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QDialog
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QPalette, QColor
 
 # 延迟导入重量级模块
 def lazy_import():
@@ -63,9 +64,27 @@ def main():
     # 设置项目根目录环境变量
     root_dir = Path(__file__).parent
     os.environ['GENETIC_IMPROVE_ROOT'] = str(root_dir)
-    
+
     app = QApplication(sys.argv)
-    
+
+    # 强制设置为浅色模式，不跟随系统深色模式
+    light_palette = QPalette()
+    light_palette.setColor(QPalette.ColorRole.Window, QColor(255, 255, 255))
+    light_palette.setColor(QPalette.ColorRole.WindowText, QColor(0, 0, 0))
+    light_palette.setColor(QPalette.ColorRole.Base, QColor(255, 255, 255))
+    light_palette.setColor(QPalette.ColorRole.AlternateBase, QColor(245, 245, 245))
+    light_palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(255, 255, 220))
+    light_palette.setColor(QPalette.ColorRole.ToolTipText, QColor(0, 0, 0))
+    light_palette.setColor(QPalette.ColorRole.Text, QColor(0, 0, 0))
+    light_palette.setColor(QPalette.ColorRole.Button, QColor(240, 240, 240))
+    light_palette.setColor(QPalette.ColorRole.ButtonText, QColor(0, 0, 0))
+    light_palette.setColor(QPalette.ColorRole.BrightText, QColor(255, 0, 0))
+    light_palette.setColor(QPalette.ColorRole.Link, QColor(0, 0, 255))
+    light_palette.setColor(QPalette.ColorRole.Highlight, QColor(52, 152, 219))
+    light_palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+    app.setPalette(light_palette)
+    logging.info("已设置应用为浅色模式，不跟随系统深色模式")
+
     # 延迟导入模块
     lazy_import()
     

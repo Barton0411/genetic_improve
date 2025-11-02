@@ -24,20 +24,26 @@ class ThemeManager:
 
     @property
     def is_dark_mode(self) -> bool:
-        """实时检测系统是否使用深色模式"""
-        return self._detect_dark_mode()
+        """实时检测系统是否使用深色模式 - 已禁用，固定为浅色模式"""
+        # 固定返回False，不跟随系统深色模式
+        return False
+        # return self._detect_dark_mode()  # 已禁用自动检测
 
     def _detect_dark_mode(self) -> bool:
-        """检测系统是否使用深色模式"""
-        app = QApplication.instance()
-        if app:
-            palette = app.palette()
-            # 通过比较窗口背景色的亮度来判断是否为深色模式
-            bg_color = palette.color(QPalette.ColorRole.Window)
-            # 计算亮度 (0-255)
-            brightness = (bg_color.red() * 299 + bg_color.green() * 587 + bg_color.blue() * 114) / 1000
-            return brightness < 128
+        """检测系统是否使用深色模式 - 已禁用"""
+        # 此方法已禁用，软件固定使用浅色模式
         return False
+
+        # 以下代码已注释，保留以备将来需要
+        # app = QApplication.instance()
+        # if app:
+        #     palette = app.palette()
+        #     # 通过比较窗口背景色的亮度来判断是否为深色模式
+        #     bg_color = palette.color(QPalette.ColorRole.Window)
+        #     # 计算亮度 (0-255)
+        #     brightness = (bg_color.red() * 299 + bg_color.green() * 587 + bg_color.blue() * 114) / 1000
+        #     return brightness < 128
+        # return False
 
     def get_table_style(self) -> str:
         """获取表格的样式表"""

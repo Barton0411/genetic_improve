@@ -614,9 +614,6 @@ class MainWindow(QMainWindow):
 
         nav_layout.addWidget(self.nav_list)
 
-        # 添加弹性空间，将版本信息推到底部
-        nav_layout.addStretch()
-
         # 在侧边栏最底部添加版本信息
         version_label = QLabel(f"版本: v{self.version}")
         version_label.setStyleSheet("""

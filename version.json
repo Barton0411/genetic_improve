@@ -1,10 +1,11 @@
 {
-  "version": "1.2.0.18",
+  "version": "1.2.0.19",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.18/伊利奶牛选配_v1.2.0.18_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.18/伊利奶牛选配_v1.2.0.18_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.19/伊利奶牛选配_v1.2.0.19_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.19/伊利奶牛选配_v1.2.0.19_win.exe",
   "changes": [
-    "1. <b>修复</b>：恢复个体选配导航功能（移除未实现的体型外貌评定菜单项）",
-    "2. <b>优化</b>：进度条窗口现支持移动和最小化，不再强制置顶"
+    "1. <b>修复</b>：修复增量选配时母牛育种指数被覆盖的问题",
+    "2. <b>界面</b>：优化界面显示，固定使用浅色模式",
+    "3. <b>文档</b>：文档体系全面重构，新增多个使用指南"
   ]
 }
