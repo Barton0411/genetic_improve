@@ -141,29 +141,28 @@ class Sheet4DetailBuilder(BaseSheetBuilder):
             self._write_header(current_row, chinese_headers)
             current_row += 1
 
-            # 写入数据
+            # 写入数据（使用append批量写入，然后对离场牛只单独设置背景色）
+            from openpyxl.styles import PatternFill
+            gray_fill = PatternFill(start_color='D3D3D3', end_color='D3D3D3', fill_type='solid')
+
+            # 记录离场牛只的行号
+            离场行号列表 = []
+
             for idx, row in df_display.iterrows():
                 values = list(row[existing_columns])
+                self.ws.append(values)
 
-                # 判断是否在场
-                if '是否在场' in df_display.columns:
-                    is_present = row['是否在场'] == '是'
-                else:
-                    is_present = True
-
-                # 在场牛只正常显示，离场牛只灰色背景
-                if is_present:
-                    self._write_data_row(current_row, values, alignment='center')
-                else:
-                    # 离场牛只用灰色背景
-                    for col_idx, value in enumerate(values):
-                        cell = self.ws.cell(row=current_row, column=col_idx + 1, value=value)
-                        self.style_manager.apply_data_style(cell, alignment='center')
-                        # 应用灰色背景
-                        from openpyxl.styles import PatternFill
-                        cell.fill = PatternFill(start_color='D3D3D3', end_color='D3D3D3', fill_type='solid')
+                # 记录离场牛只的行号（从第2行开始，第1行是表头）
+                if '是否在场' in df_display.columns and row['是否在场'] != '是':
+                    离场行号列表.append(current_row)
 
                 current_row += 1
+
+            # 批量设置离场牛只的灰色背景（比逐行设置快很多）
+            if 离场行号列表:
+                for row_num in 离场行号列表:
+                    for col_idx in range(1, len(existing_columns) + 1):
+                        self.ws.cell(row=row_num, column=col_idx).fill = gray_fill
 
             # 设置列宽
             for col_idx in range(1, len(chinese_headers) + 1):

@@ -105,11 +105,12 @@ class Sheet3DetailBuilder(BaseSheetBuilder):
             self._write_header(current_row, chinese_headers, start_col=1)
             current_row += 1
 
-            # 写入数据
+            # 写入数据（使用append批量写入整行）
             for idx, row in df_display.iterrows():
                 values = list(row)
-                self._write_data_row(current_row, values, start_col=1, alignment='center')
-                current_row += 1
+                self.ws.append(values)
+
+            current_row += len(df_display)
 
             # 设置列宽
             base_col_count = len([col for col in existing_columns if not col.endswith('_score')])

@@ -1,4 +1,4 @@
-"""数据收集模块 v1.2"""
+"""数据收集模块 v1.3"""
 
 # v1.1 collectors (已完成的Sheet 1-4)
 from .farm_info_collector import collect_farm_info
@@ -15,6 +15,11 @@ from .breeding_detail_collector import collect_breeding_detail_data
 from .bull_usage_collector import collect_bull_usage_data, collect_bull_usage_summary_data  # Sheet 8 (旧版)
 from .used_bulls_summary_collector_wrapper import collect_used_bulls_summary_data  # Sheet 8 (v1.2.2新版)
 from .used_bulls_detail_collector_wrapper import collect_used_bulls_detail_data  # Sheet 9 (v1.2.2新版)
+
+# v1.3 collectors (Sheet 12-14: 备选公牛分析)
+from .candidate_bulls_genes_collector import collect_candidate_bulls_genes_data
+from .candidate_bulls_inbreeding_collector import collect_candidate_bulls_inbreeding_data
+from .candidate_bulls_detail_collector import collect_candidate_bulls_detail_data
 
 # v1.1兼容（保留旧函数）
 from .inbreeding_collector import collect_inbreeding_data
@@ -36,6 +41,11 @@ __all__ = [
     'collect_bull_usage_summary_data',  # Sheet 8 v1.2 (旧版)
     'collect_used_bulls_summary_data',  # Sheet 8 v1.2.2 (新版)
     'collect_used_bulls_detail_data',  # Sheet 9 v1.2.2 (新版)
+
+    # v1.3 collectors
+    'collect_candidate_bulls_genes_data',  # Sheet 17 v1.3
+    'collect_candidate_bulls_inbreeding_data',  # Sheet 18 v1.3
+    'collect_candidate_bulls_detail_data',  # Sheet 19 v1.3
 
     # v1.1兼容
     'collect_gene_data',

@@ -1,4 +1,4 @@
-"""Sheet构建模块 v1.2"""
+"""Sheet构建模块 v1.3"""
 
 from .base_builder import BaseSheetBuilder
 from .sheet1_builder import Sheet1Builder
@@ -14,6 +14,9 @@ from .sheet8_builder import Sheet8Builder
 from .sheet9_builder import Sheet9Builder
 from .sheet10_builder import Sheet10Builder
 from .sheet11_builder import Sheet11Builder
+from .sheet12_builder import Sheet12Builder
+from .sheet13_builder import Sheet13Builder
+from .sheet14_builder import Sheet14Builder
 
 # 保留旧的Sheet7ABuilder以兼容（如果还需要）
 try:
@@ -37,6 +40,9 @@ __all__ = [
     'Sheet9Builder',
     'Sheet10Builder',
     'Sheet11Builder',
+    'Sheet12Builder',
+    'Sheet13Builder',
+    'Sheet14Builder',
 ]
 
 if has_sheet7a:

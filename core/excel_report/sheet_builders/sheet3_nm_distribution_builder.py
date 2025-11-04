@@ -601,7 +601,7 @@ class Sheet3NMDistributionBuilder(BaseSheetBuilder):
             all_stats = []
             all_data_min = None
             all_data_max = None
-            max_curve_height = 0  # 记录所有正态分布曲线的最高点
+            all_curve_heights = []  # 收集所有组的峰值高度（用于排除异常值）
 
             for group_name, filter_func, color in groups:
                 # 筛选数据
@@ -642,10 +642,9 @@ class Sheet3NMDistributionBuilder(BaseSheetBuilder):
                 ax.plot(x, y, linewidth=2, color=color,
                        label=f'{group_name} (n={n}, μ={mu:.1f}, σ={sigma:.1f})')
 
-                # 更新最大曲线高度
+                # 收集曲线的最大高度
                 curve_max = y.max()
-                if curve_max > max_curve_height:
-                    max_curve_height = curve_max
+                all_curve_heights.append(curve_max)
 
                 # 计算20%分位统计数据
                 quintile_stats = self._calculate_quintile_stats(valid_data, group_name, score_column)
@@ -665,9 +664,29 @@ class Sheet3NMDistributionBuilder(BaseSheetBuilder):
                 x_margin = (all_data_max - all_data_min) * 0.1
                 ax.set_xlim(all_data_min - x_margin, all_data_max + x_margin)
 
-            # 设置Y轴范围：从0到正态分布曲线最高点的2倍
-            if max_curve_height > 0:
-                ax.set_ylim(0, max_curve_height * 2)
+            # 设置Y轴范围：如果最高峰值是第二高峰值的3倍以上，则使用第二高峰值的2.5倍
+            if len(all_curve_heights) > 0:
+                # 对峰值排序（从大到小）
+                sorted_heights = sorted(all_curve_heights, reverse=True)
+
+                if len(sorted_heights) > 1:
+                    highest = sorted_heights[0]
+                    second_highest = sorted_heights[1]
+
+                    # 判断最高峰值是否为异常值（是第二高的3倍以上）
+                    if highest >= second_highest * 3:
+                        # 存在异常值，使用第二高峰值的2.5倍作为Y轴上限
+                        y_max = second_highest * 2.5
+                        logger.info(f"检测到异常峰值：最高={highest:.4f}，第二高={second_highest:.4f}（最高/第二高={highest/second_highest:.2f}倍），Y轴上限采用第二高×2.5={y_max:.4f}")
+                    else:
+                        # 无异常值，使用最高峰值的1.3倍
+                        y_max = highest * 1.3
+                        logger.info(f"未检测到异常峰值：最高={highest:.4f}，第二高={second_highest:.4f}，Y轴上限采用最高×1.3={y_max:.4f}")
+                else:
+                    # 只有一个分组，使用其峰值的1.3倍
+                    y_max = sorted_heights[0] * 1.3
+
+                ax.set_ylim(0, y_max)
 
             # 设置图表样式（简化版，图例只显示组名）
             ax.set_title(title, fontsize=14, fontweight='bold', pad=15)

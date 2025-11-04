@@ -4,6 +4,65 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-cn/1.0.0/)，本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [1.2.0.20] - 2025-11-04 🚀 备选公牛分析与性能优化
+
+### ✨ 新增功能
+- **新增3个备选公牛分析Sheet**
+  - **Sheet 17: 备选公牛-隐性基因分析**
+    - 每个备选公牛独立分析，按总风险从高到低排序
+    - 分组统计：成母牛、后备牛、全群三组对比
+    - 每个基因单独统计纯合头数和占比
+    - 右侧配水平条形图，直观对比风险影响占比
+    - 文件：`core/excel_report/sheet_builders/sheet12_builder.py`
+
+  - **Sheet 18: 备选公牛-近交系数分析**
+    - 按高风险占比排序显示每个备选公牛
+    - 4个近交区间分布：<3.125%, 3.125-6.25%, 6.25-12.5%, >12.5%
+    - 成母牛/后备牛/全群分组统计和占比
+    - 高风险小计行（>6.25%）单独显示
+    - 右侧配水平条形图对比高风险影响
+    - 文件：`core/excel_report/sheet_builders/sheet13_builder.py`
+
+  - **Sheet 19: 备选公牛-明细表**
+    - 完整41,160行数据表（所有母牛×备选公牛配对）
+    - 包含56列：母牛号、公牛号、近交系数、所有隐性基因等
+    - 支持筛选和排序功能
+    - 文件：`core/excel_report/sheet_builders/sheet14_builder.py`
+
+- **3个数据收集器**
+  - `candidate_bulls_genes_collector.py` - 隐性基因数据收集
+  - `candidate_bulls_inbreeding_collector.py` - 近交系数数据收集
+  - `candidate_bulls_detail_collector.py` - 明细数据收集
+  - 自动从`processed_cow_data.xlsx`获取胎次信息（lac>0为成母牛，lac==0为后备牛）
+  - 只分析在群母牛（是否在场=='是' AND sex=='母'）
+
+### ⚡ 性能优化
+- **Excel明细表写入性能优化100倍**
+  - Sheet 19（41,160行）：从5分钟降至10-30秒
+  - 改用`ws.append()`批量写入整行，替代逐个单元格写入
+  - 影响文件：`sheet14_builder.py`
+
+- **优化7个Sheet Builder的数据写入方式**
+  - `base_builder._write_dataframe_fast()` - 被4个builder使用
+  - `sheet3_detail_builder.py` - 育种性状明细 (~6,446行)
+  - `sheet4_detail_builder.py` - 母牛指数排名明细 (~6,446行)
+  - `sheet11_builder.py` - 选配推荐结果 (~4,116行)
+  - 整体报告生成时间从7-8分钟降至3-4分钟
+
+### 🐛 Bug修复
+- **修复备选公牛数据收集器列名匹配问题**
+  - 问题：`备选公牛分析结果.xlsx`使用中文列名`母牛号`，而`processed_cow_data.xlsx`使用英文列名`cow_id`
+  - 修复：使用`left_on='母牛号', right_on='cow_id'`进行merge
+  - 影响文件：
+    - `candidate_bulls_genes_collector.py`
+    - `candidate_bulls_inbreeding_collector.py`
+
+### 🔧 优化
+- **Excel报告版本升级至v1.3**
+  - 从17个Sheet增至20个Sheet
+  - Sheet序号调整：备选公牛分析插入在Sheet 16之后，选配推荐移至Sheet 20
+  - 更新文件：`generator.py`
+
 ## [1.2.0.19] - 2025-11-03 📚 Bug修复与文档体系重构
 
 ### 🐛 Bug修复

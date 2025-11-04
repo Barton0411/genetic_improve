@@ -183,18 +183,28 @@ class Sheet11Builder(BaseSheetBuilder):
         current_row += 1
         header_row = current_row - 1
 
-        # 数据行
-        for _, row_data in df.iterrows():
-            for col_idx, col_name in enumerate(df.columns, 1):
-                value = row_data[col_name]
+        # 数据行（先批量写入数据，再设置格式）
+        data_start_row = current_row
 
+        # 1. 批量写入数据（使用append，快速！）
+        for _, row_data in df.iterrows():
+            values = []
+            for col_name in df.columns:
+                value = row_data[col_name]
                 # 处理NaN和NaT
                 if pd.isna(value):
                     value = ""
                 elif isinstance(value, pd.Timestamp):
                     value = value.strftime('%Y-%m-%d')
+                values.append(value)
 
-                cell = self.ws.cell(row=current_row, column=col_idx, value=value)
+            self.ws.append(values)
+            current_row += 1
+
+        # 2. 批量设置格式（只遍历一次，比边写边设置快）
+        for row_num in range(data_start_row, current_row):
+            for col_idx, col_name in enumerate(df.columns, 1):
+                cell = self.ws.cell(row=row_num, column=col_idx)
 
                 # 应用格式
                 if col_name in ['胎次', '配次', '月龄', '泌乳天数']:
@@ -205,12 +215,10 @@ class Sheet11Builder(BaseSheetBuilder):
                 elif '备注' in col_name:
                     self.style_manager.apply_data_style(cell, alignment='left')
                     # 如果包含警告信息，标记为黄色
-                    if value and ('风险' in str(value) or '近交系数' in str(value)):
+                    if cell.value and ('风险' in str(cell.value) or '近交系数' in str(cell.value)):
                         cell.fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
                 else:
                     self.style_manager.apply_data_style(cell, alignment='center')
-
-            current_row += 1
 
         # 冻结首行和首列
         self.ws.freeze_panes = self.ws.cell(row=header_row + 1, column=2)
