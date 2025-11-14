@@ -184,12 +184,17 @@ class InbreedingDetailModel(QAbstractTableModel):
         # 设置要显示的列
         # 确保在模型中始终包含关键列，顺序清晰
         display_columns = []
-        
+
         # 先添加基本信息列
-        for col in ['母牛号', '父号', '配种公牛号']:
+        for col in ['母牛号', '父号', '配种公牛号', '备选公牛号']:
             if col in df.columns:
                 display_columns.append(col)
-                
+
+        # 如果有原始公牛号列，也添加（用于对比）
+        for col in ['原始备选公牛号', '原始配种公牛号']:
+            if col in df.columns:
+                display_columns.append(col)
+
         # 添加后代近交系数列
         if '后代近交系数' in df.columns:
             display_columns.append('后代近交系数')
@@ -236,33 +241,65 @@ class InbreedingDetailModel(QAbstractTableModel):
     def _precompute_sort_keys(self):
         """预计算排序键以提高排序性能"""
         self._sort_cache.clear()
-        
+
         if self.df.empty:
             return
-            
+
         # 为百分比列预计算排序键
         percentage_columns = ['近交系数', '后代近交系数']
         for col in percentage_columns:
             if col in self.df.columns:
                 def parse_percentage(x):
+                    """
+                    解析百分比值，支持多种格式：
+                    - "3.54%" -> 3.54
+                    - "0.0354" -> 3.54 (转换为百分比数值)
+                    - 3.54 -> 3.54
+                    - 0.0354 -> 3.54 (转换为百分比数值)
+                    """
                     try:
                         if pd.isna(x) or x == '':
                             return -1.0
-                        if isinstance(x, str) and '%' in x:
-                            return float(x.rstrip('%'))
-                        return float(x)
-                    except (ValueError, TypeError):
+
+                        # 如果是字符串
+                        if isinstance(x, str):
+                            x_stripped = x.strip()
+                            if '%' in x_stripped:
+                                # "3.54%" -> 3.54
+                                return float(x_stripped.rstrip('%'))
+                            else:
+                                # "0.0354" -> 3.54
+                                val = float(x_stripped)
+                                # 如果值小于1，认为是小数形式，需要乘以100
+                                if 0 <= val < 1:
+                                    return val * 100
+                                return val
+                        else:
+                            # 如果是数字
+                            val = float(x)
+                            # 如果值小于1，认为是小数形式，需要乘以100
+                            if 0 <= val < 1:
+                                return val * 100
+                            return val
+                    except (ValueError, TypeError) as e:
+                        print(f"解析百分比失败: {x} ({type(x).__name__}), 错误: {e}")
                         return -1.0
-                
+
                 sort_values = self.df[col].apply(parse_percentage).values
                 self._sort_cache[col] = sort_values
-                
-                # 调试信息
+
+                # 增强调试信息
                 if col == '后代近交系数':
-                    print(f"生成排序缓存 - {col}:")
-                    print(f"  原始前5个值: {self.df[col].head().tolist()}")
-                    print(f"  排序键前5个值: {sort_values[:5]}")
-                    print(f"  最大值: {sort_values.max()}, 最小值: {sort_values.min()}")
+                    print(f"\n生成排序缓存 - {col}:")
+                    print(f"  原始数据类型: {self.df[col].dtype}")
+                    print(f"  原始前10个值: {self.df[col].head(10).tolist()}")
+                    print(f"  排序键前10个值: {sort_values[:10]}")
+                    print(f"  最大值: {sort_values.max():.4f}, 最小值: {sort_values.min():.4f}")
+                    print(f"  唯一值数量: {len(set(sort_values))}")
+                    # 检查是否有异常值
+                    abnormal = [i for i, v in enumerate(sort_values[:20]) if v < 0]
+                    if abnormal:
+                        print(f"  警告：前20项中发现异常值（-1.0）在索引: {abnormal}")
 
     def _format_gene_value(self, value):
         """格式化基因值显示"""
@@ -304,11 +341,10 @@ class InbreedingDetailModel(QAbstractTableModel):
         try:
             if self.df.empty:
                 return
-            
-            # 检查是否需要重新排序
-            if hasattr(self, 'sort_column') and self.sort_column == column and self.sort_order == order:
-                return  # 相同的排序，直接跳过
-                
+
+            # 移除跳过逻辑，确保每次点击都会执行排序
+            # （用户点击列头时期望看到排序效果）
+
             self.layoutAboutToBeChanged.emit()
             
             # 获取列名
@@ -328,7 +364,7 @@ class InbreedingDetailModel(QAbstractTableModel):
                         import numpy as np
                         sort_keys = self._sort_cache[column_name]
                         sorted_indices = np.argsort(sort_keys)
-                        
+
                         # 对于近交系数和后代近交系数，默认降序（从大到小）更有意义
                         if order == Qt.SortOrder.AscendingOrder:
                             # 如果用户明确要求升序，则保持升序
@@ -336,13 +372,19 @@ class InbreedingDetailModel(QAbstractTableModel):
                         else:
                             # 默认或明确要求降序，则降序
                             sorted_indices = sorted_indices[::-1]
-                        
+
                         self.df = self.df.iloc[sorted_indices].reset_index(drop=True)
-                        
-                        # 调试信息
-                        print(f"使用缓存排序 '{column_name}': {'升序' if order == Qt.SortOrder.AscendingOrder else '降序'}")
+
+                        # 增强调试信息
+                        print(f"\n===== 排序调试信息 =====")
+                        print(f"列名: '{column_name}'")
+                        print(f"排序方向: {'升序 (小→大)' if order == Qt.SortOrder.AscendingOrder else '降序 (大→小)'}")
+                        print(f"数据总行数: {len(sort_keys)}")
                         if len(sorted_indices) > 0:
-                            print(f"  排序后前5项: {sort_keys[sorted_indices[:5]]}")
+                            print(f"排序键前10项: {sort_keys[sorted_indices[:10]]}")
+                            print(f"对应原始值前10项: {self.df[column_name].head(10).tolist()}")
+                            print(f"排序键最大值: {sort_keys.max():.4f}, 最小值: {sort_keys.min():.4f}")
+                        print(f"=====================\n")
                             
                     except Exception as e:
                         print(f"使用缓存排序失败，回退到普通排序: {e}")

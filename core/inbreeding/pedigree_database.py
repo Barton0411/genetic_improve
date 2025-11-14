@@ -556,27 +556,51 @@ class PedigreeDatabase:
     def standardize_animal_id(self, animal_id: str, id_type: str = 'unknown') -> str:
         """
         标准化动物ID，处理NAAB和非NAAB格式
-        
+
         Args:
             animal_id: 动物ID
             id_type: ID类型，可以是'cow'、'bull'或'unknown'
-            
+
         Returns:
             str: 标准化后的ID
         """
         if not animal_id or pd.isna(animal_id):
             return ""
-            
+
         animal_id = str(animal_id).strip()
         if not animal_id:
             return ""
-            
+
         # 对于公牛类型的ID，尝试转换NAAB格式
         if id_type == 'bull' and self._is_naab_format(animal_id):
             reg_id = self.convert_naab_to_reg(animal_id)
-            if reg_id:
+
+            # 检查转换是否成功（如果返回的还是NAAB格式，说明转换失败）
+            if reg_id and reg_id != animal_id:
+                # 转换成功，返回REG号
                 return reg_id
-                
+            elif reg_id == animal_id:
+                # 转换失败（映射表中没有），尝试直接查数据库
+                try:
+                    import sqlite3
+                    conn = sqlite3.connect(self.db_path)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT `BULL REG` FROM bull_library WHERE `BULL NAAB` = ?", (animal_id,))
+                    result = cursor.fetchone()
+                    conn.close()
+
+                    if result and result[0]:
+                        logging.info(f"从数据库直接查询NAAB→REG: {animal_id} -> {result[0]}")
+                        # 缓存到映射表，避免重复查询
+                        self.naab_to_reg_map[animal_id] = result[0]
+                        return result[0]
+                    else:
+                        logging.warning(f"NAAB号 {animal_id} 在数据库中未找到对应的REG号，使用原ID")
+                        return animal_id
+                except Exception as e:
+                    logging.error(f"查询NAAB→REG时出错: {e}")
+                    return animal_id
+
         return animal_id
     
     def merge_pedigrees(self, cow_pedigree: Dict):

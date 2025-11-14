@@ -488,24 +488,70 @@ class PedigreeDialog(QDialog):
                 path_info = ""
                 ancestor_f = 0.0
                 path_lengths = "未知"
-                
+                n1_n2_sum = 0  # n₁+n₂的值
+
                 if 'paths' in details and ancestor_id in details['paths']:
-                    # 从路径信息中提取长度（简化显示）
+                    # 从路径信息中提取长度和祖先近交系数
                     paths = details['paths'][ancestor_id]
                     if paths:
-                        # 假设路径格式中包含长度信息
+                        # 路径格式: (path_str, path_contribution, n1, n2, F_CA)
+                        # 如果是新格式（包含5个元素），提取n1, n2, F_CA
+                        first_path = paths[0]
+                        if len(first_path) >= 5:
+                            # 新格式：包含完整信息
+                            _, _, n1, n2, ancestor_f = first_path
+                            n1_n2_sum = n1 + n2
+                            path_lengths = str(n1_n2_sum)
+                        # 旧格式兼容：只有2个元素 - 动态计算
+                        elif len(first_path) == 2:
+                            # 从系谱库中读取祖先的GIB值
+                            try:
+                                from core.data.update_manager import get_pedigree_db
+                                import math
+                                pedigree_db = get_pedigree_db()
+                                if ancestor_id in pedigree_db.pedigree:
+                                    ancestor_info = pedigree_db.pedigree[ancestor_id]
+                                    if ancestor_info.get('gib') is not None:
+                                        ancestor_f = ancestor_info['gib']
+                                        # 确保是小数形式
+                                        if ancestor_f > 1.0:
+                                            ancestor_f = ancestor_f / 100.0
+
+                                # 从贡献值反推路径长度
+                                # 贡献值 = (1/2)^(n1+n2+1) * (1 + F_CA)
+                                # 因此: n1+n2 = log2((1 + F_CA) / 贡献值) - 1
+                                path_contribution = first_path[1]  # 贡献值
+                                if path_contribution > 0 and (1 + ancestor_f) > 0:
+                                    # 计算 (1/2)^(n1+n2+1) = 贡献值 / (1 + F_CA)
+                                    base_contribution = path_contribution / (1 + ancestor_f)
+                                    # n1+n2+1 = log2(1 / base_contribution) = -log2(base_contribution)
+                                    n1_n2_plus_1 = -math.log2(base_contribution)
+                                    n1_n2_sum = int(round(n1_n2_plus_1 - 1))
+                                    if n1_n2_sum > 0:
+                                        path_lengths = str(n1_n2_sum)
+                            except Exception as e:
+                                # 如果提取失败，保持默认值
+                                pass
+
                         path_info = f"<br><span class='path-info'>共{len(paths)}条路径</span>"
                 
                 # 计算贡献百分比
                 contribution_percent = (contribution / total_inbreeding * 100) if total_inbreeding > 0 else 0
                 
-                # 构建表格行
+                # 构建表格行（显示实际的n₁+n₂和F_CA值）
+                if path_lengths != "未知":
+                    # 使用实际值构建公式
+                    formula = f"(1/2)^({path_lengths}+1) × (1 + {ancestor_f:.4f})"
+                else:
+                    # 兼容旧数据
+                    formula = f"(1/2)^(n₁+n₂+1) × (1 + {ancestor_f:.4f})"
+
                 html_content += f"""
                 <tr>
                     <td>{ancestor_id}{path_info}</td>
                     <td>{path_lengths}</td>
                     <td>{ancestor_f:.4f}</td>
-                    <td>(1/2)^(n₁+n₂+1) × (1 + {ancestor_f:.4f})</td>
+                    <td>{formula}</td>
                     <td class='contribution'>{contribution:.6f}</td>
                     <td>{contribution_percent:.2f}%</td>
                 </tr>
@@ -2597,7 +2643,20 @@ class InbreedingPage(QWidget):
         # 获取近交详情
         inbreeding_details = self.detail_model.df.iloc[row].get('近交详情')
         offspring_details = self.detail_model.df.iloc[row].get('后代近交详情')
-        
+
+        # 转换字符串为字典（如果需要）
+        import ast
+        if isinstance(inbreeding_details, str):
+            try:
+                inbreeding_details = ast.literal_eval(inbreeding_details)
+            except:
+                inbreeding_details = None
+        if isinstance(offspring_details, str):
+            try:
+                offspring_details = ast.literal_eval(offspring_details)
+            except:
+                offspring_details = None
+
         # 显示血缘关系图对话框
         dialog = PedigreeDialog(cow_id, sire_id, bull_id, self, inbreeding_details, offspring_details)
         dialog.exec()
@@ -2807,11 +2866,19 @@ class InbreedingPage(QWidget):
                     # 标准化备选公牛ID
                     original_bull_id = str(bull_row['bull_id'])
                     bull_id = pedigree_db.standardize_animal_id(original_bull_id, 'bull')
-                    
+
+                    # 详细记录转换信息（用于调试）
                     if original_bull_id != bull_id and original_bull_id:
-                        print(f"  备选公牛号转换: {original_bull_id} -> {bull_id}")
-                        if hasattr(self, 'progress_dialog') and self.progress_dialog and pair_count <= 5:  # 前5对显示转换信息
+                        if pair_count <= 20:  # 前20对详细打印
+                            print(f"  ✓ 备选公牛号转换: {original_bull_id} -> {bull_id}")
+                        if hasattr(self, 'progress_dialog') and self.progress_dialog and pair_count <= 5:
                             self.progress_dialog.update_info(f"备选公牛号转换: {original_bull_id} -> {bull_id}")
+                    elif pedigree_db._is_naab_format(original_bull_id) and original_bull_id == bull_id:
+                        # NAAB格式但没转换成功，打印警告
+                        if pair_count <= 10:
+                            print(f"  ⚠️ NAAB号转换失败: {original_bull_id} (映射表和数据库都未找到)")
+                        if hasattr(self, 'progress_dialog') and self.progress_dialog and pair_count <= 3:
+                            self.progress_dialog.update_info(f"⚠️ 警告: NAAB号 {original_bull_id} 无法转换")
                     
                     candidate_genes = bull_genes.get(bull_id, {gene: 'missing data' for gene in self.defect_genes})
                     
@@ -2981,13 +3048,18 @@ class InbreedingPage(QWidget):
                 
                 # 获取标准化后的配种公牛或备选公牛ID
                 bull_id = result.get('配种公牛号', result.get('备选公牛号', ''))  # 已经标准化的REG格式
-                
-                print(f"母牛ID: {cow_id}, 父号: {sire_id}, 公牛号: {bull_id}")
-                
+
+                # 获取原始公牛ID用于调试
+                original_bull = result.get('原始配种公牛号', result.get('原始备选公牛号', ''))
+
+                if i < 5:  # 前5个详细打印
+                    print(f"母牛ID: {cow_id}, 父号: {sire_id}, 公牛号: {bull_id}, 原始公牛号: {original_bull}")
+
                 # 如果有公牛ID，计算潜在后代的近交系数
                 if bull_id:
                     offspring_count += 1
-                    print(f"\n计算潜在后代近交系数: 公牛={bull_id}, 母牛={cow_id}")
+                    if i < 5:  # 前5个详细打印
+                        print(f"\n计算潜在后代近交系数: 公牛={bull_id}, 母牛={cow_id}")
                     
                     # 显示详细计算信息
                     if hasattr(self, 'progress_dialog') and self.progress_dialog and i < 3:  # 前3个显示详细信息

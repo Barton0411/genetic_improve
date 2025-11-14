@@ -215,15 +215,23 @@ def run_update_process(force_update: bool = False, progress_callback: Optional[C
             progress_callback(10, "检查bull_library数据库版本...")
 
         # 使用download_bull_library替代ensure_bull_library_exists，以支持版本检查和自动更新
-        success, msg = download_bull_library(LOCAL_DB_PATH, progress_callback, force_download=force_update)
+        success, msg, bull_library_updated = download_bull_library(LOCAL_DB_PATH, progress_callback, force_download=force_update)
         if success:
             logging.info(f"bull_library数据库已就绪: {msg}")
+            if bull_library_updated:
+                logging.info("检测到公牛库已更新，将强制重建系谱索引和NAAB→REG映射")
         else:
             logging.error(f"bull_library数据库更新失败: {msg}")
+            bull_library_updated = False  # 失败时不重建系谱
             # 不返回False，继续尝试更新系谱库
 
-        # 获取系谱库（会自动更新）
-        pedigree_db = get_pedigree_db(force_update=force_update, progress_callback=progress_callback)
+        # 获取系谱库（如果公牛库有更新，或者用户强制更新，则重建系谱）
+        should_rebuild_pedigree = force_update or bull_library_updated
+        if should_rebuild_pedigree:
+            logging.info("将重建系谱索引（原因: %s）",
+                        "用户强制更新" if force_update else "公牛库已更新")
+
+        pedigree_db = get_pedigree_db(force_update=should_rebuild_pedigree, progress_callback=progress_callback)
 
         if pedigree_db:
             logging.info("数据库更新成功")

@@ -144,7 +144,7 @@ def download_bull_library(
     local_db_path: Path,
     progress_callback: Optional[Callable] = None,
     force_download: bool = False
-) -> Tuple[bool, str]:
+) -> Tuple[bool, str, bool]:
     """
     下载bull_library数据库
 
@@ -154,7 +154,10 @@ def download_bull_library(
         force_download: 是否强制下载（忽略版本检查）
 
     Returns:
-        Tuple[bool, str]: (成功标志, 消息)
+        Tuple[bool, str, bool]: (成功标志, 消息, 是否有实际更新)
+            - 成功标志: 操作是否成功
+            - 消息: 详细信息
+            - 是否有实际更新: True表示数据库被下载/更新了，False表示数据库已经是最新无需更新
     """
     try:
         if progress_callback:
@@ -190,7 +193,7 @@ def download_bull_library(
                                     logger.info(f"数据库已是最新版本 {local_version}，包含{count}条记录")
                                     if progress_callback:
                                         progress_callback(100, f"数据库已是最新版本 ({count:,}条记录)")
-                                    return True, f"数据库已是最新版本 {local_version}"
+                                    return True, f"数据库已是最新版本 {local_version}", False  # 没有更新
                             conn.close()
                         except Exception as e:
                             logger.warning(f"数据库验证失败: {e}")
@@ -231,15 +234,15 @@ def download_bull_library(
                 logger.info(f"版本信息已保存: {oss_version_to_save}")
             else:
                 logger.warning("无法获取OSS版本信息，版本文件未更新")
-            return True, msg
+            return True, msg, True  # 有更新
         else:
             logger.error(f"OSS下载失败: {msg}")
-            return False, msg
+            return False, msg, False
 
     except Exception as e:
         error_msg = f"下载bull_library失败: {e}"
         logger.error(error_msg)
-        return False, error_msg
+        return False, error_msg, False
 
 def download_from_oss(
     local_db_path: Path,
@@ -415,7 +418,7 @@ def ensure_bull_library_exists(
             # 如果复制失败或没有预装数据库，则下载
             if not local_db_path.exists():
                 logger.info("bull_library.db不存在，开始自动下载")
-                success, msg = download_bull_library(local_db_path, progress_callback)
+                success, msg, _ = download_bull_library(local_db_path, progress_callback)
                 if not success:
                     logger.error(f"自动下载失败: {msg}")
                     return False
@@ -430,7 +433,7 @@ def ensure_bull_library_exists(
             conn.close()
             logger.warning("数据库文件存在但缺少bull_library表，重新下载")
             local_db_path.unlink()  # 删除损坏的文件
-            success, msg = download_bull_library(local_db_path, progress_callback)
+            success, msg, _ = download_bull_library(local_db_path, progress_callback)
             if not success:
                 logger.error(f"重新下载失败: {msg}")
                 return False
@@ -443,7 +446,7 @@ def ensure_bull_library_exists(
             if count == 0:
                 logger.warning("bull_library表为空，重新下载")
                 local_db_path.unlink()
-                success, msg = download_bull_library(local_db_path, progress_callback)
+                success, msg, _ = download_bull_library(local_db_path, progress_callback)
                 if not success:
                     logger.error(f"重新下载失败: {msg}")
                     return False

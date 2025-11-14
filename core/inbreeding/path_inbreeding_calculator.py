@@ -227,11 +227,12 @@ class PathInbreedingCalculator:
                         else:
                             print(f"    最终贡献: {path_contribution:.8f}")
                     
-                    # 记录路径和贡献
+                    # 记录路径和贡献（包含路径长度和祖先近交系数，用于显示）
                     sire_path_str = " -> ".join([str(x) for x in sire_path])
                     dam_path_str = " -> ".join([str(x) for x in dam_path])
                     path_str = f"{sire_id} -> {sire_path_str} <- {dam_path_str} <- {dam_id}"
-                    ancestor_paths.append((path_str, path_contribution))
+                    # 保存为元组: (路径字符串, 贡献值, n1, n2, F_CA)
+                    ancestor_paths.append((path_str, path_contribution, sire_length, dam_length, ancestor_f))
                     
                     # 累加贡献
                     ancestor_contribution += path_contribution
