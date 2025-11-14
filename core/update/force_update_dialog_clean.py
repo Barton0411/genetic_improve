@@ -543,12 +543,13 @@ class ForceUpdateDialog(QDialog):
         # 填充更新内容
         changes = self.version_info.get('data', {}).get('changes') or self.version_info.get('changes', [])
         if isinstance(changes, str):
-            changes_text.setText(changes)
+            changes_text.setPlainText(changes)
         elif isinstance(changes, list):
-            content = "\n".join([f"• {change}" for change in changes])
-            changes_text.setText(content)
+            # 使用HTML格式，支持<b>标签和正确的换行
+            content = "<br>".join([f"• {change}" for change in changes])
+            changes_text.setHtml(content)
         else:
-            changes_text.setText("• 重要系统更新和安全修复\n• 修复已知问题\n• 提升系统稳定性")
+            changes_text.setHtml("• 重要系统更新和安全修复<br>• 修复已知问题<br>• 提升系统稳定性")
         
         layout.addWidget(changes_text)
         
