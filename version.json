@@ -1,11 +1,17 @@
 {
-  "version": "1.2.0.19",
+  "version": "1.2.0.21",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.19/伊利奶牛选配_v1.2.0.19_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.19/伊利奶牛选配_v1.2.0.19_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.21/伊利奶牛选配_v1.2.0.21_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.0.21/伊利奶牛选配_v1.2.0.21_win.exe",
   "changes": [
-    "1. <b>修复</b>：修复增量选配时母牛育种指数被覆盖的问题",
-    "2. <b>界面</b>：优化界面显示，固定使用浅色模式",
-    "3. <b>文档</b>：文档体系全面重构，新增多个使用指南"
+    "1. <b>修复</b>：近交系数计算步骤详情显示n₁、n₂、F_CA实际值而非默认值",
+    "2. <b>优化</b>：路径信息存储增强，保存完整计算参数（n1, n2, F_CA）",
+    "3. <b>功能</b>：旧格式数据兼容，动态从系谱库提取GIB值",
+    "4. <b>功能</b>：智能反推路径长度，使用数学公式从贡献值计算",
+    "5. <b>修复</b>：修复近交详情从Excel读取的字符串格式转换问题",
+    "6. <b>优化</b>：完善公牛库更新后自动重建系谱索引机制",
+    "7. <b>修复</b>：修复NAAB→REG映射缓存未及时更新导致的近交系数计算错误",
+    "8. <b>优化</b>：增强系谱数据库查询，缓存未命中时直接查询本地数据库",
+    "9. <b>文档</b>：完成820头母牛0.00%近交系数问题分析报告"
   ]
 }
