@@ -587,16 +587,34 @@ class PathInbreedingCalculator:
             
         # 识别共同祖先
         all_common_ancestors = set(bull_ancestors.keys()) & set(cow_ancestors.keys())
-        print(f"找到所有共同祖先: {len(all_common_ancestors)}个")
-        
-        # 特殊情况: 如果公牛或母牛是对方的祖先，将其添加到共同祖先集合
-        if bull_id in cow_ancestors and bull_id not in all_common_ancestors:
+        print(f"找到初步共同祖先: {len(all_common_ancestors)}个")
+
+        # 特殊情况处理：如果公牛是母牛的祖先（但不是父亲，父亲已经在前面处理了）
+        # 需要将公牛本身作为共同祖先，因为公牛既是父方又在母方血统中
+        if bull_id in cow_ancestors:
+            print(f"[INFO] 检测到公牛 {bull_id} 是母牛的祖先")
+
+            # 将公牛本身添加为共同祖先
             all_common_ancestors.add(bull_id)
-            print(f"[INFO] 添加公牛 {bull_id} 作为母牛祖先到共同祖先集合")
-            
-        if cow_id in bull_ancestors and cow_id not in all_common_ancestors:
-            all_common_ancestors.add(cow_id)
-            print(f"[INFO] 添加母牛 {cow_id} 作为公牛祖先到共同祖先集合")
+
+            # 为公牛创建一个"自我到自我"的空路径（长度为0）
+            # 这样在计算时，从公牛到公牛的距离是0
+            if bull_id not in bull_ancestors:
+                bull_ancestors[bull_id] = [[]]  # 空路径表示从自己到自己
+
+            # 关键修复：排除公牛的其他祖先，避免路径重复计算
+            # 因为通过公牛的祖先到达母牛的路径，实际上也会经过公牛本身
+            # 如果同时计算公牛和公牛的祖先，会导致路径重复
+            bull_other_ancestors = set(bull_ancestors.keys()) - {bull_id}
+            ancestors_to_remove = all_common_ancestors & bull_other_ancestors
+
+            if ancestors_to_remove:
+                print(f"[INFO] 排除公牛的 {len(ancestors_to_remove)} 个祖先，避免路径重复：")
+                for anc in list(ancestors_to_remove)[:5]:  # 只打印前5个
+                    print(f"  - {anc}")
+                all_common_ancestors -= ancestors_to_remove
+
+        print(f"最终共同祖先: {len(all_common_ancestors)}个")
         
         # 按代数对共同祖先排序 (代数越小表示越接近牛只)
         sorted_common_ancestors = sorted(
@@ -622,12 +640,18 @@ class PathInbreedingCalculator:
                 
             # 检查是否是需要标记的共同祖先
             should_mark = False
-            
-            # 特殊情况：祖先就是公牛或母牛本身，必须标记
-            if ancestor == bull_id or ancestor == cow_id:
+
+            # 特殊情况：如果祖先就是公牛本身（公牛是母牛的祖先）
+            if ancestor == bull_id:
+                # 这是合法的情况：公牛既是父方又是母方的祖先
                 should_mark = True
                 filtered_common_ancestors.add(ancestor)
-                print(f"[INFO] 标记特殊祖先: {ancestor} (是公牛或母牛本身)")
+                print(f"[INFO] 标记公牛 {ancestor} 为共同祖先（公牛是母牛的祖先）")
+                continue
+
+            # 错误检查：母牛本身不应该出现在共同祖先列表中
+            if ancestor == cow_id:
+                print(f"[ERROR] 检测到异常：{ancestor} 是母牛本身，不应该作为共同祖先！跳过此祖先。")
                 continue
                 
             # 检查公牛侧的路径
