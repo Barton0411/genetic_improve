@@ -357,9 +357,16 @@ class PedigreeDialog(QDialog):
                 
                 if ancestor_id in details['paths']:
                     ancestor_paths = details['paths'][ancestor_id]
-                    for i, (path_str, path_contrib) in enumerate(ancestor_paths):
-                        path_percent = path_contrib * 100
-                        item = QListWidgetItem(f"路径 {i+1}: {path_contrib:.6f} ({path_percent:.4f}%)")
+                    for i, path_data in enumerate(ancestor_paths):
+                        # 兼容新旧格式：新格式5元素，旧格式2元素
+                        if len(path_data) >= 5:
+                            path_str, path_contrib, n1, n2, f_ca = path_data[:5]
+                            path_percent = path_contrib * 100
+                            item = QListWidgetItem(f"通径 {i+1}: {path_contrib:.6f} ({path_percent:.4f}%) [n1={n1}, n2={n2}]")
+                        else:
+                            path_str, path_contrib = path_data[:2]
+                            path_percent = path_contrib * 100
+                            item = QListWidgetItem(f"路径 {i+1}: {path_contrib:.6f} ({path_percent:.4f}%)")
                         item.setData(Qt.ItemDataRole.UserRole, path_str)
                         path_list.addItem(item)
             
@@ -558,14 +565,65 @@ class PedigreeDialog(QDialog):
                 """
             
             html_content += "</table>"
-            
+
             # 添加总结
             html_content += f"""
             <h3>计算总结</h3>
             <p>共找到 <strong>{len(details['common_ancestors'])}</strong> 个共同祖先</p>
             <p>近交系数总和: <strong class='result'>F = {total_inbreeding:.4f} ({total_inbreeding*100:.2f}%)</strong></p>
             """
-            
+
+            # 添加所有通径详情（仅显示前5个重要祖先的通径）
+            if 'paths' in details:
+                html_content += """
+                <h3>通径详情（前5个重要共同祖先）</h3>
+                <div style='max-height: 600px; overflow-y: auto;'>
+                """
+
+                displayed_count = 0
+                for ancestor_id, contribution in sorted_ancestors:
+                    if displayed_count >= 5 or contribution < 0.001:
+                        break
+
+                    if ancestor_id in details['paths']:
+                        paths = details['paths'][ancestor_id]
+                        if paths:
+                            html_content += f"""
+                            <h4>{ancestor_id} - 贡献: {contribution:.6f} ({contribution*100:.4f}%)</h4>
+                            <ul style='list-style-type: none; padding-left: 20px;'>
+                            """
+
+                            # 显示该祖先的所有通径（最多10条）
+                            for i, path_data in enumerate(paths[:10]):
+                                if len(path_data) >= 5:
+                                    path_str, path_contrib, n1, n2, f_ca = path_data[:5]
+                                    path_percent = path_contrib * 100
+                                    html_content += f"""
+                                    <li style='margin: 5px 0; font-family: monospace; font-size: 12px;'>
+                                        <strong>通径 {i+1}:</strong> {path_str}
+                                        <br>&nbsp;&nbsp;&nbsp;&nbsp;
+                                        <span style='color: #666;'>贡献: {path_contrib:.6f} ({path_percent:.4f}%), n₁={n1}, n₂={n2}, F_CA={f_ca:.4f}</span>
+                                    </li>
+                                    """
+                                else:
+                                    path_str, path_contrib = path_data[:2]
+                                    path_percent = path_contrib * 100
+                                    html_content += f"""
+                                    <li style='margin: 5px 0; font-family: monospace; font-size: 12px;'>
+                                        <strong>路径 {i+1}:</strong> {path_str}
+                                        <br>&nbsp;&nbsp;&nbsp;&nbsp;
+                                        <span style='color: #666;'>贡献: {path_contrib:.6f} ({path_percent:.4f}%)</span>
+                                    </li>
+                                    """
+
+                            if len(paths) > 10:
+                                html_content += f"<li style='color: #999;'>...还有 {len(paths) - 10} 条通径未显示</li>"
+
+                            html_content += "</ul>"
+                            displayed_count += 1
+
+                html_content += "</div>"
+
             # 添加解释
             if total_inbreeding > 0.0625:
                 html_content += "<p class='warning'>⚠️ 注意：近交系数超过6.25%，建议谨慎考虑此配对</p>"

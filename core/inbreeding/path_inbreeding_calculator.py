@@ -276,50 +276,51 @@ class PathInbreedingCalculator:
             
         # 初始化队列，每个元素是(当前ID, 当前路径, 当前代数)
         queue = [(animal_id, [], 0)]
-        visited = set()  # 记录已经访问过的节点，避免环路
-        
+
         print(f"开始搜索 {animal_id} 的祖先，最大追溯 {max_generations} 代")
-        
+
         parent_count = 0
         while queue:
             current_id, current_path, current_gen = queue.pop(0)
-            
-            # 如果已经处理过这个节点，或者超过最大代数，跳过
-            if current_id in visited or current_gen > max_generations:
+
+            # 检查是否超过最大代数
+            if current_gen > max_generations:
                 continue
-                
-            # 标记为已访问
-            visited.add(current_id)
-            
+
+            # 检查当前路径中是否已经包含此节点（避免环路）
+            if current_id in current_path:
+                continue
+
             # 将当前ID加入路径
             new_path = current_path + [current_id]
-            
+
             # 如果当前ID不是起始ID，将其添加到结果中
             if current_id != animal_id:
                 if current_id not in result:
                     result[current_id] = []
                 # 存储从动物到祖先的完整路径
                 result[current_id].append(new_path[1:])
-            
+
             # 如果已经达到最大代数，不再继续
             if current_gen == max_generations:
                 continue
-            
+
             # 获取父母并添加到队列中
             if current_id in self.pedigree_db.pedigree:
                 info = self.pedigree_db.pedigree[current_id]
                 sire_id = info.get('sire', '')
                 dam_id = info.get('dam', '')
-                
+
                 # 打印进度（每100个父母打印一次）
                 parent_count += 1
                 if parent_count <= 10 or parent_count % 100 == 0:
                     gen_str = '代数' + str(current_gen)
                     print(f"  {gen_str:<6} 处理 {current_id:<15} 父: {sire_id:<15} 母: {dam_id:<15}")
-                
-                if sire_id and sire_id not in visited:
+
+                # 只要父母不在当前路径中（无环路），就添加到队列
+                if sire_id and sire_id not in new_path:
                     queue.append((sire_id, new_path, current_gen + 1))
-                if dam_id and dam_id not in visited:
+                if dam_id and dam_id not in new_path:
                     queue.append((dam_id, new_path, current_gen + 1))
         
         # 打印结果统计
@@ -711,19 +712,25 @@ class PathInbreedingCalculator:
                 for cow_path in cow_paths:
                     # 计算路径系数: (1/2)^(n+1) * (1 + F_ancestor)
                     # 这里n是路径长度，+1是因为还要从公牛到后代
-                    path_length = len(cow_path)
+                    sire_length = 0  # 公牛到自己的距离为0
+                    dam_length = len(cow_path)
+                    path_length = dam_length
                     ancestor_inbreeding, _, _ = self.calculate_inbreeding_coefficient(ancestor)
                     path_coef = (0.5) ** (path_length + 1) * (1 + ancestor_inbreeding)
-                    
-                    # 构建路径字符串
-                    path_str = f"子代 <- {cow_id} <- "
-                    path_str += " <- ".join([str(p) for p in reversed(cow_path)])
-                    path_str += f" -> {bull_id} -> 子代"
-                    
-                    print(f"[DEBUG] 路径: {path_str}, 长度: {path_length}, 系数: {path_coef:.6f}")
-                    
+
+                    # 构建路径字符串（格式：公牛(共同祖先) → 母系路径 → 母牛）
+                    # 因为公牛本身就是共同祖先，所以只显示母系部分
+                    path_str = f"{bull_id}"
+                    if cow_path:
+                        # 母系路径需要反转（从祖先到母牛的顺序）
+                        path_str += " → " + " → ".join([str(p) for p in reversed(cow_path)])
+                    path_str += f" → {cow_id}"
+
+                    print(f"[DEBUG] 路径: {path_str}, 长度: n1={sire_length}, n2={dam_length}, 贡献={(path_coef*100):.4f}%")
+
                     ancestor_contribution += path_coef
-                    all_path_details.append((path_str, path_coef))
+                    # 保存为元组: (路径字符串, 贡献值, n1, n2, F_CA)
+                    all_path_details.append((path_str, path_coef, sire_length, dam_length, ancestor_inbreeding))
                     
             # 特殊情况处理：如果祖先就是母牛自己
             elif ancestor == cow_id:
@@ -731,39 +738,88 @@ class PathInbreedingCalculator:
                 # 母牛直接是公牛的某个祖先（非常罕见）
                 for bull_path in bull_paths:
                     # 计算路径系数: (1/2)^(n+1) * (1 + F_ancestor)
-                    path_length = len(bull_path)
+                    sire_length = len(bull_path)
+                    dam_length = 0  # 母牛到自己的距离为0
+                    path_length = sire_length
                     ancestor_inbreeding, _, _ = self.calculate_inbreeding_coefficient(ancestor)
                     path_coef = (0.5) ** (path_length + 1) * (1 + ancestor_inbreeding)
-                    
-                    # 构建路径字符串
-                    path_str = f"子代 <- {bull_id} <- "
-                    path_str += " <- ".join([str(p) for p in reversed(bull_path)])
-                    path_str += f" -> {cow_id} -> 子代"
-                    
-                    print(f"[DEBUG] 路径: {path_str}, 长度: {path_length}, 系数: {path_coef:.6f}")
-                    
+
+                    # 构建路径字符串（格式：公牛 ← 父系路径 ← 母牛(共同祖先)）
+                    # 因为母牛本身就是共同祖先，所以只显示父系部分
+                    path_str = f"{bull_id}"
+                    if bull_path:
+                        path_str += " ← " + " ← ".join([str(p) for p in bull_path])
+                    path_str += f" ← {cow_id}"
+
+                    print(f"[DEBUG] 路径: {path_str}, 长度: n1={sire_length}, n2={dam_length}, 贡献={(path_coef*100):.4f}%")
+
                     ancestor_contribution += path_coef
-                    all_path_details.append((path_str, path_coef))
+                    # 保存为元组: (路径字符串, 贡献值, n1, n2, F_CA)
+                    all_path_details.append((path_str, path_coef, sire_length, dam_length, ancestor_inbreeding))
             
             # 正常情况：祖先既不是公牛也不是母牛
             else:
                 # 计算所有可能的路径组合
+                valid_path_count = 0
+                invalid_path_count = 0
+
                 for bull_path in bull_paths:
                     for cow_path in cow_paths:
+                        # 检查是否是有效通径（通径链中不能有重复节点）
+                        bull_nodes = set(bull_path)
+                        cow_nodes = set(cow_path)
+                        common_nodes = bull_nodes & cow_nodes
+
+                        # 除了共同祖先外，路径不应有其他交叉点
+                        if len(common_nodes) > 1 or (len(common_nodes) == 1 and ancestor not in common_nodes):
+                            invalid_path_count += 1
+                            if invalid_path_count <= 3:  # 只打印前3条无效路径
+                                print(f"[DEBUG] 跳过无效通径（存在重复节点）:")
+                                print(f"  父系路径: {' → '.join(bull_path)}")
+                                print(f"  母系路径: {' → '.join(cow_path)}")
+                                print(f"  重复节点: {common_nodes}")
+                            continue
+
+                        valid_path_count += 1
+
                         # 计算路径系数: (1/2)^(n1+n2+1) * (1 + F_ancestor)
-                        path_length = len(bull_path) + len(cow_path)
+                        sire_length = len(bull_path)
+                        dam_length = len(cow_path)
+                        path_length = sire_length + dam_length
                         ancestor_inbreeding, _, _ = self.calculate_inbreeding_coefficient(ancestor)
                         path_coef = (0.5) ** (path_length + 1) * (1 + ancestor_inbreeding)
-                        
-                        # 构建路径字符串
-                        path_str = f"子代 <- {cow_id} <- "
-                        path_str += " <- ".join([str(p) for p in reversed(cow_path)])
-                        path_str += f" -> {ancestor} -> "
-                        path_str += " -> ".join([str(p) for p in bull_path])
-                        path_str += f" -> {bull_id} -> 子代"
-                        
+
+                        # 构建路径字符串（格式：公牛 ← 父系路径 ← 共同祖先 → 母系路径 → 母牛）
+                        # 例如：47 ← 13 ← 29 → 14 → 36
+                        # 注意：bull_path和cow_path都包含ancestor作为最后一个元素
+
+                        path_str = f"{bull_id}"
+
+                        # 父系路径：从公牛到共同祖先（bull_path已包含ancestor）
+                        if bull_path:
+                            path_str += " ← " + " ← ".join([str(p) for p in bull_path])
+
+                        # 母系路径：从共同祖先到母牛
+                        # cow_path是从母牛到祖先，格式为[母系节点1, ..., ancestor]
+                        # 需要去掉ancestor，反转，然后添加
+                        if cow_path:
+                            # 去掉最后一个元素（ancestor），然后反转
+                            cow_path_without_ancestor = cow_path[:-1] if len(cow_path) > 1 else []
+                            if cow_path_without_ancestor:
+                                path_str += " → " + " → ".join([str(p) for p in reversed(cow_path_without_ancestor)])
+
+                        path_str += f" → {cow_id}"
+
+                        if valid_path_count <= 5:  # 打印前5条有效路径
+                            print(f"[DEBUG] 有效通径 {valid_path_count}: {path_str}")
+                            print(f"  路径长度: n1={sire_length}, n2={dam_length}, 贡献={(path_coef*100):.4f}%")
+
                         ancestor_contribution += path_coef
-                        all_path_details.append((path_str, path_coef))
+                        # 保存为元组: (路径字符串, 贡献值, n1, n2, F_CA)
+                        all_path_details.append((path_str, path_coef, sire_length, dam_length, ancestor_inbreeding))
+
+                if invalid_path_count > 0:
+                    print(f"[INFO] 祖先 {ancestor}: 过滤掉 {invalid_path_count} 条无效通径，保留 {valid_path_count} 条有效通径")
             
             # 保存这个祖先的总贡献和所有路径(如果贡献大于0)
             if ancestor_contribution > 0:
