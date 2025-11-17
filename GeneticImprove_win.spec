@@ -30,7 +30,8 @@ a = Analysis(
         # 添加其他必要资源
         ('startup.mp4', '.'),
         ('homepage.jpg', '.'),
-        ('PPT模版.pptx', '.'),
+        # PPT报告模版（使用正确的模版文件）
+        ('牧场牧场育种分析报告-模版.pptx', '.'),
     ],
     hiddenimports=[
         # PyQt6 相关模块

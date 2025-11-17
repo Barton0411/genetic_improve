@@ -3,10 +3,21 @@
 """
 
 # 版本号格式: 主版本号.次版本号.修订号.构建号 (xxx.xxx.xxx.xxx)
-VERSION = "1.2.1.2"
+VERSION = "1.2.1.3"
 
 # 版本历史（完整记录所有版本）
 VERSION_HISTORY = [
+    {
+        "version": "1.2.1.3",
+        "date": "2025-11-18",
+        "author": "Development Team",
+        "changes": [
+            "1. <b>修复</b>：修正PPT模版打包错误，使用正确的模版文件",
+            "2. <b>优化</b>：macOS安装包大小优化，从375MB降至预期的60MB左右",
+            "3. <b>修复</b>：排除PyTorch等不必要的大型库（torch 239MB、pyarrow 97MB等）",
+            "4. <b>优化</b>：Windows安装包同步优化，减小体积提升下载速度"
+        ]
+    },
     {
         "version": "1.2.1.2",
         "date": "2025-11-18",

@@ -1,12 +1,12 @@
 {
-  "version": "1.2.1.2",
+  "version": "1.2.1.3",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.2/伊利奶牛选配_v1.2.1.2_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.2/伊利奶牛选配_v1.2.1.2_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.3/伊利奶牛选配_v1.2.1.3_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.3/伊利奶牛选配_v1.2.1.3_win.exe",
   "changes": [
-    "1. <b>优化</b>：macOS安装包大小优化，从375MB降至预期的60MB左右",
-    "2. <b>修复</b>：排除PyTorch等不必要的大型库（torch 239MB、pyarrow 97MB等）",
-    "3. <b>优化</b>：Windows安装包同步优化，减小体积提升下载速度",
-    "4. <b>修复</b>：更新对话框换行显示问题修复"
+    "1. <b>修复</b>：修正PPT模版打包错误，使用正确的模版文件",
+    "2. <b>优化</b>：macOS安装包大小优化，从375MB降至预期的60MB左右",
+    "3. <b>修复</b>：排除PyTorch等不必要的大型库（torch 239MB、pyarrow 97MB等）",
+    "4. <b>优化</b>：Windows安装包同步优化，减小体积提升下载速度"
   ]
 }

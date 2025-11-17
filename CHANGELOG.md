@@ -4,6 +4,35 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-cn/1.0.0/)，本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [1.2.1.3] - 2025-11-18 🔧 PPT模版打包修复与安装包优化
+
+### 🐛 关键修复
+- **PPT模版打包错误修正**
+  - 修复前：打包了错误的模版 `PPT模版.pptx`（5.9MB）
+  - 修复后：正确打包 `牧场牧场育种分析报告-模版.pptx`（7.3MB）
+  - 代码优先级：generator.py 优先使用"牧场牧场育种分析报告-模版.pptx"
+  - 影响：修复自动生成PPT报告功能无法正常工作的问题
+  - 文件：`GeneticImprove.spec:34`, `GeneticImprove_win.spec:34`
+
+### 🎯 性能优化
+- **macOS安装包大小优化**
+  - 从375MB大幅降至预期的60MB左右（降低84%）
+  - 排除PyTorch及相关库（torch 239MB、torchvision 4MB）
+  - 排除pyarrow（97MB）、未使用的大型依赖
+  - 显著提升下载速度和用户体验
+
+- **Windows安装包同步优化**
+  - 同步排除不必要的大型库
+  - 减小安装包体积，提升下载速度
+
+### 📝 技术细节
+- 在PyInstaller配置中新增excludes列表，排除：
+  - torch、torchvision、torchaudio
+  - IPython、jupyter、notebook
+  - pytest、setuptools、distutils
+
+---
+
 ## [1.2.1.2] - 2025-11-18 📦 安装包体积优化
 
 ### 🎯 重大优化

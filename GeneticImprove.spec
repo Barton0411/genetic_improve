@@ -30,7 +30,8 @@ a = Analysis(
         # 添加启动视频和图片
         ('startup.mp4', '.'),
         ('homepage.jpg', '.'),
-        ('PPT模版.pptx', '.'),
+        # PPT报告模版（使用正确的模版文件）
+        ('牧场牧场育种分析报告-模版.pptx', '.'),
     ],
     hiddenimports=[
         # PyQt6 相关模块
@@ -173,12 +174,12 @@ app = BUNDLE(
     name='伊利奶牛选配.app',
     icon=icon_path,
     bundle_identifier='com.yili.breeding.app',
-    version='1.2.1.2',
+    version='1.2.1.3',
     info_plist={
         'CFBundleName': '伊利奶牛选配',
         'CFBundleDisplayName': '伊利奶牛选配',
-        'CFBundleVersion': '1.2.1.2',
-        'CFBundleShortVersionString': '1.2.1.2',
+        'CFBundleVersion': '1.2.1.3',
+        'CFBundleShortVersionString': '1.2.1.3',
         'CFBundleIdentifier': 'com.yili.breeding.app',
         'CFBundleInfoDictionaryVersion': '6.0',
         'CFBundlePackageType': 'APPL',
