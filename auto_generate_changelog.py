@@ -120,11 +120,12 @@ def main():
     
     print(f"Changes ({len(version_info.get('changes', []))} items):")
     for i, change in enumerate(version_info.get('changes', []), 1):
-        # 安全打印，移除或替换非ASCII字符
-        safe_change = change.encode('ascii', 'ignore').decode('ascii').strip()
-        if not safe_change:  # 如果移除后为空，使用占位符
-            safe_change = "[Contains non-ASCII characters]"
-        print(f"   {i}. {safe_change}")
+        try:
+            # 尝试直接打印（在支持UTF-8的环境中）
+            print(f"   {i}. {change}")
+        except UnicodeEncodeError:
+            # 如果打印失败，使用占位符
+            print(f"   {i}. [Change {i}]")
     
     # 保存changelog文件
     changelog_file = save_changelog_file(current_version, content)
