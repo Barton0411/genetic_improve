@@ -1,36 +1,48 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import sys
+import os
 from pathlib import Path
 
 # 获取项目根目录
 project_root = Path.cwd()
 
+# 基础数据文件列表
+base_datas = [
+    # 添加资源文件
+    ('gui/resources', 'gui/resources'),
+    # 添加其他必要的数据文件夹
+    ('core', 'core'),
+    ('version.py', '.'),
+    # 添加图标文件
+    ('icon.ico', '_internal'),
+    # 添加配置文件
+    ('config', 'config'),
+    # 添加模板文件
+    ('templates', 'templates'),
+    # 添加阿里云登录模块
+    ('aliyun_login_module', 'aliyun_login_module'),
+    # 添加启动视频和图片
+    ('startup.mp4', '.'),
+    ('homepage.jpg', '.'),
+    ('PPT模版.pptx', '.'),
+]
+
+# Windows特有：添加预装公牛数据库（减小Mac安装包体积，Mac版从云端下载）
+if sys.platform.startswith('win'):
+    if os.path.exists('data/databases/bull_library.db'):
+        base_datas.append(('data/databases/bull_library.db', 'data/databases'))
+        print("✅ Windows: 已添加公牛数据库到安装包")
+    else:
+        print("⚠️ Windows: 未找到公牛数据库文件")
+else:
+    print("ℹ️ macOS: 跳过公牛数据库打包（从云端下载）")
+
 a = Analysis(
     ['main.py'],
     pathex=[str(project_root)],
     binaries=[],
-    datas=[
-        # 添加资源文件
-        ('gui/resources', 'gui/resources'),
-        # 添加其他必要的数据文件夹
-        ('core', 'core'),
-        ('version.py', '.'),
-        # 添加图标文件
-        ('icon.ico', '_internal'),
-        # 添加预装数据库文件
-        ('data/databases/bull_library.db', 'data/databases'),
-        # 添加配置文件
-        ('config', 'config'),
-        # 添加模板文件
-        ('templates', 'templates'),
-        # 添加阿里云登录模块
-        ('aliyun_login_module', 'aliyun_login_module'),
-        # 添加启动视频和图片
-        ('startup.mp4', '.'),
-        ('homepage.jpg', '.'),
-        ('PPT模版.pptx', '.'),
-    ],
+    datas=base_datas,
     hiddenimports=[
         # PyQt6 相关模块
         'PyQt6.QtCore',
@@ -161,12 +173,12 @@ app = BUNDLE(
     name='伊利奶牛选配.app',
     icon=icon_path,
     bundle_identifier='com.yili.breeding.app',
-    version='1.2.0.1',
+    version='1.2.1.1',
     info_plist={
         'CFBundleName': '伊利奶牛选配',
         'CFBundleDisplayName': '伊利奶牛选配',
-        'CFBundleVersion': '1.2.0.1',
-        'CFBundleShortVersionString': '1.2.0.1',
+        'CFBundleVersion': '1.2.1.1',
+        'CFBundleShortVersionString': '1.2.1.1',
         'CFBundleIdentifier': 'com.yili.breeding.app',
         'CFBundleInfoDictionaryVersion': '6.0',
         'CFBundlePackageType': 'APPL',
