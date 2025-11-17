@@ -43,6 +43,12 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
+    - name: Remove unnecessary large packages
+      run: |
+        # 明确卸载不需要的大型库，避免被PyInstaller打包
+        pip uninstall -y torch torchvision torchaudio pyarrow || true
+        echo "Removed large packages that are not needed"
+
     - name: Prepare database file
       run: |
         python scripts/prepare_database.py
@@ -193,6 +199,12 @@ jobs:
         pip install pyinstaller
         # 安装创建DMG的工具
         brew install create-dmg
+
+    - name: Remove unnecessary large packages
+      run: |
+        # 明确卸载不需要的大型库，避免被PyInstaller打包
+        pip3 uninstall -y torch torchvision torchaudio pyarrow || true
+        echo "Removed large packages that are not needed"
 
     # macOS不打包数据库，跳过数据库准备步骤（减小安装包体积）
     # - name: Prepare database file

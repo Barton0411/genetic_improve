@@ -110,7 +110,7 @@ a = Analysis(
         'aliyun_login_module.database_config',
         'config.settings',
     ],
-    hookspath=[],
+    hookspath=['hooks'],  # 使用自定义hooks强制排除大型库
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
@@ -174,12 +174,12 @@ app = BUNDLE(
     name='伊利奶牛选配.app',
     icon=icon_path,
     bundle_identifier='com.yili.breeding.app',
-    version='1.2.1.3',
+    version='1.2.1.4',
     info_plist={
         'CFBundleName': '伊利奶牛选配',
         'CFBundleDisplayName': '伊利奶牛选配',
-        'CFBundleVersion': '1.2.1.3',
-        'CFBundleShortVersionString': '1.2.1.3',
+        'CFBundleVersion': '1.2.1.4',
+        'CFBundleShortVersionString': '1.2.1.4',
         'CFBundleIdentifier': 'com.yili.breeding.app',
         'CFBundleInfoDictionaryVersion': '6.0',
         'CFBundlePackageType': 'APPL',

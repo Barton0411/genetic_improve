@@ -110,7 +110,7 @@ a = Analysis(
         'aliyun_login_module.database_config',
         'config.settings',
     ],
-    hookspath=[],
+    hookspath=['hooks'],  # 使用自定义hooks强制排除大型库
     hooksconfig={},
     runtime_hooks=[],
     excludes=[

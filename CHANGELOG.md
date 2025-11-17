@@ -4,6 +4,38 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-cn/1.0.0/)，本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [1.2.1.4] - 2025-11-18 🔧 安装包体积优化增强版
+
+### 🐛 关键修复
+- **PPT模版打包错误修正**
+  - 修复前：打包了错误的模版 `PPT模版.pptx`（5.9MB）
+  - 修复后：正确打包 `牧场牧场育种分析报告-模版.pptx`（7.3MB）
+  - 修复自动生成PPT报告功能无法正常工作的问题
+  - 文件：`GeneticImprove.spec:34`, `GeneticImprove_win.spec:34`
+
+### 🎯 体积优化增强
+- **PyInstaller hooks机制**
+  - 新增自定义hooks文件强制排除大型库
+  - `hooks/hook-torch.py` - 排除PyTorch
+  - `hooks/hook-torchvision.py` - 排除torchvision
+  - `hooks/hook-pyarrow.py` - 排除pyarrow
+  - 在spec文件中配置 `hookspath=['hooks']`
+
+- **构建流程优化**
+  - 在打包前明确卸载torch、torchvision、torchaudio、pyarrow
+  - 防止这些库被意外打包进去
+  - Windows和macOS构建流程同步优化
+  - 文件：`.github/workflows/build-releases.yml`
+
+### 📝 技术细节
+- v1.2.1.3版本的excludes列表未生效（376MB未减小）
+- 本版本采用双重策略：
+  1. 构建时明确卸载：`pip uninstall -y torch torchvision ...`
+  2. PyInstaller hooks强制排除
+- 预期效果：macOS从376MB降至~60-80MB
+
+---
+
 ## [1.2.1.3] - 2025-11-18 🔧 PPT模版打包修复与安装包优化
 
 ### 🐛 关键修复

@@ -3,10 +3,21 @@
 """
 
 # 版本号格式: 主版本号.次版本号.修订号.构建号 (xxx.xxx.xxx.xxx)
-VERSION = "1.2.1.3"
+VERSION = "1.2.1.4"
 
 # 版本历史（完整记录所有版本）
 VERSION_HISTORY = [
+    {
+        "version": "1.2.1.4",
+        "date": "2025-11-18",
+        "author": "Development Team",
+        "changes": [
+            "1. <b>修复</b>：修正PPT模版打包错误，使用正确的模版文件",
+            "2. <b>优化</b>：macOS安装包大小优化 - 强制卸载torch等大型库",
+            "3. <b>修复</b>：添加PyInstaller hooks强制排除不必要依赖",
+            "4. <b>优化</b>：构建流程优化，打包前明确卸载大型依赖"
+        ]
+    },
     {
         "version": "1.2.1.3",
         "date": "2025-11-18",
