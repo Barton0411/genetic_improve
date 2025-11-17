@@ -117,6 +117,17 @@ a = Analysis(
         'tkinter',
         'pdb',
         'doctest',
+        # 排除PyTorch及相关库（不需要，但可能被某些依赖引入）
+        'torch',
+        'torchvision',
+        'torchaudio',
+        # 排除其他不必要的大型库
+        'IPython',
+        'jupyter',
+        'notebook',
+        'pytest',
+        'setuptools',
+        'distutils',
     ],
     noarchive=False,
 )
@@ -162,12 +173,12 @@ app = BUNDLE(
     name='伊利奶牛选配.app',
     icon=icon_path,
     bundle_identifier='com.yili.breeding.app',
-    version='1.2.1.1',
+    version='1.2.1.2',
     info_plist={
         'CFBundleName': '伊利奶牛选配',
         'CFBundleDisplayName': '伊利奶牛选配',
-        'CFBundleVersion': '1.2.1.1',
-        'CFBundleShortVersionString': '1.2.1.1',
+        'CFBundleVersion': '1.2.1.2',
+        'CFBundleShortVersionString': '1.2.1.2',
         'CFBundleIdentifier': 'com.yili.breeding.app',
         'CFBundleInfoDictionaryVersion': '6.0',
         'CFBundlePackageType': 'APPL',

@@ -1,13 +1,12 @@
 {
-  "version": "1.2.1.1",
+  "version": "1.2.1.2",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.1/伊利奶牛选配_v1.2.1.1_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.1/伊利奶牛选配_v1.2.1.1_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.2/伊利奶牛选配_v1.2.1.2_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.2/伊利奶牛选配_v1.2.1.2_win.exe",
   "changes": [
-    "1. <b>功能</b>：开始完善自动生成PPT，已经完成模版建设，正在逐步调整数据和结构",
-    "2. <b>架构</b>：把PPT生成流程从'新建+拼接'切到'基于完整模版按页填充'",
-    "3. <b>优化</b>：把1–6页的数据映射、取数逻辑和格式问题逐步纠正到了和Excel/模版完全一致",
-    "4. <b>功能</b>：开始完善Part 3，从第8页'系谱识别情况汇总'入手，让行数、顺序、样式都严格跟Excel+模版对齐",
-    "5. <b>修复</b>：对近交通径法里'共同祖先合并'的逻辑做了核心修正，保证像509HO11351这种近祖先能在结果里清楚展示"
+    "1. <b>优化</b>：macOS安装包大小优化，从375MB降至预期的60MB左右",
+    "2. <b>修复</b>：排除PyTorch等不必要的大型库（torch 239MB、pyarrow 97MB等）",
+    "3. <b>优化</b>：Windows安装包同步优化，减小体积提升下载速度",
+    "4. <b>修复</b>：更新对话框换行显示问题修复"
   ]
 }

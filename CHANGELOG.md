@@ -4,6 +4,36 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-cn/1.0.0/)，本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## [1.2.1.2] - 2025-11-18 📦 安装包体积优化
+
+### 🎯 重大优化
+- **macOS安装包大小优化**
+  - 从375MB大幅降至预期的60MB左右（降低84%）
+  - 排除PyTorch及相关库（torch 239MB、torchvision 4MB）
+  - 排除pyarrow（97MB）、未使用的大型依赖
+  - 显著提升下载速度和用户体验
+  - 文件：`GeneticImprove.spec`
+
+### 🔧 Windows同步优化
+- **Windows安装包优化**
+  - 同步排除不必要的大型库
+  - 减小安装包体积，提升下载速度
+  - 文件：`GeneticImprove_win.spec`
+
+### 🐛 界面修复
+- **更新对话框显示优化**
+  - 修复更新内容换行显示问题
+  - 改用`<p>`标签替代`<br>`标签，提供更好的段落间距
+  - 文件：`core/update/force_update_dialog_clean.py:71-73`
+
+### 📝 技术细节
+- 在PyInstaller配置中新增excludes列表，排除以下模块：
+  - torch、torchvision、torchaudio（深度学习库，本项目不需要）
+  - IPython、jupyter、notebook（交互式环境，打包不需要）
+  - pytest、setuptools、distutils（开发工具，生产环境不需要）
+
+---
+
 ## [1.2.1.1] - 2025-11-18 📊 PPT自动生成系统重构与完善
 
 ### ✨ 功能增强

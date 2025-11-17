@@ -117,6 +117,17 @@ a = Analysis(
         'tkinter',
         'pdb',
         'doctest',
+        # 排除PyTorch及相关库（不需要，但可能被某些依赖引入）
+        'torch',
+        'torchvision',
+        'torchaudio',
+        # 排除其他不必要的大型库
+        'IPython',
+        'jupyter',
+        'notebook',
+        'pytest',
+        'setuptools',
+        'distutils',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
