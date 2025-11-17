@@ -3688,118 +3688,147 @@ class MainWindow(QMainWindow):
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
-            
+
         try:
-            # 导入新的PPT生成器
-            from core.report.ppt_generator import PPTGenerator
-            
-            # 获取用户名（从设置或默认值）
-            username = getattr(self, 'username', '用户')
-            
-            # 创建输出文件夹路径
-            output_folder = self.selected_project_path / "analysis_results"
-            output_folder.mkdir(exist_ok=True)
-            
-            # 创建PPT生成器
-            ppt_generator = PPTGenerator(str(output_folder), username)
-            
-            # 生成报告
-            success = ppt_generator.generate_report(parent_widget=self)
-            
-            if not success:
-                # 错误消息已经在generate_report中显示
-                return
-                
-        except ImportError as e:
-            # 如果新模块还未完全实现，回退到旧的实现
-            logging.warning(f"无法导入新的PPT生成器: {e}")
-            # 使用旧的PPT生成器
-            try:
-                from core.reporting.ppt import PPTGenerator as OldPPTGenerator
-                
-                # 获取牧场名称
-                farm_name = self.selected_project_path.name
-                
-                # 创建PPT生成器
-                ppt_generator = OldPPTGenerator(self.selected_project_path, farm_name)
-                
-                # 检查必要文件
+            # 优先使用新的Excel报告模式 ✨
+            reports_folder = self.selected_project_path / "reports"
+            excel_reports = list(reports_folder.glob("育种分析综合报告_*.xlsx")) if reports_folder.exists() else []
+
+            if excel_reports:
+                # 使用新的Excel报告模式
+                from core.ppt_report import ExcelBasedPPTGenerator
+                from auth.auth_service import AuthService
+                import pandas as pd
+
+                # 获取登录用户的账号和姓名
+                reporter_name = "用户"  # 默认值
+                try:
+                    auth_service = AuthService()
+                    user_name = auth_service.get_user_name()
+
+                    # 同时显示账号和姓名
+                    if user_name and self.username:
+                        # 如果有姓名，显示为 "姓名 (账号)"
+                        reporter_name = f"{user_name} ({self.username})"
+                    elif user_name:
+                        # 只有姓名
+                        reporter_name = user_name
+                    elif self.username:
+                        # 只有账号
+                        reporter_name = self.username
+                except Exception as e:
+                    logging.warning(f"无法获取用户信息: {e}")
+                    if self.username:
+                        reporter_name = self.username
+
+                # 从Excel报告中读取真实的牧场名称
+                farm_name = "牧场"  # 默认值
+                try:
+                    # 尝试从最新的Excel报告中读取牧场名称
+                    if excel_reports:
+                        latest_excel = max(excel_reports, key=lambda p: p.stat().st_mtime)
+                        # 读取Sheet1（牧场基础信息）
+                        df_info = pd.read_excel(latest_excel, sheet_name='牧场基础信息', nrows=1)
+                        if '牧场名称' in df_info.columns:
+                            farm_name = str(df_info['牧场名称'].iloc[0])
+                        elif '项目名称' in df_info.columns:
+                            farm_name = str(df_info['项目名称'].iloc[0])
+                except Exception as e:
+                    logging.warning(f"无法从Excel读取牧场名称: {e}")
+                    # 如果读取失败，尝试清理文件夹名称
+                    raw_name = self.selected_project_path.name
+                    # 移除日期时间戳部分（如 _2025_10_12_13_13）
+                    import re
+                    farm_name = re.sub(r'_\d{4}_\d{2}_\d{2}_\d{2}_\d{2}$', '', raw_name)
+                    if not farm_name or farm_name == raw_name:
+                        farm_name = raw_name
+
+                ppt_generator = ExcelBasedPPTGenerator(
+                    project_path=self.selected_project_path,
+                    farm_name=farm_name,
+                    reporter_name=reporter_name
+                )
+
+                # 检查Excel报告
                 can_generate, error_msg = ppt_generator.check_required_files()
                 if not can_generate:
-                    # 解析缺少的文件类型
-                    missing_analyses = []
-                    if "系谱识别情况分析" in error_msg:
-                        missing_analyses.append(("系谱识别情况分析", self.run_pedigree_analysis))
-                    if "母牛关键性状指数" in error_msg:
-                        missing_analyses.append(("母牛关键性状指数", self.run_cow_key_traits))
-                    if "母牛育种指数" in error_msg:
-                        missing_analyses.append(("母牛育种指数", self.run_cow_index_calculation))
-                    
-                    # 构建提示信息
-                    missing_names = [name for name, _ in missing_analyses]
-                    message = f"生成PPT报告需要先完成以下分析：\n\n• " + "\n• ".join(missing_names)
-                    message += "\n\n是否现在自动执行这些分析？"
-                    
                     reply = QMessageBox.question(
                         self,
-                        "缺少必要分析",
-                        message,
+                        "缺少Excel报告",
+                        f"{error_msg}\n\n是否现在生成Excel报告？",
                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                     )
-                    
+
                     if reply == QMessageBox.StandardButton.Yes:
-                        # 执行缺失的分析
-                        for name, func in missing_analyses:
-                            try:
-                                QMessageBox.information(self, "提示", f"正在执行{name}...")
-                                QApplication.processEvents()
-                                func()
-                            except Exception as e:
-                                QMessageBox.critical(self, "错误", f"执行{name}时出错：{str(e)}")
-                                return
-                        
-                        # 重新检查文件
-                        can_generate, error_msg = ppt_generator.check_required_files()
-                        if not can_generate:
-                            QMessageBox.warning(self, "错误", "部分分析执行失败，无法生成PPT报告。")
-                            return
+                        # 调用生成Excel报告
+                        self.on_generate_excel_report()
+                        # 等待Excel生成完成后再继续
+                        QMessageBox.information(self, "提示", "Excel报告生成完成，请再次点击'生成PPT报告'")
+                        return
                     else:
                         return
-                    
+
                 # 创建进度对话框
                 progress_dialog = ProgressDialog(self)
                 progress_dialog.setWindowTitle("生成PPT报告")
                 progress_dialog.set_task_info("正在生成PPT报告...")
                 progress_dialog.show()
-                
+
                 # 生成PPT
                 def progress_callback(message, progress):
                     progress_dialog.set_task_info(message)
                     progress_dialog.update_progress(progress)
                     QApplication.processEvents()
-                    
-                ppt_generator.generate_ppt(progress_callback)
-                
+
+                success = ppt_generator.generate_ppt(progress_callback)
                 progress_dialog.close()
-                
-                # 询问是否打开
-                output_file = self.selected_project_path / "analysis_results" / f"{farm_name}牧场遗传改良项目专项服务报告.pptx"
-                reply = QMessageBox.information(
+
+                if success:
+                    # 优先使用生成器返回的最后输出路径，防止 farm_name 不一致导致匹配不到文件
+                    latest_ppt = getattr(ppt_generator, "last_output_path", None)
+
+                    if latest_ppt is None:
+                        reports_folder = self.selected_project_path / "reports"
+                        ppt_files = list(reports_folder.glob("*牧场育种分析报告_*.pptx")) if reports_folder.exists() else []
+                        if ppt_files:
+                            latest_ppt = max(ppt_files, key=lambda p: p.stat().st_mtime)
+
+                    if latest_ppt and latest_ppt.exists():
+                        reply = QMessageBox.question(
+                            self,
+                            "生成成功",
+                            f"PPT报告已生成！\n\n文件：{latest_ppt.name}\n\n是否立即打开查看？",
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                            QMessageBox.StandardButton.Yes
+                        )
+
+                        if reply == QMessageBox.StandardButton.Yes:
+                            from PyQt6.QtCore import QUrl
+                            from PyQt6.QtGui import QDesktopServices
+                            QDesktopServices.openUrl(QUrl.fromLocalFile(str(latest_ppt)))
+                else:
+                    QMessageBox.warning(self, "生成失败", "PPT报告生成失败，请查看日志")
+
+                return
+            else:
+                # 如果没有Excel报告，提示用户先生成
+                reply = QMessageBox.question(
                     self,
-                    "生成成功",
-                    f"PPT报告已生成！\n\n是否立即打开查看？",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes
+                    "缺少Excel报告",
+                    "生成PPT报告需要先生成Excel综合报告。\n\n是否现在生成Excel报告？",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                 )
-                
+
                 if reply == QMessageBox.StandardButton.Yes:
-                    try:
-                        QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_file)))
-                    except Exception as e:
-                        QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}")
-                        
-            except Exception as e:
-                QMessageBox.critical(self, "生成失败", f"生成PPT报告时发生错误：\n{str(e)}")
+                    self.on_generate_excel_report()
+                    QMessageBox.information(self, "提示", "Excel报告生成完成后，请再次点击'生成PPT报告'")
+                return
+
+        except Exception as e:
+            logging.error(f"生成PPT报告失败: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+            QMessageBox.critical(self, "错误", f"生成PPT报告时发生错误：\n{str(e)}")
 
     def on_generate_excel_report(self):
         """生成Excel综合报告（使用后台线程）"""

@@ -21,10 +21,6 @@ from .candidate_bulls_genes_collector import collect_candidate_bulls_genes_data
 from .candidate_bulls_inbreeding_collector import collect_candidate_bulls_inbreeding_data
 from .candidate_bulls_detail_collector import collect_candidate_bulls_detail_data
 
-# v1.1兼容（保留旧函数）
-from .inbreeding_collector import collect_inbreeding_data
-from .bull_prediction_collector import collect_bull_prediction_data
-
 __all__ = [
     # v1.1 collectors
     'collect_farm_info',
@@ -50,6 +46,4 @@ __all__ = [
     # v1.1兼容
     'collect_gene_data',
     'collect_bull_usage_data',
-    'collect_inbreeding_data',
-    'collect_bull_prediction_data',
 ]

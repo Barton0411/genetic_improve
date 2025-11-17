@@ -18,13 +18,6 @@ from .sheet12_builder import Sheet12Builder
 from .sheet13_builder import Sheet13Builder
 from .sheet14_builder import Sheet14Builder
 
-# 保留旧的Sheet7ABuilder以兼容（如果还需要）
-try:
-    from .sheet7a_builder import Sheet7ABuilder
-    has_sheet7a = True
-except ImportError:
-    has_sheet7a = False
-
 __all__ = [
     'BaseSheetBuilder',
     'Sheet1Builder',
@@ -44,6 +37,3 @@ __all__ = [
     'Sheet13Builder',
     'Sheet14Builder',
 ]
-
-if has_sheet7a:
-    __all__.append('Sheet7ABuilder')

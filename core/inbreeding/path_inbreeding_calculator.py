@@ -162,6 +162,9 @@ class PathInbreedingCalculator:
         contributions = {}
         paths = {}
         
+        # 在通径法中，如果同一条通径上有多代祖先，应该优先保留离后代最近的那个作为共同祖先。
+        # 这里不在集合层面提前“合并”父辈与祖辈，而是让每个共同祖先根据自身路径独立计算贡献，
+        # 由路径过滤规则负责避免同一条通径被多次计数。
         for ancestor_id in common_ancestors:
             # 获取所有从父亲到祖先的路径
             sire_paths = sire_ancestors[ancestor_id]
@@ -586,105 +589,23 @@ class PathInbreedingCalculator:
         bull_generations = calculate_generation(bull_ancestors)
         cow_generations = calculate_generation(cow_ancestors)
             
-        # 识别共同祖先
-        all_common_ancestors = set(bull_ancestors.keys()) & set(cow_ancestors.keys())
-        print(f"找到初步共同祖先: {len(all_common_ancestors)}个")
+        # 识别共同祖先：直接使用交集，不在集合层面做“远祖合并近祖”的压缩，
+        # 让每个祖先在后续通径计算中独立贡献，这样像 509HO11351 这种更近的祖先可以单独展示。
+        common_ancestors = set(bull_ancestors.keys()) & set(cow_ancestors.keys())
+        print(f"找到初步共同祖先: {len(common_ancestors)}个")
 
-        # 特殊情况处理：如果公牛是母牛的祖先（但不是父亲，父亲已经在前面处理了）
-        # 需要将公牛本身作为共同祖先，因为公牛既是父方又在母方血统中
+        # 特殊情况：如果公牛是母牛的祖先（但不是父亲，父亲已在前面处理），
+        # 需要将公牛本身加入共同祖先集合，并为其创建自身路径。
         if bull_id in cow_ancestors:
             print(f"[INFO] 检测到公牛 {bull_id} 是母牛的祖先")
-
-            # 将公牛本身添加为共同祖先
-            all_common_ancestors.add(bull_id)
-
-            # 为公牛创建一个"自我到自我"的空路径（长度为0）
-            # 这样在计算时，从公牛到公牛的距离是0
+            common_ancestors.add(bull_id)
             if bull_id not in bull_ancestors:
-                bull_ancestors[bull_id] = [[]]  # 空路径表示从自己到自己
+                bull_ancestors[bull_id] = [[]]  # 自身路径
 
-            # 关键修复：排除公牛的其他祖先，避免路径重复计算
-            # 因为通过公牛的祖先到达母牛的路径，实际上也会经过公牛本身
-            # 如果同时计算公牛和公牛的祖先，会导致路径重复
-            bull_other_ancestors = set(bull_ancestors.keys()) - {bull_id}
-            ancestors_to_remove = all_common_ancestors & bull_other_ancestors
+        print(f"最终共同祖先: {len(common_ancestors)}个")
 
-            if ancestors_to_remove:
-                print(f"[INFO] 排除公牛的 {len(ancestors_to_remove)} 个祖先，避免路径重复：")
-                for anc in list(ancestors_to_remove)[:5]:  # 只打印前5个
-                    print(f"  - {anc}")
-                all_common_ancestors -= ancestors_to_remove
-
-        print(f"最终共同祖先: {len(all_common_ancestors)}个")
-        
-        # 按代数对共同祖先排序 (代数越小表示越接近牛只)
-        sorted_common_ancestors = sorted(
-            all_common_ancestors,
-            key=lambda x: min(bull_generations.get(x, float('inf')), cow_generations.get(x, float('inf')))
-        )
-        
-        # 过滤掉在同一血缘线上已有更近共同祖先的远祖先
-        filtered_common_ancestors = set()
-        # 记录每条路径上是否已有共同祖先
-        bull_path_has_ca = {}  # 键: 路径标识符，值: 已存在的最近共同祖先
-        cow_path_has_ca = {}   # 键: 路径标识符，值: 已存在的最近共同祖先
-        
-        for ancestor in sorted_common_ancestors:
-            # 获取所有从公牛和母牛到该祖先的路径
-            bull_paths = bull_ancestors.get(ancestor, [])
-            cow_paths = cow_ancestors.get(ancestor, [])
-            
-            # 如果任一方没有路径，跳过该祖先
-            if not bull_paths or not cow_paths:
-                print(f"[WARNING] 祖先 {ancestor} 缺少路径，跳过")
-                continue
-                
-            # 检查是否是需要标记的共同祖先
-            should_mark = False
-
-            # 特殊情况：如果祖先就是公牛本身（公牛是母牛的祖先）
-            if ancestor == bull_id:
-                # 这是合法的情况：公牛既是父方又是母方的祖先
-                should_mark = True
-                filtered_common_ancestors.add(ancestor)
-                print(f"[INFO] 标记公牛 {ancestor} 为共同祖先（公牛是母牛的祖先）")
-                continue
-
-            # 错误检查：母牛本身不应该出现在共同祖先列表中
-            if ancestor == cow_id:
-                print(f"[ERROR] 检测到异常：{ancestor} 是母牛本身，不应该作为共同祖先！跳过此祖先。")
-                continue
-                
-            # 检查公牛侧的路径
-            for path_idx, path in enumerate(bull_paths):
-                path_key = f"bull_path_{path_idx}"
-                # 如果这条路径上还没有标记过共同祖先
-                if path_key not in bull_path_has_ca:
-                    bull_path_has_ca[path_key] = ancestor
-                    should_mark = True
-            
-            # 检查母牛侧的路径
-            for path_idx, path in enumerate(cow_paths):
-                path_key = f"cow_path_{path_idx}"
-                # 如果这条路径上还没有标记过共同祖先
-                if path_key not in cow_path_has_ca:
-                    cow_path_has_ca[path_key] = ancestor
-                    should_mark = True
-            
-            # 如果需要标记，加入过滤后的共同祖先集合
-            if should_mark:
-                filtered_common_ancestors.add(ancestor)
-                print(f"[INFO] 标记祖先: {ancestor}")
-                
-        # 使用过滤后的共同祖先进行计算
-        common_ancestors = filtered_common_ancestors
-        
-        # 记录共同祖先数量
-        print(f"过滤后的共同祖先数量: {len(common_ancestors)}")
-        
-        # 如果没有共同祖先，近交系数为0
         if not common_ancestors:
-            print(f"[INFO] 没有找到共同祖先，后代近交系数为0")
+            print("[INFO] 没有找到共同祖先，后代近交系数为0")
             return 0.0, {}, {}
             
         # 计算每个共同祖先的贡献

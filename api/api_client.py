@@ -24,6 +24,7 @@ class APIClient:
             config_file: 配置文件路径，如果为None则使用默认配置
         """
         self.token = None
+        self.user_info = None  # 缓存用户信息（登录时保存）
         self._load_config(config_file)
 
         # 尝试从token manager恢复令牌
@@ -253,8 +254,17 @@ class APIClient:
         success, response = self._make_request('POST', '/api/auth/login', data)
 
         if success and response.get('success'):
-            token = response.get('data', {}).get('token')
+            response_data = response.get('data', {})
+            token = response_data.get('token')
             self.token = token  # 保存令牌
+
+            # 保存用户信息（登录时API就返回了name）
+            self.user_info = {
+                'user_id': response_data.get('user_id'),
+                'name': response_data.get('name')
+            }
+            logger.info(f"登录成功，用户信息: {self.user_info}")
+
             return True, token, response.get('message', '登录成功')
         else:
             return False, None, response.get('message', '登录失败')
@@ -296,6 +306,12 @@ class APIClient:
         if not self.token:
             return False, None, "未登录，请先登录"
 
+        # 优先返回缓存的用户信息（登录时已获取）
+        if self.user_info:
+            logger.debug(f"使用缓存的用户信息: {self.user_info}")
+            return True, self.user_info, "获取用户信息成功"
+
+        # 如果没有缓存，则从API获取
         headers = {
             'Authorization': f'Bearer {self.token}'
         }
@@ -303,7 +319,8 @@ class APIClient:
         success, response = self._make_request('GET', '/api/auth/profile', headers=headers)
 
         if success and response.get('success'):
-            return True, response.get('data'), response.get('message', '获取用户信息成功')
+            self.user_info = response.get('data')  # 缓存用户信息
+            return True, self.user_info, response.get('message', '获取用户信息成功')
         else:
             return False, None, response.get('message', '获取用户信息失败')
 
@@ -326,8 +343,9 @@ class APIClient:
         if success and response.get('success'):
             return True, response.get('message', '令牌有效')
         else:
-            # 令牌无效，清除本地令牌
+            # 令牌无效，清除本地令牌和用户信息
             self.token = None
+            self.user_info = None
             return False, response.get('message', '令牌无效')
 
     def set_token(self, token: str):
@@ -340,8 +358,9 @@ class APIClient:
         self.token = token
 
     def clear_token(self):
-        """清除令牌"""
+        """清除令牌和用户信息"""
         self.token = None
+        self.user_info = None
 
     def upload_missing_bulls(self, bulls_data: list) -> bool:
         """
