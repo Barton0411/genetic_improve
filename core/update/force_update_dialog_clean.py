@@ -523,11 +523,12 @@ class ForceUpdateDialog(QDialog):
         # 更新内容文本
         changes_text = QTextEdit()
         changes_text.setReadOnly(True)
-        
+        changes_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)  # 启用自动换行
+
         text_bg = "#1e1e1e" if self._is_dark_mode else "#f8f9fa"
         text_color = "#ffffff" if self._is_dark_mode else "#212529"
         border_color = "#555" if self._is_dark_mode else "#dee2e6"
-        
+
         changes_text.setStyleSheet(f"""
             QTextEdit {{
                 border: 1px solid {border_color};
@@ -539,17 +540,18 @@ class ForceUpdateDialog(QDialog):
                 line-height: 1.6;
             }}
         """)
-        
+
         # 填充更新内容
         changes = self.version_info.get('data', {}).get('changes') or self.version_info.get('changes', [])
         if isinstance(changes, str):
             changes_text.setPlainText(changes)
         elif isinstance(changes, list):
             # 使用HTML格式，支持<b>标签和正确的换行
-            content = "<br>".join([f"• {change}" for change in changes])
+            # 每个条目用<p>标签包裹，确保有足够的行间距
+            content = "".join([f"<p style='margin-bottom: 10px;'>• {change}</p>" for change in changes])
             changes_text.setHtml(content)
         else:
-            changes_text.setHtml("• 重要系统更新和安全修复<br>• 修复已知问题<br>• 提升系统稳定性")
+            changes_text.setHtml("<p>• 重要系统更新和安全修复</p><p>• 修复已知问题</p><p>• 提升系统稳定性</p>")
         
         layout.addWidget(changes_text)
         
