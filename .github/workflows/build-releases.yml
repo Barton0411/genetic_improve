@@ -128,35 +128,37 @@ jobs:
         # 显示生成的文件
         Get-ChildItem installer_output
     
-    - name: Create portable ZIP package
-      run: |
-        # 获取版本号
-        $VERSION = python -c "from version import get_version; print(get_version())"
-        
-        # 创建便携版ZIP
-        $ZIP_NAME = "伊利奶牛选配_v$VERSION" + "_win.zip"
-        Compress-Archive -Path "dist\伊利奶牛选配\*" -DestinationPath $ZIP_NAME -Force
-        
-        echo "Portable package created: $ZIP_NAME"
-        
-        # 显示文件大小
-        $size = (Get-Item $ZIP_NAME).Length / 1MB
-        echo "Package size: $([math]::Round($size, 2)) MB"
-    
+    # Windows便携版zip已废弃，只保留exe安装包
+    # - name: Create portable ZIP package
+    #   run: |
+    #     # 获取版本号
+    #     $VERSION = python -c "from version import get_version; print(get_version())"
+    #
+    #     # 创建便携版ZIP
+    #     $ZIP_NAME = "伊利奶牛选配_v$VERSION" + "_win.zip"
+    #     Compress-Archive -Path "dist\伊利奶牛选配\*" -DestinationPath $ZIP_NAME -Force
+    #
+    #     echo "Portable package created: $ZIP_NAME"
+    #
+    #     # 显示文件大小
+    #     $size = (Get-Item $ZIP_NAME).Length / 1MB
+    #     echo "Package size: $([math]::Round($size, 2)) MB"
+
     - name: Upload Windows installer
       uses: actions/upload-artifact@v4
       with:
         name: windows-installer
         path: installer_output/*.exe
         retention-days: 30
-    
-    - name: Upload Windows portable
-      uses: actions/upload-artifact@v4
-      with:
-        name: windows-portable
-        path: 伊利奶牛选配_v*_win.zip
-        retention-days: 30
-    
+
+    # Windows便携版zip已废弃
+    # - name: Upload Windows portable
+    #   uses: actions/upload-artifact@v4
+    #   with:
+    #     name: windows-portable
+    #     path: 伊利奶牛选配_v*_win.zip
+    #     retention-days: 30
+
     - name: Upload changelog artifact
       uses: actions/upload-artifact@v4
       with:
@@ -624,7 +626,6 @@ jobs:
         body_path: release_notes.md
         files: |
           windows-installer/*.exe
-          windows-portable/*.zip
           macos-release/*.dmg
         draft: false
         prerelease: false
