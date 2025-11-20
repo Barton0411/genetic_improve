@@ -1,12 +1,12 @@
 {
-  "version": "1.2.1.4",
+  "version": "1.2.1.5",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.4/伊利奶牛选配_v1.2.1.4_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.4/伊利奶牛选配_v1.2.1.4_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.5/伊利奶牛选配_v1.2.1.5_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.5/伊利奶牛选配_v1.2.1.5_win.exe",
   "changes": [
-    "1. <b>修复</b>：修正PPT模版打包错误，使用正确的模版文件",
-    "2. <b>优化</b>：macOS安装包大小优化 - 强制卸载torch等大型库",
-    "3. <b>修复</b>：添加PyInstaller hooks强制排除不必要依赖",
-    "4. <b>优化</b>：构建流程优化，打包前明确卸载大型依赖"
+    "1. <b>功能</b>：自动化生成页面支持小屏幕，窗口尺寸自适应分辨率，右侧内容区改为可滚动显示",
+    "2. <b>优化</b>：PPT第8页“系谱识别情况汇总”按Excel动态生成行，自动删除多余模板行并保留合计行蓝色底样式",
+    "3. <b>功能</b>：PPT第8页可识别占比列按“<80%标粉色”规则自动高亮，包括合计行，占比异常一目了然",
+    "4. <b>修复</b>：近交通径法共同祖先集合不再合并远祖，像509HO11351这类近祖先在结果中单独展示，计算更符合理论"
   ]
 }

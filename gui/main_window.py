@@ -14,13 +14,14 @@ from PyQt6.QtGui import (
     QLinearGradient
 )
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QPushButton, QFileDialog, QMessageBox, QLabel, 
-    QListWidget, QListWidgetItem, QStackedWidget, QInputDialog, 
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QFileDialog, QMessageBox, QLabel,
+    QListWidget, QListWidgetItem, QStackedWidget, QInputDialog,
     QFrame, QTreeView, QGridLayout, QAbstractItemView, QMenu, QGraphicsOpacityEffect,
-    QStackedLayout, QGroupBox, QComboBox, QCheckBox, QTableWidget, QTableWidgetItem, 
-    QHeaderView, QLineEdit, QTabWidget, QFormLayout, QSpinBox, QDialogButtonBox, 
-    QDialog, QProgressDialog, QApplication, QTextBrowser, QSizePolicy, QStyle
+    QStackedLayout, QGroupBox, QComboBox, QCheckBox, QTableWidget, QTableWidgetItem,
+    QHeaderView, QLineEdit, QTabWidget, QFormLayout, QSpinBox, QDialogButtonBox,
+    QDialog, QProgressDialog, QApplication, QTextBrowser, QSizePolicy, QStyle,
+    QScrollArea,
 )
 import warnings
 import pandas as pd
@@ -510,7 +511,26 @@ class MainWindow(QMainWindow):
 
     def setup_ui(self):
         self.setWindowTitle(f"伊利奶牛选配 v{self.version}")
-        self.setGeometry(100, 100, 1600, 900)
+
+        # 根据屏幕分辨率自适应窗口大小，兼顾小屏和大屏
+        try:
+            screen = QApplication.primaryScreen()
+            if screen is not None:
+                available = screen.availableGeometry()
+                sw, sh = available.width(), available.height()
+                # 目标尺寸：占可用区域的 90%，但不小于一个安全的最小值
+                target_w = max(1200, int(sw * 0.9))
+                target_h = max(700, int(sh * 0.9))
+                self.resize(target_w, target_h)
+            else:
+                # 回退到固定值
+                self.resize(1600, 900)
+        except Exception:
+            # 任何异常都回退到固定尺寸，避免因为 DPI 获取失败导致崩溃
+            self.resize(1600, 900)
+
+        # 给一个合理的最小尺寸，防止窗口被拉得过小导致布局完全挤压
+        self.setMinimumSize(1100, 650)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -1279,9 +1299,14 @@ class MainWindow(QMainWindow):
         self.content_stack.addWidget(page)
     
     def create_report_generation_page(self):
-        """创建自动化生成页面"""
-        page = QWidget()
-        layout = QVBoxLayout(page)
+        """创建自动化生成页面（使用可滚动容器，适配小屏幕）"""
+        # 实际内容放在 content_widget 中
+        content_widget = QWidget()
+        # 让内容区域本身保持透明，露出底部背景图和半透明遮罩
+        content_widget.setAutoFillBackground(False)
+        content_widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        layout = QVBoxLayout(content_widget)
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(30)
 
@@ -1517,7 +1542,28 @@ class MainWindow(QMainWindow):
 
         layout.addStretch()
 
-        return page
+        # 使用 QScrollArea 包裹内容，解决小屏幕看不全的问题
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # 让滚动区域本身也保持透明，避免盖住背景
+        scroll.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                background: transparent;
+            }
+            QScrollArea > QWidget {
+                background: transparent;
+            }
+            QScrollArea QWidget {
+                background: transparent;
+            }
+        """)
+        viewport = scroll.viewport()
+        viewport.setAutoFillBackground(False)
+        scroll.setWidget(content_widget)
+
+        return scroll
     
     # 在 handle_file_upload 方法中添加对基因组检测数据的处理逻辑
     def handle_file_upload(self, file_paths: list[Path], display_name: str):
