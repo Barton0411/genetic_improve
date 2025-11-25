@@ -253,9 +253,11 @@ class ExcelBasedPPTGenerator:
 
     def _build_part4_genetics(self, data: dict):
         """构建Part 4: 遗传评估"""
+        from .slide_builders.part4_genetics import Part4GeneticsBuilder
+
         logger.info("构建Part 4: 遗传评估")
-        # TODO: 实现遗传评估
-        pass
+        builder = Part4GeneticsBuilder(self.prs, self.chart_creator, self.farm_name)
+        builder.build(data)
 
     def _build_part5_breeding(self, data: dict):
         """构建Part 5: 配种记录"""

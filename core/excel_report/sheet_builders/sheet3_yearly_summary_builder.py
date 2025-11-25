@@ -475,16 +475,39 @@ class Sheet3YearlySummaryBuilder(BaseSheetBuilder):
         """
         # 选择对应的数据源
         farm_data = farm.get('present_data', {}) if data_type == 'present' else farm.get('all_data', {})
-
         # 构建行数据
         row = []
         for col_name in headers:
             if col_name == '出生年份':
-                # 第一列：显示"牧场名 (年份年)"
+                # 第一列：显示"牧场名 (年份范围)"
                 name = farm.get('name', '对比牧场')
-                year = farm.get('latest_year')
-                if year:
-                    row.append(f"{name} ({year}年)")
+
+                # 优先根据年份列表计算年份范围（最小-最大）
+                year_range_str = None
+                year_rows = farm.get('year_rows') or []
+                if year_rows:
+                    # 过滤掉“总计”等非年份行
+                    actual_years = [y for y in year_rows if '总计' not in str(y)]
+                    if actual_years:
+                        first_year = actual_years[0]
+                        last_year = actual_years[-1]
+
+                        # 提取阿拉伯数字年份，例如“2021年及以前” -> 2021
+                        match_first = re.search(r'(\d{4})', str(first_year))
+                        match_last = re.search(r'(\d{4})', str(last_year))
+
+                        if match_first and match_last:
+                            # 形如“2020年 - 2024年”
+                            year_range_str = f"{match_first.group(1)}年 - {match_last.group(1)}年"
+
+                # 如果无法解析年份范围，则退回到最后一年
+                if not year_range_str:
+                    year = farm.get('latest_year')
+                    if year:
+                        year_range_str = f"{year}年"
+
+                if year_range_str:
+                    row.append(f"{name} ({year_range_str})")
                 else:
                     row.append(name)
             elif col_name == '头数':

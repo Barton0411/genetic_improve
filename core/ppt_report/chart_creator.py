@@ -4,6 +4,8 @@
 
 import matplotlib.pyplot as plt
 import matplotlib
+from matplotlib import font_manager
+from matplotlib.font_manager import FontProperties
 import seaborn as sns
 import pandas as pd
 import numpy as np
@@ -14,16 +16,31 @@ from datetime import datetime
 import tempfile
 
 from .config import (
-    CHART_COLORS, CHART_DPI, CHART_FORMAT,
-    COLOR_SUCCESS, COLOR_WARNING, COLOR_DANGER, COLOR_PRIMARY,
-    FONT_NAME_CN
+    CHART_COLORS,
+    CHART_DPI,
+    CHART_FORMAT,
+    COLOR_SUCCESS,
+    COLOR_WARNING,
+    COLOR_DANGER,
+    COLOR_PRIMARY,
+    FONT_NAME_CN,
 )
 
 logger = logging.getLogger(__name__)
 
-# 设置中文字体
-plt.rcParams['font.sans-serif'] = [FONT_NAME_CN, 'Arial Unicode MS', 'SimHei']
-plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+# 设置中文字体（尽量兼容 Win / Mac）
+_cn_font_candidates = [
+    FONT_NAME_CN,  # 配置中的首选字体（默认：微软雅黑）
+    "Microsoft YaHei",  # Windows 微软雅黑
+    "SimHei",  # Windows 黑体
+    "PingFang SC",  # macOS 常见中文字体
+    "Songti SC",  # macOS 常见中文字体
+    "STHeiti",  # macOS 旧版黑体
+    "Arial Unicode MS",  # 跨平台 Unicode 字体
+]
+plt.rcParams["font.family"] = "sans-serif"
+plt.rcParams["font.sans-serif"] = _cn_font_candidates
+plt.rcParams["axes.unicode_minus"] = False  # 解决负号显示问题
 
 # 设置seaborn样式
 sns.set_style("whitegrid")
@@ -40,6 +57,20 @@ class ChartCreator:
         Args:
             output_dir: 图表输出目录，None则使用临时目录
         """
+        # 为当前运行环境选择一个可用的中文字体
+        self.cn_font: Optional[FontProperties] = None
+        try:
+            available_fonts = {f.name for f in font_manager.fontManager.ttflist}
+            for name in _cn_font_candidates:
+                if name in available_fonts:
+                    self.cn_font = FontProperties(family=name)
+                    matplotlib.rcParams["font.family"] = "sans-serif"
+                    matplotlib.rcParams["font.sans-serif"] = [name]
+                    logger.info("使用中文字体绘图: %s", name)
+                    break
+        except Exception as e:  # pragma: no cover - 防御性保护
+            logger.warning("检测中文字体失败，使用matplotlib默认字体: %s", e)
+
         if output_dir:
             self.output_dir = Path(output_dir)
             self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -226,6 +257,162 @@ class ChartCreator:
         plt.tight_layout()
         return self._save_figure(fig, f"pie_{datetime.now().strftime('%H%M%S%f')}")
 
+    def create_multi_group_normal_distribution(
+        self,
+        data: pd.DataFrame,
+        value_col: str,
+        groups: List[Tuple[str, callable, str]],
+        title: str,
+        xlabel: str = "指数值",
+        ylabel: str = "频率密度",
+        bins: int = 30,
+    ) -> Optional[Path]:
+        """
+        创建多组叠加的正态分布曲线图（用于在群牛NM$/指数正态分布）
+
+        Args:
+            data: 原始数据DataFrame
+            value_col: 数值列名（如 'NM$'）
+            groups: 分组配置列表，元素为 (组名, 过滤函数, 颜色)
+                    过滤函数形如 lambda df: 条件Series
+            title: 图表标题
+            xlabel: X轴标签
+            ylabel: Y轴标签
+            bins: 直方图分箱数量
+
+        Returns:
+            生成的图表文件路径；若无有效数据则返回None
+        """
+        try:
+            from matplotlib.ticker import MaxNLocator
+
+            fig, ax = plt.subplots(figsize=(10, 6))
+
+            all_data_min = None
+            all_data_max = None
+            all_curve_heights: List[float] = []
+
+            for group_name, filter_func, color in groups:
+                try:
+                    mask = filter_func(data)
+                    group_df = data[mask].copy()
+                except Exception as e:  # pragma: no cover - 防御性日志
+                    logger.warning("多组正态分布图过滤分组 '%s' 失败: %s", group_name, e)
+                    continue
+
+                if value_col not in group_df.columns:
+                    continue
+
+                series = pd.to_numeric(group_df[value_col], errors="coerce").dropna()
+                if series.empty:
+                    continue
+
+                n = len(series)
+                mu = series.mean()
+                sigma = series.std()
+                min_val = series.min()
+                max_val = series.max()
+
+                if n < 2 or sigma == 0:
+                    continue
+
+                # 更新全局最小/最大值
+                all_data_min = min(all_data_min, min_val) if all_data_min is not None else min_val
+                all_data_max = max(all_data_max, max_val) if all_data_max is not None else max_val
+
+                # 绘制直方图（频率密度）
+                ax.hist(
+                    series,
+                    bins=bins,
+                    density=True,
+                    alpha=0.3,
+                    color=color,
+                    edgecolor="none",
+                )
+
+                # 绘制正态分布曲线（使用numpy公式，避免依赖scipy）
+                x = np.linspace(series.min(), series.max(), 200)
+                y = (1.0 / (np.sqrt(2 * np.pi) * sigma)) * np.exp(
+                    -0.5 * ((x - mu) / sigma) ** 2
+                )
+                ax.plot(
+                    x,
+                    y,
+                    linewidth=2,
+                    color=color,
+                    label=f"{group_name} (n={n}, μ={mu:.1f}, σ={sigma:.1f})",
+                )
+
+                all_curve_heights.append(float(y.max()))
+
+            # 若所有分组都没有有效数据，直接返回
+            if not all_curve_heights:
+                logger.warning("多组正态分布图没有任何有效分组数据，跳过图表创建")
+                plt.close(fig)
+                return None
+
+            # 设置X轴范围（基于所有组的数据范围，预留10%边距）
+            if all_data_min is not None and all_data_max is not None:
+                margin = (all_data_max - all_data_min) * 0.1
+                if margin == 0:
+                    margin = 1
+                ax.set_xlim(all_data_min - margin, all_data_max + margin)
+
+            # 设置Y轴范围（借鉴Excel构建器逻辑，避免异常峰值）
+            sorted_heights = sorted(all_curve_heights, reverse=True)
+            if len(sorted_heights) > 1:
+                highest = sorted_heights[0]
+                second_highest = sorted_heights[1]
+                if highest >= second_highest * 3:
+                    y_max = second_highest * 2.5
+                    logger.info(
+                        "检测到异常峰值：最高=%.4f, 第二高=%.4f, 使用第二高×2.5=%.4f 作为Y轴上限",
+                        highest,
+                        second_highest,
+                        y_max,
+                    )
+                else:
+                    y_max = highest * 1.3
+            else:
+                y_max = sorted_heights[0] * 1.3
+            ax.set_ylim(0, y_max)
+
+            # 样式设置
+            ax.set_title(title, fontsize=16, fontweight="bold", pad=20)
+            if self.cn_font:
+                ax.set_xlabel(xlabel, fontsize=12, fontproperties=self.cn_font)
+                ax.set_ylabel(ylabel, fontsize=12, fontproperties=self.cn_font)
+                for label in ax.get_xticklabels() + ax.get_yticklabels():
+                    label.set_fontproperties(self.cn_font)
+            else:
+                ax.set_xlabel(xlabel, fontsize=12)
+                ax.set_ylabel(ylabel, fontsize=12)
+
+            # 简化图例：只显示组名
+            handles, labels = ax.get_legend_handles_labels()
+            simple_labels = [label.split(" (")[0] for label in labels]
+            legend_kwargs: Dict = {
+                "loc": "upper right",
+                "fontsize": 9,
+                "framealpha": 0.9,
+            }
+            if self.cn_font:
+                legend_kwargs["prop"] = self.cn_font
+            ax.legend(handles, simple_labels, **legend_kwargs)
+
+            ax.grid(True, alpha=0.3, linestyle="--")
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=10))
+
+            plt.tight_layout()
+            return self._save_figure(fig, f"multi_norm_{datetime.now().strftime('%H%M%S%f')}")
+        except Exception as e:  # pragma: no cover - 运行时防御
+            logger.error("创建多组正态分布图失败: %s", e, exc_info=True)
+            try:
+                plt.close(fig)
+            except Exception:
+                pass
+            return None
+
     def create_histogram(
         self,
         data: pd.Series,
@@ -276,8 +463,14 @@ class ChartCreator:
             ax.legend(loc='best', fontsize=10)
 
         ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
-        ax.set_xlabel(xlabel, fontsize=12)
-        ax.set_ylabel(ylabel, fontsize=12)
+        if self.cn_font:
+            ax.set_xlabel(xlabel, fontsize=12, fontproperties=self.cn_font)
+            ax.set_ylabel(ylabel, fontsize=12, fontproperties=self.cn_font)
+            for label in ax.get_xticklabels() + ax.get_yticklabels():
+                label.set_fontproperties(self.cn_font)
+        else:
+            ax.set_xlabel(xlabel, fontsize=12)
+            ax.set_ylabel(ylabel, fontsize=12)
         ax.grid(axis='y', alpha=0.3, linestyle='--')
 
         # 添加统计信息

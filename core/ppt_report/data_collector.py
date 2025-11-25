@@ -75,6 +75,9 @@ class DataCollector:
 
         logger.info("数据收集完成: 成功读取 %s/%s 个Sheet", len(self.data_cache), total_sheets)
 
+        # 记录Excel源路径，供后续PPT构建器按需直接读取原始Sheet
+        self.data_cache['excel_path'] = self.excel_path
+
         # 特殊处理：farm_info需要解析成dict（因为Sheet1是横向布局）
         if 'farm_info' in self.data_cache:
             logger.info("正在解析farm_info横向布局...")
