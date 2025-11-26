@@ -1,13 +1,19 @@
 {
-  "version": "1.2.1.6",
+  "version": "1.2.1.8",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.6/伊利奶牛选配_v1.2.1.6_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.6/伊利奶牛选配_v1.2.1.6_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.8/伊利奶牛选配_v1.2.1.8_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.8/伊利奶牛选配_v1.2.1.8_win.exe",
   "changes": [
-    "1. <b>修复</b>：修正PPT育种分析报告中9个正态分布页面的统计表格数据错误问题",
-    "2. <b>修复</b>：修正不同阶段育种指数页面统计表格名称（表格3→表格5）",
-    "3. <b>修复</b>：修正不同出生年份页面统计表格数据匹配逻辑，使用正向特征匹配代替负向排除",
-    "4. <b>优化</b>：完善Excel标签匹配机制，精确定位S204位置的年份统计数据",
-    "5. <b>修复</b>：解决同一Excel标签出现在多个位置时的数据混淆问题（S100/S144/S204）"
+    "1. <b>修复</b>：修正近交系数计算中违反Wright通径规则的问题",
+    "   - 正确过滤虚拟节点（_dam、_mgd等）造成的重复节点通径",
+    "   - 修正路径验证规则，只检查路径中间节点（不包括终点祖先）",
+    "",
+    "2. <b>优化</b>：改进共同祖先识别逻辑",
+    "   - 公牛作为母牛祖先时正确计入共同祖先",
+    "   - 添加空路径表示起点到自己（路径长度=0）",
+    "",
+    "3. <b>功能</b>：新增计算器缓存清除方法，支持系谱更新后重新计算",
+    "",
+    "4. <b>影响</b>：近交系数计算更准确，符合Wright通径系数理论"
   ]
 }
