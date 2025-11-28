@@ -11,6 +11,7 @@ import json
 from .index_calculation import IndexCalculation, TRAIT_SD
 from .cow_traits_calc import TRAITS_TRANSLATION  # 从 cow_traits_calc.py 导入 TRAITS_TRANSLATION
 from gui.theme_manager import theme_manager  # 导入主题管理器
+from gui.progress import ProgressDialog  # 导入进度对话框
 
 class IndexCalculationPage(QWidget):
     def __init__(self, parent=None):
@@ -275,18 +276,42 @@ class IndexCalculationPage(QWidget):
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
 
+        # 创建进度对话框
+        self.progress_dialog = ProgressDialog(self)
+        self.progress_dialog.setWindowTitle("母牛群指数计算进度")
+        self.progress_dialog.set_task_info("正在计算母牛群指数排名...")
+        self.progress_dialog.show()
+
         try:
+            # 定义进度回调函数
+            def progress_callback(progress_value, message=None):
+                if progress_value is not None:
+                    self.progress_dialog.update_progress(progress_value)
+                if message is not None:
+                    self.progress_dialog.update_info(message)
+
+            def task_info_callback(task_info):
+                self.progress_dialog.set_task_info(task_info)
+
             success, message = self.index_calculator.process_cow_index(
-                main_window, self.current_weight_name
+                main_window, self.current_weight_name,
+                progress_callback=progress_callback,
+                task_info_callback=task_info_callback
             )
-            
+
+            self.progress_dialog.close()
+
             if success:
                 QMessageBox.information(self, "完成", "母牛群指数计算完成！")
             else:
                 QMessageBox.warning(self, "错误", f"计算失败：{message}")
 
         except Exception as e:
+            self.progress_dialog.close()
             QMessageBox.critical(self, "错误", f"计算过程中发生错误：{str(e)}")
+        finally:
+            if hasattr(self, 'progress_dialog'):
+                self.progress_dialog.close()
 
     def calculate_bull_index(self):
         """计算备选公牛指数排名"""
@@ -299,15 +324,39 @@ class IndexCalculationPage(QWidget):
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
 
+        # 创建进度对话框
+        self.progress_dialog = ProgressDialog(self)
+        self.progress_dialog.setWindowTitle("备选公牛指数计算进度")
+        self.progress_dialog.set_task_info("正在计算备选公牛指数排名...")
+        self.progress_dialog.show()
+
         try:
+            # 定义进度回调函数
+            def progress_callback(progress_value, message=None):
+                if progress_value is not None:
+                    self.progress_dialog.update_progress(progress_value)
+                if message is not None:
+                    self.progress_dialog.update_info(message)
+
+            def task_info_callback(task_info):
+                self.progress_dialog.set_task_info(task_info)
+
             success, message = self.index_calculator.process_bull_index(
-                main_window, self.current_weight_name
+                main_window, self.current_weight_name,
+                progress_callback=progress_callback,
+                task_info_callback=task_info_callback
             )
-            
+
+            self.progress_dialog.close()
+
             if success:
                 QMessageBox.information(self, "完成", "备选公牛指数计算完成！")
             else:
                 QMessageBox.warning(self, "错误", f"计算失败：{message}")
 
         except Exception as e:
+            self.progress_dialog.close()
             QMessageBox.critical(self, "错误", f"计算过程中发生错误：{str(e)}")
+        finally:
+            if hasattr(self, 'progress_dialog'):
+                self.progress_dialog.close()

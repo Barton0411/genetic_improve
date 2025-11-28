@@ -3,10 +3,25 @@
 """
 
 # 版本号格式: 主版本号.次版本号.修订号.构建号 (xxx.xxx.xxx.xxx)
-VERSION = "1.2.2.2"
+VERSION = "1.2.2.3"
 
 # 版本历史（完整记录所有版本）
 VERSION_HISTORY = [
+    {
+        "version": "1.2.2.3",
+        "date": "2025-11-28",
+        "author": "Development Team",
+        "changes": [
+            "1. <b>性能</b>：母牛育种性状分析性能大幅提升（提升57%）",
+            "   - 优化DataFrame操作，预创建所有source列避免碎片化",
+            "   - 改用pd.concat批量添加列替代逐列添加",
+            "   - 新增process_yearly_data_from_df和calculate_trait_scores_from_df方法",
+            "   - 避免不必要的临时Excel文件读写",
+            "2. <b>功能</b>：牛只指数计算排名新增进度对话框",
+            "   - 母牛群指数排名和备选公牛指数排名增加进度显示",
+            "   - 实时显示计算进度，提升用户体验"
+        ]
+    },
     {
         "version": "1.2.2.2",
         "date": "2025-11-28",

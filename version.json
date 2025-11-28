@@ -1,15 +1,16 @@
 {
-  "version": "1.2.2.2",
+  "version": "1.2.2.3",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.2/伊利奶牛选配_v1.2.2.2_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.2/伊利奶牛选配_v1.2.2.2_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.3/伊利奶牛选配_v1.2.2.3_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.3/伊利奶牛选配_v1.2.2.3_win.exe",
   "changes": [
-    "1. <b>修复</b>：母牛指数排名后育种值文件丢失性状的问题",
-    "   - 修复运行母牛指数排名后，processed_cow_data_key_traits_final.xlsx只剩3个性状的bug",
-    "   - 现在会保留所有原有性状，仅补充缺失的性状",
+    "1. <b>性能</b>：母牛育种性状分析性能大幅提升（提升57%）",
+    "   - 优化DataFrame操作，预创建所有source列避免碎片化",
+    "   - 改用pd.concat批量添加列替代逐列添加",
+    "   - 避免不必要的临时Excel文件读写",
     "",
-    "2. <b>优化</b>：性状得分计算逻辑",
-    "   - calculate_trait_scores方法现在接受selected_traits参数",
-    "   - 确保生成所有选择的性状得分，避免依赖旧文件的sheet名称"
+    "2. <b>功能</b>：牛只指数计算排名新增进度对话框",
+    "   - 母牛群指数排名和备选公牛指数排名增加进度显示",
+    "   - 实时显示计算进度，提升用户体验"
   ]
 }

@@ -160,10 +160,24 @@ class IndexCalculation(BaseCowCalculation):
                 score += (trait_values[trait] / TRAIT_SD[trait]) * weight
         return score
         
-    def process_cow_index(self, main_window, weight_name: str) -> Tuple[bool, str]:
-        """处理母牛群指数计算"""
+    def process_cow_index(self, main_window, weight_name: str,
+                          progress_callback=None, task_info_callback=None) -> Tuple[bool, str]:
+        """处理母牛群指数计算
+
+        Args:
+            main_window: 主窗口实例
+            weight_name: 权重配置名称
+            progress_callback: 进度回调函数 (progress_value, message)
+            task_info_callback: 任务信息回调函数 (task_info)
+        """
         try:
             project_path = main_window.selected_project_path
+
+            # 更新进度
+            if task_info_callback:
+                task_info_callback("检查数据文件...")
+            if progress_callback:
+                progress_callback(5, "检查母牛数据文件...")
 
             # 1. 首先检查是否有 processed_cow_data.xlsx
             cow_data_path = project_path / "standardized_data" / "processed_cow_data.xlsx"
@@ -171,6 +185,8 @@ class IndexCalculation(BaseCowCalculation):
                 return False, "请先上传母牛数据"
 
             # 2. 加载权重配置并获取性状列表
+            if progress_callback:
+                progress_callback(10, "加载权重配置...")
             weights = self.load_weights()
             if weight_name not in weights:
                 return False, f"未找到权重配置：{weight_name}"
@@ -178,6 +194,11 @@ class IndexCalculation(BaseCowCalculation):
             selected_traits = list(weight_values.keys())
 
             # 3. 检查是否存在基因组评估结果文件
+            if task_info_callback:
+                task_info_callback("检查评估结果...")
+            if progress_callback:
+                progress_callback(15, "检查现有评估结果...")
+
             genomic_scores_path = project_path / "analysis_results" / "processed_cow_data_key_traits_scores_genomic.xlsx"
             if genomic_scores_path.exists():
                 # 3.1 基因组评估结果存在，检查是否完整
@@ -188,10 +209,14 @@ class IndexCalculation(BaseCowCalculation):
                 if not missing_traits:
                     # 所有性状都存在，直接使用现有基因组评估结果
                     print("使用现有完整的基因组评估结果")
+                    if progress_callback:
+                        progress_callback(80, "使用现有基因组评估结果...")
                     df = genomic_df
                 else:
                     # 缺少部分性状，需要重新计算
                     print(f"基因组评估结果缺少性状: {missing_traits}")
+                    if task_info_callback:
+                        task_info_callback("计算缺失性状...")
 
                     # 重要：合并原有性状和需要的性状，避免覆盖原有数据
                     all_traits_to_calc = list(set(existing_traits) | set(selected_traits))
@@ -201,13 +226,21 @@ class IndexCalculation(BaseCowCalculation):
                     genomic_data_path = project_path / "standardized_data" / "processed_genomic_data.xlsx"
                     if genomic_data_path.exists():
                         # 有基因组数据，重新计算包含基因组数据
-                        success, message = self.traits_calculator.process_data(main_window, all_traits_to_calc)
+                        success, message = self.traits_calculator.process_data(
+                            main_window, all_traits_to_calc,
+                            progress_callback=progress_callback,
+                            task_info_callback=task_info_callback
+                        )
                         if not success:
                             return False, message
                         df = pd.read_excel(project_path / "analysis_results" / "processed_cow_data_key_traits_scores_genomic.xlsx")
                     else:
                         # 没有基因组数据，使用系谱计算后更新基因组评估文件
-                        success, message = self.traits_calculator.process_data(main_window, all_traits_to_calc)
+                        success, message = self.traits_calculator.process_data(
+                            main_window, all_traits_to_calc,
+                            progress_callback=progress_callback,
+                            task_info_callback=task_info_callback
+                        )
                         if not success:
                             return False, message
 
@@ -229,7 +262,13 @@ class IndexCalculation(BaseCowCalculation):
                 genomic_data_path = project_path / "standardized_data" / "processed_genomic_data.xlsx"
                 if genomic_data_path.exists():
                     # 有基因组数据，计算包含基因组数据的结果
-                    success, message = self.traits_calculator.process_data(main_window, selected_traits)
+                    if task_info_callback:
+                        task_info_callback("计算性状得分（含基因组数据）...")
+                    success, message = self.traits_calculator.process_data(
+                        main_window, selected_traits,
+                        progress_callback=progress_callback,
+                        task_info_callback=task_info_callback
+                    )
                     if not success:
                         return False, message
                     df = pd.read_excel(project_path / "analysis_results" / "processed_cow_data_key_traits_scores_genomic.xlsx")
@@ -245,27 +284,46 @@ class IndexCalculation(BaseCowCalculation):
                         if not missing_traits:
                             # 系谱评估结果完整，直接使用
                             print("使用现有完整的系谱评估结果")
+                            if progress_callback:
+                                progress_callback(80, "使用现有系谱评估结果...")
                             df = pedigree_df
                         else:
                             # 系谱评估结果不完整，重新计算
                             print(f"系谱评估结果缺少性状: {missing_traits}")
+                            if task_info_callback:
+                                task_info_callback("计算缺失性状...")
 
                             # 重要：合并原有性状和需要的性状，避免覆盖原有数据
                             all_traits_to_calc = list(set(existing_traits) | set(selected_traits))
                             print(f"将计算所有性状（保留原有 + 新增）: {len(all_traits_to_calc)} 个")
 
-                            success, message = self.traits_calculator.process_data(main_window, all_traits_to_calc)
+                            success, message = self.traits_calculator.process_data(
+                                main_window, all_traits_to_calc,
+                                progress_callback=progress_callback,
+                                task_info_callback=task_info_callback
+                            )
                             if not success:
                                 return False, message
                             df = pd.read_excel(project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pedigree.xlsx")
                     else:
                         # 没有任何评估结果，计算系谱评估结果
-                        success, message = self.traits_calculator.process_data(main_window, selected_traits)
+                        if task_info_callback:
+                            task_info_callback("计算性状得分...")
+                        success, message = self.traits_calculator.process_data(
+                            main_window, selected_traits,
+                            progress_callback=progress_callback,
+                            task_info_callback=task_info_callback
+                        )
                         if not success:
                             return False, message
                         df = pd.read_excel(project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pedigree.xlsx")
 
             # 4. 计算指数得分 (向量化优化)
+            if task_info_callback:
+                task_info_callback("计算指数得分...")
+            if progress_callback:
+                progress_callback(90, "计算指数得分...")
+
             weight_values = weights[weight_name]
             score = np.zeros(len(df))
             for trait, weight in weight_values.items():
@@ -278,6 +336,8 @@ class IndexCalculation(BaseCowCalculation):
             df[f'{weight_name}_index'] = score
 
             # 5. 排序并添加排名
+            if progress_callback:
+                progress_callback(95, "排序并添加排名...")
             df = df.sort_values(f'{weight_name}_index', ascending=False)
             df['ranking'] = range(1, len(df) + 1)
 
@@ -286,9 +346,17 @@ class IndexCalculation(BaseCowCalculation):
                 df['cow_id'] = df['cow_id'].astype(str)
 
             # 6. 保存结果（应用格式化）
+            if task_info_callback:
+                task_info_callback("保存结果...")
+            if progress_callback:
+                progress_callback(98, "保存结果文件...")
+
             output_path = project_path / "analysis_results" / f"{self.output_prefix}_cow_index_scores.xlsx"
             if not self.save_results_with_retry(df, output_path, apply_formatting=True):
                 return False, "保存结果失败"
+
+            if progress_callback:
+                progress_callback(100, "计算完成！")
 
             return True, "计算完成"
 
@@ -296,45 +364,75 @@ class IndexCalculation(BaseCowCalculation):
             print(f"计算母牛群指数时发生错误: {str(e)}")
             return False, str(e)
 
-    def process_bull_index(self, main_window, weight_name: str) -> Tuple[bool, str]:
-        """处理公牛指数计算"""
+    def process_bull_index(self, main_window, weight_name: str,
+                           progress_callback=None, task_info_callback=None) -> Tuple[bool, str]:
+        """处理公牛指数计算
+
+        Args:
+            main_window: 主窗口实例
+            weight_name: 权重配置名称
+            progress_callback: 进度回调函数 (progress_value, message)
+            task_info_callback: 任务信息回调函数 (task_info)
+        """
         try:
             project_path = main_window.selected_project_path
-            
+
+            # 更新进度
+            if task_info_callback:
+                task_info_callback("检查数据文件...")
+            if progress_callback:
+                progress_callback(5, "检查备选公牛数据...")
+
             # 1. 检查并初始化必要的设置
             bull_data_path = project_path / "standardized_data" / "processed_bull_data.xlsx"
             if not bull_data_path.exists():
                 return False, "请先上传备选公牛数据"
-                
+
             # 2. 检查并初始化数据库连接
+            if progress_callback:
+                progress_callback(10, "连接数据库...")
             if not self.init_db_connection():
                 print("数据库连接初始化失败")
                 return False, "连接数据库失败"
-                
+
             # 3. 加载权重配置
+            if progress_callback:
+                progress_callback(15, "加载权重配置...")
             weights = self.load_weights()
             if weight_name not in weights:
                 return False, f"未找到权重配置：{weight_name}"
-                    
+
             weight_values = weights[weight_name]
             if not weight_values:
                 return False, "权重配置为空"
-                
+
             selected_traits = list(weight_values.keys())
             if not selected_traits:
                 return False, "未找到需要计算的性状"
-            
+
             # 4. 读取备选公牛数据
+            if task_info_callback:
+                task_info_callback("读取公牛数据...")
+            if progress_callback:
+                progress_callback(20, "读取备选公牛数据...")
             try:
                 bull_df = pd.read_excel(bull_data_path)
                 if bull_df.empty:
                     return False, "备选公牛数据为空"
             except Exception as e:
                 return False, f"读取备选公牛数据失败: {str(e)}"
-                    
+
             # 5. 为每个公牛查询性状数据
+            if task_info_callback:
+                task_info_callback("查询公牛性状...")
+            total_bulls = len(bull_df)
             missing_bulls = []
             for idx, row in bull_df.iterrows():
+                # 更新进度
+                if progress_callback and idx % 10 == 0:
+                    progress = 20 + int((idx / total_bulls) * 50)
+                    progress_callback(progress, f"查询公牛性状 ({idx+1}/{total_bulls})...")
+
                 bull_id = str(row['bull_id'])
                 trait_data, found = self.query_bull_traits(bull_id, selected_traits)
                 if found:
@@ -348,6 +446,8 @@ class IndexCalculation(BaseCowCalculation):
 
             # 6. 处理缺失的公牛信息
             if missing_bulls:
+                if progress_callback:
+                    progress_callback(75, f"处理 {len(missing_bulls)} 个缺失公牛...")
                 print(f"\n[检查点-指数] 在指数排序中发现 {len(missing_bulls)} 个缺失公牛")
                 print(f"[检查点-指数] 调用 process_missing_bulls 进行上传...")
                 self.process_missing_bulls(missing_bulls, 'bull_index', main_window.username)
@@ -355,6 +455,11 @@ class IndexCalculation(BaseCowCalculation):
                 print("\n[检查点-指数] 所有公牛数据完整，无缺失公牛")
 
             # 7. 计算指数得分 (向量化优化)
+            if task_info_callback:
+                task_info_callback("计算指数得分...")
+            if progress_callback:
+                progress_callback(85, "计算指数得分...")
+
             score = np.zeros(len(bull_df))
             for trait, weight in weight_values.items():
                 if trait in TRAIT_SD and trait in bull_df.columns:
@@ -362,16 +467,26 @@ class IndexCalculation(BaseCowCalculation):
                     trait_values = bull_df[trait].fillna(0).values
                     score += (trait_values / TRAIT_SD[trait]) * weight
             bull_df[f'{weight_name}_index'] = score
-            
+
             # 8. 排序并添加排名
+            if progress_callback:
+                progress_callback(90, "排序并添加排名...")
             bull_df = bull_df.sort_values(f'{weight_name}_index', ascending=False)
             bull_df['ranking'] = range(1, len(bull_df) + 1)
-            
+
             # 9. 保存结果
+            if task_info_callback:
+                task_info_callback("保存结果...")
+            if progress_callback:
+                progress_callback(95, "保存结果文件...")
+
             output_path = project_path / "analysis_results" / f"{self.output_prefix}_bull_scores.xlsx"
             if not self.save_results_with_retry(bull_df, output_path):
                 return False, "保存结果失败"
-                
+
+            if progress_callback:
+                progress_callback(100, "计算完成！")
+
             return True, "计算完成"
                 
         except Exception as e:

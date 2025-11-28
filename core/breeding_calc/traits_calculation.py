@@ -131,15 +131,9 @@ class TraitsCalculation(BaseCowCalculation):
             output_dir.mkdir(exist_ok=True)
             yearly_output_path = output_dir / self.yearly_filename
 
-            # 先临时保存一份未填充的数据用于计算年度数据
-            temp_detail_path = output_dir / "temp_detail.xlsx"
-            cow_df.to_excel(temp_detail_path, index=False)
-
-            if not self.process_yearly_data(temp_detail_path, yearly_output_path, selected_traits):
+            # 优化：直接传DataFrame，避免临时文件读写
+            if not self.process_yearly_data_from_df(cow_df, yearly_output_path, selected_traits):
                 return False, "处理年度数据失败"
-
-            # 删除临时文件
-            temp_detail_path.unlink(missing_ok=True)
 
             # 6. 填充预估值
             print("6. 填充缺失公牛的预估值...")
@@ -175,8 +169,9 @@ class TraitsCalculation(BaseCowCalculation):
                 progress_callback(85, "正在计算性状得分...")
                 
             pedigree_output_path = output_dir / f"{self.output_prefix}_scores_pedigree.xlsx"
-            if not self.calculate_trait_scores(detail_output_path, yearly_output_path, pedigree_output_path,
-                                               apply_formatting=False, selected_traits=selected_traits):
+            # 优化：直接传DataFrame，避免重复读取Excel文件
+            if not self.calculate_trait_scores_from_df(cow_df, yearly_output_path, pedigree_output_path,
+                                                       apply_formatting=False, selected_traits=selected_traits):
                 return False, "计算性状得分失败"
 
             if progress_callback:
@@ -346,7 +341,96 @@ class TraitsCalculation(BaseCowCalculation):
             
             # 保存结果
             return self.save_yearly_results(results, output_path)
-            
+
+        except Exception as e:
+            import traceback
+            print(f"处理年度数据失败: {e}")
+            print(f"详细错误信息: {traceback.format_exc()}")
+            return False
+
+    def process_yearly_data_from_df(self, df: pd.DataFrame, output_path: Path, selected_traits: list) -> bool:
+        """处理年度关键性状数据 - 优化版本，直接从DataFrame处理，避免临时文件"""
+        try:
+            # 创建副本避免修改原始数据
+            df = df.copy()
+
+            # 检查birth_year列是否存在
+            if 'birth_year' not in df.columns:
+                print("错误：数据中缺少birth_year列")
+                return False
+
+            # 清理birth_year数据，移除空值和无效值
+            df = df.dropna(subset=['birth_year'])
+            df['birth_year'] = pd.to_numeric(df['birth_year'], errors='coerce')
+            df = df.dropna(subset=['birth_year'])
+
+            # 过滤合理的年份范围（1900-当前年份+10）
+            current_year = datetime.datetime.now().year
+            df = df[(df['birth_year'] >= 1900) & (df['birth_year'] <= current_year + 10)]
+
+            if len(df) == 0:
+                print("错误：没有有效的出生年份数据")
+                return False
+
+            # 获取出生年份范围
+            min_year = int(df['birth_year'].min())
+            max_year = int(df['birth_year'].max())
+
+            # 必需的性状（用于生成正态分布图）
+            required_traits = ['NM$', 'TPI']
+
+            # 确保必需性状被包含在处理列表中
+            all_traits_to_process = list(selected_traits)
+            for req_trait in required_traits:
+                if req_trait not in all_traits_to_process:
+                    all_traits_to_process.append(req_trait)
+                    print(f"信息: 自动添加必需性状 {req_trait} 到处理列表")
+
+            # 获取默认值（包含所有要处理的性状）
+            default_values = self.get_default_values(all_traits_to_process)
+
+            # 处理每个性状
+            results = {}
+            for trait in all_traits_to_process:
+                trait_col = f'sire_{trait}'
+
+                if trait_col not in df.columns:
+                    # 使用默认值
+                    all_years = pd.DataFrame({'birth_year': range(min_year, max_year + 1)})
+                    all_years['mean'] = default_values[trait]
+                    all_years['interpolated'] = True
+                else:
+                    # 仅使用 sire_identified 为 True 的记录来计算年度平均值
+                    if 'sire_identified' in df.columns:
+                        df_identified = df[df['sire_identified'] == True]
+                        print(f"处理性状 {trait}: 总记录 {len(df)} 条，其中 identified {len(df_identified)} 条")
+                    else:
+                        # 如果没有 identified 列，使用有数据的记录
+                        df_identified = df[df[trait_col].notna()]
+                        print(f"处理性状 {trait}: 使用有数据的记录 {len(df_identified)} 条")
+
+                    if len(df_identified) == 0:
+                        # 如果没有 identified 记录，使用默认值
+                        all_years = pd.DataFrame({'birth_year': range(min_year, max_year + 1)})
+                        all_years['mean'] = default_values[trait]
+                        all_years['interpolated'] = True
+                    else:
+                        # 计算年度均值（仅使用 identified 记录）
+                        yearly_means = df_identified.groupby('birth_year').agg({
+                            trait_col: ['count', 'mean']
+                        }).reset_index()
+                        yearly_means.columns = ['birth_year', 'count', 'mean']
+
+                        # 处理数据：传递所有年度数据，让process_trait_yearly_data决定哪些需要插值
+                        all_years = self.process_trait_yearly_data(
+                            yearly_means, min_year, max_year, default_values[trait]
+                        )
+
+                results[trait] = all_years
+
+            # 保存结果
+            return self.save_yearly_results(results, output_path)
+
         except Exception as e:
             import traceback
             print(f"处理年度数据失败: {e}")
@@ -571,13 +655,124 @@ class TraitsCalculation(BaseCowCalculation):
                             df[source_col] = np.where(has_trait, 1, np.where(has_year, 2, 3))
             
             return self.save_results_with_retry(df, output_path, apply_formatting=apply_formatting)
-            
+
         except Exception as e:
             print(f"计算性状得分失败: {e}")
             return False
 
-    def calculate_single_trait_score(self, df: pd.DataFrame, trait: str, 
-                                   yearly_data: pd.DataFrame, default_value: float, 
+    def calculate_trait_scores_from_df(self, df: pd.DataFrame, yearly_path: Path,
+                                       output_path: Path, apply_formatting: bool = False,
+                                       selected_traits: list = None) -> bool:
+        """计算性状得分 - 优化版本，直接从DataFrame处理，避免重复读取Excel
+
+        Args:
+            df: 详细数据DataFrame（已在内存中）
+            yearly_path: 年度数据文件路径
+            output_path: 输出文件路径
+            apply_formatting: 是否应用格式化
+            selected_traits: 选择的性状列表（用于确保生成所有性状的得分）
+        """
+        try:
+            # 创建副本避免修改原始数据
+            df = df.copy()
+
+            # 处理日期列（如果尚未处理）
+            date_columns = ['birth_date', 'birth_date_dam', 'birth_date_mgd']
+            for col in date_columns:
+                if col in df.columns and not pd.api.types.is_datetime64_any_dtype(df[col]):
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+
+            if 'birth_year' not in df.columns or df['birth_year'].isna().all():
+                df['birth_year'] = df['birth_date'].dt.year if 'birth_date' in df.columns else None
+            if 'dam_birth_year' not in df.columns:
+                df['dam_birth_year'] = df['birth_date_dam'].dt.year if 'birth_date_dam' in df.columns else None
+            if 'mgd_birth_year' not in df.columns:
+                df['mgd_birth_year'] = df['birth_date_mgd'].dt.year if 'birth_date_mgd' in df.columns else None
+
+            # 读取年度数据
+            yearly_data = {}
+            with pd.ExcelFile(yearly_path) as xls:
+                for sheet in xls.sheet_names:
+                    yearly_data[sheet] = pd.read_excel(xls, sheet_name=sheet)
+                    yearly_data[sheet].set_index('birth_year', inplace=True)
+
+            # 必需的性状（用于生成正态分布图）
+            required_traits = ['NM$', 'TPI']
+
+            # 确定要处理的性状列表：优先使用 selected_traits 参数
+            if selected_traits:
+                all_traits_to_process = list(selected_traits)
+                # 确保必需性状被包含
+                for req_trait in required_traits:
+                    if req_trait not in all_traits_to_process:
+                        all_traits_to_process.append(req_trait)
+            else:
+                # 回退到从 yearly_data 获取（保持向后兼容）
+                all_traits_to_process = list(yearly_data.keys())
+
+            # 确保必需的性状存在于 yearly_data 中
+            min_year = int(df['birth_year'].min()) if df['birth_year'].notna().any() else 2020
+            max_year = int(df['birth_year'].max()) if df['birth_year'].notna().any() else 2024
+
+            # 为所有需要处理的性状创建年度数据（如果不存在）
+            for trait in all_traits_to_process:
+                if trait not in yearly_data:
+                    print(f"警告: yearly 数据中缺少 {trait}，使用默认值创建")
+                    # 创建默认的年度数据
+                    default_yearly = pd.DataFrame({
+                        'birth_year': range(min_year, max_year + 1),
+                        'mean': [0] * (max_year - min_year + 1)
+                    })
+                    default_yearly.set_index('birth_year', inplace=True)
+                    yearly_data[trait] = default_yearly
+
+            # 获取默认值（包含所有要处理的性状）
+            default_values = self.get_default_values(all_traits_to_process)
+
+            # 设置权重
+            weights = {
+                'sire': 0.5,
+                'mgs': 0.25,
+                'mmgs': 0.125,
+                'default': 0.125
+            }
+
+            # 计算得分并保留source信息（使用 all_traits_to_process 确保处理所有选择的性状）
+            for trait in all_traits_to_process:
+                score_column = f'{trait}_score'
+                df[score_column] = self.calculate_single_trait_score(
+                    df, trait, yearly_data[trait], default_values[trait], weights
+                )
+
+                # 复制source列（如果存在）- 使用向量化操作替代apply()
+                for bull_type in ['sire', 'mgs', 'mmgs']:
+                    source_col = f'{bull_type}_{trait}_source'
+                    if source_col not in df.columns:
+                        # 如果source列不存在，根据是否有值来判断
+                        trait_col = f'{bull_type}_{trait}'
+                        if trait_col in df.columns:
+                            # 确定年份列
+                            if bull_type == 'sire':
+                                year_col = 'birth_year'
+                            elif bull_type == 'mgs':
+                                year_col = 'dam_birth_year'
+                            else:
+                                year_col = 'mgd_birth_year'
+
+                            # 使用向量化操作设置source值
+                            has_trait = df[trait_col].notna()
+                            has_year = df[year_col].notna() if year_col in df.columns else pd.Series(False, index=df.index)
+                            # source=1 如果有trait值，否则 source=2 如果有年份，否则 source=3
+                            df[source_col] = np.where(has_trait, 1, np.where(has_year, 2, 3))
+
+            return self.save_results_with_retry(df, output_path, apply_formatting=apply_formatting)
+
+        except Exception as e:
+            print(f"计算性状得分失败: {e}")
+            return False
+
+    def calculate_single_trait_score(self, df: pd.DataFrame, trait: str,
+                                   yearly_data: pd.DataFrame, default_value: float,
                                    weights: dict) -> pd.Series:
         """计算单个性状的得分"""
         trait_score = pd.Series(0.0, index=df.index)
@@ -621,7 +816,9 @@ class TraitsCalculation(BaseCowCalculation):
             contribution[:] = weight * default_value
         else:
             # 直接使用列中的值（已包含真实值和预估值）
-            contribution = weight * df[trait_col].fillna(default_value)
+            # 使用 pd.to_numeric 确保数值类型，避免 FutureWarning
+            values = pd.to_numeric(df[trait_col], errors='coerce').fillna(default_value)
+            contribution = weight * values
 
         return contribution
 
@@ -794,7 +991,7 @@ class TraitsCalculation(BaseCowCalculation):
             return False
 
     def fill_estimated_values(self, cow_df, yearly_data_path, selected_traits):
-        """填充缺失公牛的预估值 - 优化版本，使用向量化操作替代循环"""
+        """填充缺失公牛的预估值 - 优化版本，避免DataFrame碎片化"""
         try:
             # 首先确保年份列存在
             if 'birth_year' not in cow_df.columns and 'birth_date' in cow_df.columns:
@@ -824,6 +1021,18 @@ class TraitsCalculation(BaseCowCalculation):
                 'mmgs': 'mgd_birth_year'
             }
 
+            # 优化：预先创建所有source列，避免DataFrame碎片化
+            source_cols_to_add = {}
+            for bull_type in bull_type_year_cols.keys():
+                for trait in selected_traits:
+                    source_col = f'{bull_type}_{trait}_source'
+                    if source_col not in cow_df.columns:
+                        source_cols_to_add[source_col] = np.ones(len(cow_df), dtype=np.int8)
+
+            # 一次性添加所有source列
+            if source_cols_to_add:
+                cow_df = pd.concat([cow_df, pd.DataFrame(source_cols_to_add, index=cow_df.index)], axis=1)
+
             for bull_type, year_col in bull_type_year_cols.items():
                 identified_col = f'{bull_type}_identified'
 
@@ -833,25 +1042,25 @@ class TraitsCalculation(BaseCowCalculation):
                 else:
                     unidentified_mask = pd.Series(False, index=cow_df.index)
 
+                if not unidentified_mask.any():
+                    continue  # 没有未识别的公牛，跳过这个bull_type
+
                 # 获取有效年份的掩码
                 has_year_mask = cow_df[year_col].notna() if year_col in cow_df.columns else pd.Series(False, index=cow_df.index)
+
+                # 预计算掩码
+                mask_with_year = unidentified_mask & has_year_mask
+                mask_no_year = unidentified_mask & ~has_year_mask
 
                 for trait in selected_traits:
                     trait_col = f'{bull_type}_{trait}'
                     source_col = f'{bull_type}_{trait}_source'
-
-                    # 初始化source列，默认为1（真实数据）
-                    cow_df[source_col] = 1
-
-                    if not unidentified_mask.any():
-                        continue  # 没有未识别的公牛，跳过
 
                     # 获取年份到均值的映射
                     year_to_mean = yearly_mean_maps.get(trait, {})
                     default_val = default_values.get(trait, 0)
 
                     # 情况1：未识别 + 有年份数据 -> 使用年份预估值
-                    mask_with_year = unidentified_mask & has_year_mask
                     if mask_with_year.any():
                         # 获取年份并转为整数
                         years = cow_df.loc[mask_with_year, year_col].astype(int)
@@ -860,16 +1069,18 @@ class TraitsCalculation(BaseCowCalculation):
 
                         # 有年份映射的行 -> source=2
                         has_mapping = estimated_values.notna()
-                        cow_df.loc[mask_with_year & has_mapping.reindex(cow_df.index, fill_value=False), trait_col] = estimated_values[has_mapping].values
-                        cow_df.loc[mask_with_year & has_mapping.reindex(cow_df.index, fill_value=False), source_col] = 2
+                        has_mapping_idx = mask_with_year & has_mapping.reindex(cow_df.index, fill_value=False)
+                        if has_mapping_idx.any():
+                            cow_df.loc[has_mapping_idx, trait_col] = estimated_values[has_mapping].values
+                            cow_df.loc[has_mapping_idx, source_col] = 2
 
                         # 没有年份映射的行 -> source=3，使用默认值
-                        no_mapping_mask = mask_with_year & (~has_mapping).reindex(cow_df.index, fill_value=True)
-                        cow_df.loc[no_mapping_mask, trait_col] = default_val
-                        cow_df.loc[no_mapping_mask, source_col] = 3
+                        no_mapping_idx = mask_with_year & (~has_mapping).reindex(cow_df.index, fill_value=True)
+                        if no_mapping_idx.any():
+                            cow_df.loc[no_mapping_idx, trait_col] = default_val
+                            cow_df.loc[no_mapping_idx, source_col] = 3
 
                     # 情况2：未识别 + 无年份数据 -> 使用默认值
-                    mask_no_year = unidentified_mask & ~has_year_mask
                     if mask_no_year.any():
                         cow_df.loc[mask_no_year, trait_col] = default_val
                         cow_df.loc[mask_no_year, source_col] = 3
