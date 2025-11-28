@@ -4,7 +4,7 @@
   "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.9/伊利奶牛选配_v1.2.1.9_mac.dmg",
   "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.9/伊利奶牛选配_v1.2.1.9_win.exe",
   "changes": [
-    "1. <b>修复</b>：PPT分析文本重复"分析："前缀问题",
+    "1. <b>修复</b>：PPT分析文本重复「分析：」前缀问题",
     "   - 所有分析文本框现在正确检查是否已有前缀，避免重复",
     "",
     "2. <b>优化</b>：统一PPT分析文本字体样式",
