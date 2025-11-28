@@ -42,7 +42,9 @@ class Part6TraitsTrendsBuilder(BaseSlideBuilder):
             return
 
         try:
-            charts_data = self._extract_charts_from_excel(excel_path)
+            # 优先使用缓存的workbook（避免重复加载，每次加载需要约21秒）
+            cached_wb = data.get("_cached_workbook_data_only")
+            charts_data = self._extract_charts_from_excel(excel_path, cached_wb)
             logger.info(f"✓ 从Excel中提取到 {len(charts_data)} 个图表")
         except Exception as e:
             logger.error(f"提取Excel图表失败: {e}")
@@ -71,14 +73,24 @@ class Part6TraitsTrendsBuilder(BaseSlideBuilder):
 
         logger.info("✓ Part 6 配种记录分析-性状进展折线图完成")
 
-    def _extract_charts_from_excel(self, excel_path: str) -> List[Dict]:
+    def _extract_charts_from_excel(self, excel_path: str, cached_wb=None) -> List[Dict]:
         """
         从Excel中提取图表信息和数据
+
+        Args:
+            excel_path: Excel文件路径
+            cached_wb: 缓存的workbook对象（可选，避免重复加载）
 
         Returns:
             List[Dict]: [{'index': 1, 'title': '经济指数', 'data': {...}}, ...]
         """
-        wb = load_workbook(str(excel_path), data_only=True)  # data_only=True 获取计算后的值
+        # 优先使用缓存的workbook
+        if cached_wb is not None:
+            wb = cached_wb
+            logger.debug("使用缓存的workbook (data_only)")
+        else:
+            logger.debug("加载新的workbook（这可能需要约21秒）")
+            wb = load_workbook(str(excel_path), data_only=True)  # data_only=True 获取计算后的值
         ws = wb['已用公牛性状汇总']
 
         charts_data = []

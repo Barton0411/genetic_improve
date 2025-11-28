@@ -3,10 +3,23 @@
 """
 
 # 版本号格式: 主版本号.次版本号.修订号.构建号 (xxx.xxx.xxx.xxx)
-VERSION = "1.2.2.0"
+VERSION = "1.2.2.1"
 
 # 版本历史（完整记录所有版本）
 VERSION_HISTORY = [
+    {
+        "version": "1.2.2.1",
+        "date": "2025-11-28",
+        "author": "Development Team",
+        "changes": [
+            "1. <b>优化</b>：PPT生成性能大幅提升",
+            "   - PPT生成时间从67秒优化到46秒（节省约21秒）",
+            "   - 时间线图片在Excel生成阶段预导出，避免重复加载workbook",
+            "2. <b>优化</b>：智能workbook加载策略",
+            "   - 检测到预导出图片时跳过data_only=False加载",
+            "   - 保持向后兼容，无预导出图片时自动回退到从Excel提取"
+        ]
+    },
     {
         "version": "1.2.2.0",
         "date": "2025-11-28",

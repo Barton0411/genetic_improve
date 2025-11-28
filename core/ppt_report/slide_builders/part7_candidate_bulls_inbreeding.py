@@ -53,7 +53,9 @@ class Part7CandidateBullsInbreedingBuilder(BaseSlideBuilder):
                 return
 
             logger.info(f"从Excel读取数据: {Path(excel_path).name}")
-            bulls_data = self._read_bulls_inbreeding_data(excel_path)
+            # 优先使用缓存的workbook（避免重复加载，每次加载需要约21秒）
+            cached_wb = data.get("_cached_workbook_data_only")
+            bulls_data = self._read_bulls_inbreeding_data(excel_path, cached_wb)
 
             if not bulls_data:
                 logger.warning("未读取到备选公牛近交系数分析数据")
@@ -90,7 +92,7 @@ class Part7CandidateBullsInbreedingBuilder(BaseSlideBuilder):
         except Exception as e:
             logger.error(f"构建备选公牛近交系数分析失败: {e}", exc_info=True)
 
-    def _read_bulls_inbreeding_data(self, excel_path: str) -> List[Dict[str, Any]]:
+    def _read_bulls_inbreeding_data(self, excel_path: str, cached_wb=None) -> List[Dict[str, Any]]:
         """
         从Excel读取备选公牛近交系数分析数据
 
@@ -106,12 +108,19 @@ class Part7CandidateBullsInbreedingBuilder(BaseSlideBuilder):
 
         Args:
             excel_path: Excel文件路径
+            cached_wb: 缓存的workbook对象（可选，避免重复加载）
 
         Returns:
             公牛近交系数数据列表
         """
         try:
-            wb = load_workbook(excel_path, data_only=True)
+            # 优先使用缓存的workbook
+            if cached_wb is not None:
+                wb = cached_wb
+                logger.debug("使用缓存的workbook (data_only)")
+            else:
+                logger.debug("加载新的workbook（这可能需要约21秒）")
+                wb = load_workbook(excel_path, data_only=True)
 
             # 查找"备选公牛-近交系数分析" sheet
             sheet_name = None

@@ -40,6 +40,20 @@ class Sheet8Builder(BaseSheetBuilder):
     5. 散点图：近12个月配种记录时间线
     """
 
+    def __init__(self, workbook, style_manager, chart_builder, progress_callback=None, output_dir=None):
+        """
+        初始化Sheet8构建器
+
+        Args:
+            workbook: Excel工作簿对象
+            style_manager: 样式管理器
+            chart_builder: 图表构建器
+            progress_callback: 进度回调函数
+            output_dir: 图片输出目录（用于预导出时间线图片供PPT使用）
+        """
+        super().__init__(workbook, style_manager, chart_builder, progress_callback)
+        self.output_dir = output_dir
+
     def build(self, data: dict):
         """
         构建Sheet 8: 已用公牛性状汇总分析
@@ -893,6 +907,11 @@ class Sheet8Builder(BaseSheetBuilder):
                 plt.close(fig)
                 img_buffer.seek(0)
 
+                # 预导出图片到analysis_results目录（供PPT生成时使用，避免重复加载Excel）
+                if self.output_dir:
+                    self._export_timeline_image(img_buffer, chart_subtitle)
+                    img_buffer.seek(0)  # 重置指针以便后续嵌入Excel
+
                 # 将图片嵌入Excel
                 img = OpenpyxlImage(img_buffer)
                 chart_col_letter = get_column_letter(start_col)
@@ -917,3 +936,35 @@ class Sheet8Builder(BaseSheetBuilder):
             no_data_cell = self.ws.cell(row=current_row + 1, column=start_col, value="暂无数据")
             no_data_cell.font = Font(size=10, italic=True, color="999999")
             return current_row + 2
+
+    def _export_timeline_image(self, img_buffer: BytesIO, chart_subtitle: str):
+        """
+        预导出时间线图片到analysis_results目录（供PPT生成时使用）
+
+        Args:
+            img_buffer: 图片缓存对象
+            chart_subtitle: 图表子标题（'全部记录' 或 '近1年'）
+        """
+        try:
+            from pathlib import Path
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            # 根据子标题生成文件名
+            if '全部' in chart_subtitle:
+                filename = f"配种记录时间线_全部_{timestamp}.png"
+            elif '1年' in chart_subtitle or '近' in chart_subtitle:
+                filename = f"配种记录时间线_近一年_{timestamp}.png"
+            else:
+                filename = f"配种记录时间线_{chart_subtitle}_{timestamp}.png"
+
+            output_path = Path(self.output_dir) / filename
+
+            # 保存图片
+            with open(output_path, 'wb') as f:
+                f.write(img_buffer.getvalue())
+
+            logger.info(f"✓ 时间线图片已预导出: {output_path.name}")
+
+        except Exception as e:
+            logger.warning(f"预导出时间线图片失败: {e}")

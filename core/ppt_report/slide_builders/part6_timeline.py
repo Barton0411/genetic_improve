@@ -4,7 +4,7 @@ Part 6: 配种记录时间线分析构建器
 """
 
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 from pathlib import Path
 from io import BytesIO
 
@@ -25,34 +25,54 @@ class Part6TimelineBuilder(BaseSlideBuilder):
         super().__init__(prs, chart_creator)
         self.farm_name = farm_name
 
-    def build(self, data: Dict):
+    def build(self, data: Dict) -> bool:
         """
         构建 Part 6: 配种记录时间线分析
 
         Args:
             data: 包含 'excel_path' 的数据字典
+
+        Returns:
+            bool: 是否需要从Excel提取图片（用于判断是否需要加载data_only=False workbook）
         """
         logger.info("=" * 60)
         logger.info("开始构建Part 6: 配种记录时间线分析")
         logger.info("=" * 60)
 
-        # 读取Excel文件中的图片
         excel_path = data.get("excel_path")
         if excel_path is None:
             logger.error("excel_path 未找到，跳过配种记录时间线")
-            return
+            return False
 
-        try:
-            # 从Excel中提取Image 12和Image 13
-            images = self._extract_images_from_excel(excel_path)
-            logger.info(f"✓ 从Excel中提取到 {len(images)} 个图片")
-        except Exception as e:
-            logger.error(f"提取Excel图片失败: {e}")
-            return
+        # 优先查找预导出的时间线图片（在Excel生成阶段已导出到analysis_results）
+        pregenerated_images = self._find_pregenerated_images(excel_path)
 
-        if len(images) < 2:
-            logger.warning(f"Excel中图片数量不足（需要2个，实际{len(images)}个），跳过配种记录时间线")
-            return
+        if pregenerated_images and len(pregenerated_images) >= 2:
+            # 使用预导出的图片（无需加载data_only=False workbook，节省约20秒）
+            logger.info(f"✓ 找到预导出的时间线图片，跳过从Excel提取")
+            image_all_path = pregenerated_images[0]
+            image_recent_path = pregenerated_images[1]
+            used_pregenerated = True
+        else:
+            # 回退到从Excel提取图片
+            logger.info("未找到预导出图片，从Excel中提取...")
+            try:
+                cached_wb = data.get("_cached_workbook")
+                images = self._extract_images_from_excel(excel_path, cached_wb)
+                logger.info(f"✓ 从Excel中提取到 {len(images)} 个图片")
+            except Exception as e:
+                logger.error(f"提取Excel图片失败: {e}")
+                return False
+
+            if len(images) < 2:
+                logger.warning(f"Excel中图片数量不足（需要2个，实际{len(images)}个），跳过配种记录时间线")
+                return False
+
+            # 导出图片到临时文件
+            temp_dir = Path(self.chart_creator.output_dir)
+            image_all_path = self._export_image_to_file(images[0], temp_dir / "timeline_all.png")
+            image_recent_path = self._export_image_to_file(images[1], temp_dir / "timeline_recent.png") if len(images) > 1 else None
+            used_pregenerated = False
 
         # 查找"配种记录时间线"页面
         logger.info(f"开始查找包含'配种记录时间线'的页面，模板共{len(self.prs.slides)}页")
@@ -60,29 +80,24 @@ class Part6TimelineBuilder(BaseSlideBuilder):
 
         if len(target_slides) < 2:
             logger.error(f"❌ 未找到足够的配种记录时间线页面（需要2页，实际{len(target_slides)}页），跳过")
-            return
+            return not used_pregenerated
 
         logger.info(f"✓ 找到 {len(target_slides)} 个配种记录时间线页面")
 
-        # 导出图片到临时文件
-        temp_dir = Path(self.chart_creator.output_dir)
-
         # Image 12: 配种记录时间线-全部记录
-        image_12_path = self._export_image_to_file(images[0], temp_dir / "timeline_all.png")
-        if image_12_path:
-            self._add_image_to_slide(target_slides[0], image_12_path, "配种记录时间线-全部记录")
+        if image_all_path:
+            self._add_image_to_slide(target_slides[0], image_all_path, "配种记录时间线-全部记录")
             self._fill_timeline_analysis(target_slides[0], "all")
             logger.info(f"✓ 添加图片到第{target_slides[0] + 1}页: 配种记录时间线-全部记录")
 
         # Image 13: 配种记录时间线-近一年
-        if len(images) > 1:
-            image_13_path = self._export_image_to_file(images[1], temp_dir / "timeline_recent.png")
-            if image_13_path:
-                self._add_image_to_slide(target_slides[1], image_13_path, "配种记录时间线-近一年")
-                self._fill_timeline_analysis(target_slides[1], "recent")
-                logger.info(f"✓ 添加图片到第{target_slides[1] + 1}页: 配种记录时间线-近一年")
+        if image_recent_path:
+            self._add_image_to_slide(target_slides[1], image_recent_path, "配种记录时间线-近一年")
+            self._fill_timeline_analysis(target_slides[1], "recent")
+            logger.info(f"✓ 添加图片到第{target_slides[1] + 1}页: 配种记录时间线-近一年")
 
         logger.info("✓ Part 6 配种记录时间线分析完成")
+        return not used_pregenerated  # 返回是否需要从Excel提取（用于判断是否需要workbook）
 
     def _fill_timeline_analysis(self, slide_index: int, timeline_type: str):
         """
@@ -154,14 +169,24 @@ class Part6TimelineBuilder(BaseSlideBuilder):
         except Exception as e:
             logger.warning(f"填充时间线分析失败: {e}")
 
-    def _extract_images_from_excel(self, excel_path: str) -> List[OpenpyxlImage]:
+    def _extract_images_from_excel(self, excel_path: str, cached_wb=None) -> List[OpenpyxlImage]:
         """
         从Excel中提取图片（Image 12和Image 13）
+
+        Args:
+            excel_path: Excel文件路径
+            cached_wb: 缓存的workbook对象（可选，避免重复加载）
 
         Returns:
             List[OpenpyxlImage]: 图片对象列表
         """
-        wb = load_workbook(str(excel_path))
+        # 优先使用缓存的workbook
+        if cached_wb is not None:
+            wb = cached_wb
+            logger.debug("使用缓存的workbook")
+        else:
+            logger.debug("加载新的workbook（这可能需要约21秒）")
+            wb = load_workbook(str(excel_path))
         ws = wb['已用公牛性状汇总']
 
         images = []
@@ -266,3 +291,45 @@ class Part6TimelineBuilder(BaseSlideBuilder):
         except Exception as e:
             logger.warning(f"添加图片到幻灯片失败: {e}")
             logger.debug(f"错误详情: {e}", exc_info=True)
+
+    def _find_pregenerated_images(self, excel_path: str) -> List[Path]:
+        """
+        查找Excel生成阶段预导出的时间线图片
+
+        Args:
+            excel_path: Excel文件路径
+
+        Returns:
+            List[Path]: 图片路径列表，顺序为 [全部记录, 近一年]；未找到则返回空列表
+        """
+        try:
+            excel_path = Path(excel_path)
+            # Excel通常在 project/reports/ 下，analysis_results在 project/analysis_results/
+            project_folder = excel_path.parent.parent
+            analysis_folder = project_folder / "analysis_results"
+
+            if not analysis_folder.exists():
+                logger.debug(f"analysis_results目录不存在: {analysis_folder}")
+                return []
+
+            # 查找两个关键的时间线图片
+            all_pattern = "配种记录时间线_全部_*.png"
+            recent_pattern = "配种记录时间线_近一年_*.png"
+
+            all_files = list(analysis_folder.glob(all_pattern))
+            recent_files = list(analysis_folder.glob(recent_pattern))
+
+            if not all_files or not recent_files:
+                logger.debug(f"未找到完整的时间线图片集合 (全部: {len(all_files)}, 近一年: {len(recent_files)})")
+                return []
+
+            # 按修改时间排序，取最新的
+            latest_all = max(all_files, key=lambda f: f.stat().st_mtime)
+            latest_recent = max(recent_files, key=lambda f: f.stat().st_mtime)
+
+            logger.info(f"  ✓ 找到预导出图片: {latest_all.name}, {latest_recent.name}")
+            return [latest_all, latest_recent]
+
+        except Exception as e:
+            logger.debug(f"查找预导出图片失败: {e}")
+            return []

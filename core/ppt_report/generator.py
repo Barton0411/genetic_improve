@@ -6,9 +6,11 @@ import logging
 from pathlib import Path
 from typing import Optional, Tuple, Callable
 from datetime import datetime
+import time
 
 from pptx import Presentation
 from pptx.util import Inches
+from openpyxl import load_workbook
 
 from .utils import find_excel_report
 from .data_collector import DataCollector
@@ -50,6 +52,10 @@ class ExcelBasedPPTGenerator:
         self.prs = None
         self.farm_info = {}
         self.last_output_path: Optional[Path] = None
+
+        # 缓存的openpyxl workbook（避免重复加载，每次加载需要约21秒）
+        self._cached_workbook = None
+        self._cached_workbook_data_only = None
 
         logger.info(f"初始化PPT生成器: {farm_name}, 汇报人: {reporter_name}")
 
@@ -155,6 +161,13 @@ class ExcelBasedPPTGenerator:
             # 6. 清理临时文件 (95-100%)
             self._report_progress(progress_callback, "正在清理临时文件...", 95)
             self.chart_creator.cleanup()
+            # 关闭缓存的workbook
+            if self._cached_workbook:
+                self._cached_workbook.close()
+                self._cached_workbook = None
+            if self._cached_workbook_data_only:
+                self._cached_workbook_data_only.close()
+                self._cached_workbook_data_only = None
             self._report_progress(progress_callback, "✓ 清理完成", 100)
 
             logger.info("=" * 60)
@@ -183,6 +196,20 @@ class ExcelBasedPPTGenerator:
 
         # 图表生成器
         self.chart_creator = ChartCreator()
+
+        # 预加载openpyxl workbook (data_only=True)
+        # 这是耗时操作，约21秒，但只需加载一次
+        logger.info("预加载Excel workbook (openpyxl data_only=True)...")
+        t0 = time.perf_counter()
+        self._cached_workbook_data_only = load_workbook(
+            str(self.excel_report_path), data_only=True
+        )
+        t1 = time.perf_counter()
+        logger.info(f"✓ Excel workbook预加载完成，耗时: {t1-t0:.2f}秒")
+
+        # data_only=False 的workbook延迟加载（只有Part6 Timeline需要，用于提取图片）
+        # 设为None，在需要时才加载
+        self._cached_workbook = None
 
         logger.info("组件初始化完成")
 
@@ -263,6 +290,10 @@ class ExcelBasedPPTGenerator:
         from .slide_builders.part4_genetics import Part4GeneticsBuilder
 
         logger.info("构建Part 4: 遗传评估")
+        # 传递缓存的workbook给需要的Builder
+        data['_cached_workbook'] = self._cached_workbook
+        data['_cached_workbook_data_only'] = self._cached_workbook_data_only
+
         builder = Part4GeneticsBuilder(self.prs, self.chart_creator, self.farm_name)
         builder.build(data)
 
@@ -290,6 +321,9 @@ class ExcelBasedPPTGenerator:
 
         logger.info("构建Part 6: 公牛使用")
 
+        # 传递缓存的workbook给需要的Builder
+        data['_cached_workbook_data_only'] = self._cached_workbook_data_only
+
         # 已用公牛性状汇总表（1页）
         bulls_builder = Part6BullsUsageBuilder(self.prs, self.chart_creator, self.farm_name)
         bulls_builder.build(data)
@@ -303,7 +337,26 @@ class ExcelBasedPPTGenerator:
         traits_trends_builder.build(data)
 
         # 配种记录时间线（2页：全部记录、近一年）
+        # 优化：优先使用预导出的图片，避免加载data_only=False workbook（节省约20秒）
         timeline_builder = Part6TimelineBuilder(self.prs, self.chart_creator, self.farm_name)
+
+        # 先检查是否有预导出的时间线图片
+        pregenerated_images = timeline_builder._find_pregenerated_images(str(self.excel_report_path))
+
+        if not pregenerated_images or len(pregenerated_images) < 2:
+            # 没有预导出图片，需要从Excel提取，必须加载data_only=False workbook
+            if self._cached_workbook is None:
+                logger.info("延迟加载Excel workbook (openpyxl data_only=False) 用于提取图片...")
+                t0 = time.perf_counter()
+                self._cached_workbook = load_workbook(
+                    str(self.excel_report_path), data_only=False
+                )
+                t1 = time.perf_counter()
+                logger.info(f"✓ Excel workbook加载完成，耗时: {t1-t0:.2f}秒")
+            data['_cached_workbook'] = self._cached_workbook
+        else:
+            logger.info("✓ 检测到预导出的时间线图片，跳过加载data_only=False workbook（节省约20秒）")
+
         timeline_builder.build(data)
 
     def _build_part7_mating(self, data: dict):
@@ -323,6 +376,9 @@ class ExcelBasedPPTGenerator:
             logger.info(f"✓ Excel报告路径: {self.excel_report_path.name}")
         else:
             logger.warning("⚠️  Excel报告路径未找到")
+
+        # 传递缓存的workbook给需要的Builder（避免重复加载）
+        data['_cached_workbook_data_only'] = self._cached_workbook_data_only
 
         # 收集备选公牛排名数据（从analysis_results）
         try:

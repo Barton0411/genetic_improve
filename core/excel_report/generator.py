@@ -399,7 +399,8 @@ class ExcelReportGenerator:
     def _build_sheet8(self, data: dict):
         """构建Sheet 8: 已用公牛性状汇总分析"""
         from .sheet_builders import Sheet8Builder
-        builder = Sheet8Builder(self.wb, self.style_manager, self.chart_builder, self.progress_callback)
+        builder = Sheet8Builder(self.wb, self.style_manager, self.chart_builder, self.progress_callback,
+                               output_dir=self.analysis_folder)
         builder.build(data)
 
     def _build_sheet9(self, data: dict):

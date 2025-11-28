@@ -52,7 +52,9 @@ class Part7CandidateBullsGenesBuilder(BaseSlideBuilder):
 
         try:
             # 1. 读取Excel数据
-            bulls_data = self._read_bulls_genes_data(excel_path)
+            # 优先使用缓存的workbook（避免重复加载，每次加载需要约21秒）
+            cached_wb = data.get("_cached_workbook_data_only")
+            bulls_data = self._read_bulls_genes_data(excel_path, cached_wb)
             if not bulls_data:
                 logger.warning("⚠️  未找到备选公牛隐性基因数据，跳过")
                 return
@@ -87,18 +89,25 @@ class Part7CandidateBullsGenesBuilder(BaseSlideBuilder):
             logger.error(f"❌ 构建备选公牛-隐性基因分析失败: {e}")
             logger.debug("错误详情:", exc_info=True)
 
-    def _read_bulls_genes_data(self, excel_path: str) -> List[Dict]:
+    def _read_bulls_genes_data(self, excel_path: str, cached_wb=None) -> List[Dict]:
         """
         从Excel读取备选公牛隐性基因数据
 
         Args:
             excel_path: Excel文件路径
+            cached_wb: 缓存的workbook对象（可选，避免重复加载）
 
         Returns:
             List[Dict]: 公牛数据列表，每个字典包含公牛的隐性基因信息
         """
         try:
-            wb = load_workbook(excel_path, data_only=True)
+            # 优先使用缓存的workbook
+            if cached_wb is not None:
+                wb = cached_wb
+                logger.debug("使用缓存的workbook (data_only)")
+            else:
+                logger.debug("加载新的workbook（这可能需要约21秒）")
+                wb = load_workbook(excel_path, data_only=True)
 
             # 检查sheet是否存在
             if "备选公牛-隐性基因分析" not in wb.sheetnames:
@@ -133,7 +142,8 @@ class Part7CandidateBullsGenesBuilder(BaseSlideBuilder):
                 else:
                     row_idx += 1
 
-            wb.close()
+            # 注意：不关闭wb，因为可能是缓存的共享对象
+            # 由generator.py统一管理workbook的生命周期
             logger.info(f"✓ 成功解析 {len(bulls_data)} 头公牛的隐性基因数据")
             return bulls_data
 

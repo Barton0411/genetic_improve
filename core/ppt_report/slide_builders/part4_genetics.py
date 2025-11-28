@@ -196,6 +196,12 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
         if not self.excel_path:
             logger.warning("未获取到Excel路径，无法从源Excel复制统计表")
 
+        # 优先使用缓存的workbook（避免重复加载，每次加载需要约21秒）
+        cached_wb = data.get("_cached_workbook_data_only")
+        if cached_wb is not None:
+            self._excel_wb = cached_wb
+            logger.debug("使用缓存的workbook (data_only)")
+
         self._fill_yearly_traits_slide(data)
 
         # 从第 11 页开始：在群牛关键性状年均进展折线图（动态）
