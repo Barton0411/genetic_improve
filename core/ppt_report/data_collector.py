@@ -85,6 +85,12 @@ class DataCollector:
             self.data_cache['farm_info_dict'] = farm_info_dict
             logger.info(f"✓ farm_info解析完成: {farm_info_dict}")
 
+        # 特殊处理：选配推荐摘要（从Excel汇总区域解析）
+        mating_summary = self.get_mating_summary()
+        if mating_summary:
+            self.data_cache['mating_summary'] = mating_summary
+            logger.info(f"✓ mating_summary解析完成: {len(mating_summary.get('group_stats', []))}个分组")
+
         return self.data_cache
 
     def _read_sheet(self, sheet_name: str, header=0) -> Optional[pd.DataFrame]:
@@ -378,32 +384,78 @@ class DataCollector:
 
     def get_mating_summary(self) -> Optional[Dict[str, any]]:
         """
-        获取选配推荐摘要
+        获取选配推荐摘要（从Excel汇总区域读取）
 
         Returns:
-            选配摘要字典
+            {
+                'basic_stats': {
+                    'total_cows': 665,
+                    'has_sexed': 255,
+                    'has_regular': 665,
+                    'no_recommendation': 0
+                },
+                'group_stats': [
+                    {'group': '后备牛已孕牛+非性控', 'total': 52, 'sexed': 0, 'regular': 52},
+                    ...
+                ]
+            }
         """
         df = self.get_data('mating_results')
         if df is None or df.empty:
             return None
 
         try:
-            summary = {
-                'total_cows': len(df),
-                'has_sexed': len(df[df['推荐性控冻精1选'].notna()]),
-                'has_regular': len(df[df['推荐常规冻精1选'].notna()]),
-                'no_recommendation': len(df[(df['推荐性控冻精1选'].isna()) & (df['推荐常规冻精1选'].isna())]),
+            # 读取基础统计摘要（行1-4, 0-based索引0-3）
+            # 行0: 标题
+            # 行1: 总母牛数
+            # 行2: 有性控推荐
+            # 行3: 有常规推荐
+            # 行4: 无推荐
+
+            basic_stats = {
+                'total_cows': _to_int(df.iloc[1, 1]) or 0,      # 行2列B
+                'has_sexed': _to_int(df.iloc[2, 1]) or 0,       # 行3列B
+                'has_regular': _to_int(df.iloc[3, 1]) or 0,     # 行4列B
+                'no_recommendation': _to_int(df.iloc[4, 1]) or 0  # 行5列B
             }
 
-            # 按分组统计（如果有分组字段）
-            if '分组' in df.columns:
-                group_stats = df.groupby('分组').size().to_dict()
-                summary['group_stats'] = group_stats
+            logger.info(f"基础统计: 总{basic_stats['total_cows']}头, "
+                       f"性控{basic_stats['has_sexed']}, "
+                       f"常规{basic_stats['has_regular']}, "
+                       f"无推荐{basic_stats['no_recommendation']}")
 
-            return summary
+            # 读取分组统计（行7起）
+            # 行6: "按分组统计"标题
+            # 行7: 表头 ['分组', '母牛数', '性控推荐数', '常规推荐数']
+            # 行8-: 分组数据
+
+            group_stats = []
+            header_row = 7  # 0-based索引，对应Excel的行8
+
+            # 从表头下一行开始读取数据
+            data_start_row = header_row + 1
+
+            for i in range(data_start_row, min(data_start_row + 20, len(df))):
+                group_name = df.iloc[i, 0]
+                if pd.isna(group_name) or str(group_name).strip() == '':
+                    break  # 遇到空行停止
+
+                group_stats.append({
+                    'group': str(group_name).strip(),
+                    'total': _to_int(df.iloc[i, 1]) or 0,
+                    'sexed': _to_int(df.iloc[i, 2]) or 0,
+                    'regular': _to_int(df.iloc[i, 3]) or 0
+                })
+
+            logger.info(f"分组统计: 共{len(group_stats)}个分组")
+
+            return {
+                'basic_stats': basic_stats,
+                'group_stats': group_stats
+            }
 
         except Exception as e:
-            logger.error(f"计算选配摘要失败: {e}")
+            logger.error(f"读取选配摘要失败: {e}", exc_info=True)
             return None
 
     def _parse_upload_stats(self, df: pd.DataFrame):

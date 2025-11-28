@@ -21,7 +21,7 @@ from pptx.util import Pt
 from pptx.dml.color import RGBColor
 
 from ..base_builder import BaseSlideBuilder
-from ..config import CONTENT_LEFT, CONTENT_TOP, CHART_WIDTH, CHART_HEIGHT
+from ..config import CONTENT_LEFT, CONTENT_TOP, CHART_WIDTH, CHART_HEIGHT, FONT_NAME_CN
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,134 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
         "最小值",
         "平均得分",
     )
+
+    # 性状定义字典（来源：CDCB官网 uscdcb.com）
+    TRAIT_DEFINITIONS = {
+        # ========== 选择指数 ==========
+        "NM$": (
+            "终身净收益指数",
+            "美国主要遗传选择指数，综合约45个经济性状按其对牧场盈利能力的影响加权，"
+            "预测每头动物传递给后代的终身利润差异（美元），数值越高表示综合经济效益越好"
+        ),
+        "TPI": (
+            "总性能指数",
+            "美国荷斯坦协会(Holstein USA)的综合选择指数，整合产量、健康和体型性状。"
+            "与NM$类似但权重分配不同，更侧重体型性状，帮助牧场追踪遗传改良并做出育种决策"
+        ),
+        "CM$": ("奶酪收益指数", "针对奶酪生产牧场的选择指数，对产奶量赋予负权重，更侧重乳蛋白产量"),
+        "FM$": ("液态奶收益指数", "针对液态奶市场的选择指数，显著增加产奶量权重，不考虑乳蛋白"),
+        "GM$": ("放牧收益指数", "针对放牧型牧场的选择指数，繁殖性状权重是其他指数的2.5倍，强调季节性产犊"),
+
+        # ========== 产量性状 ==========
+        "MILK": (
+            "产奶量PTA",
+            "预测传递力(Predicted Transmitting Ability)，单位磅(lbs)。表示后代成年女儿相对于群体平均的产奶量差异，"
+            "正值表示增产。在NM$中权重约为-1%（因高产奶量会稀释乳成分）"
+        ),
+        "FAT": (
+            "乳脂产量PTA",
+            "预测后代成年女儿的乳脂产量（磅），正值表示乳脂增产。"
+            "在NM$中权重最高（约32%），是最重要的经济性状之一"
+        ),
+        "FAT%": ("乳脂率PTA", "遗传传递乳脂浓度的能力，以百分点表示。乳脂率=乳脂产量/产奶量×100%"),
+        "PROT": (
+            "乳蛋白产量PTA",
+            "预测后代成年女儿的乳蛋白产量（磅），正值表示乳蛋白增产。"
+            "在NM$中权重约13%，是第二重要的产量性状"
+        ),
+        "PROT%": ("乳蛋白率PTA", "遗传传递乳蛋白浓度的能力，以百分点表示。乳蛋白率=乳蛋白产量/产奶量×100%"),
+
+        # ========== 饲料效率 ==========
+        "RFI": (
+            "剩余采食量",
+            "实际采食量与基于体型、产量预期采食量的差值。负值表示在相同产量下采食更少，饲料效率更高。"
+            "在NM$中权重约-4%，有利于降低饲料成本"
+        ),
+        "FSAV": ("节省饲料量", "每个泌乳期预期减少的干物质采食量（磅），正值表示更节省饲料"),
+        "BWC": ("体重综合指数", "反映体型大小，在NM$中权重约-9%，因大体型牛只维持消耗更高"),
+
+        # ========== 健康与长寿 ==========
+        "SCS": (
+            "体细胞评分",
+            "通过体细胞数(SCC)反映乳房健康的遗传易感性，采用对数转换：SCS=log2(SCC/100)+3。"
+            "数值越低乳房越健康，乳房炎发病率越低。在NM$中权重约-3%"
+        ),
+        "PL": (
+            "生产寿命",
+            "预测后代母牛在泌乳群中被淘汰前的留群时间（月）。数值越高表示使用年限越长，"
+            "减少更新成本。在NM$中权重约15%，是重要的长寿性状"
+        ),
+        "LIV": (
+            "母牛存活力",
+            "预测后代母牛在泌乳群中存活（非因死亡淘汰）的差异，以百分点表示。"
+            "数值越高表示非自愿淘汰率越低"
+        ),
+        "HLV": ("青年牛存活力", "预测后备牛从出生到初产期间的存活能力"),
+        "MAST": (
+            "乳房炎抗性",
+            "预测后代对临床乳房炎的抵抗能力，以百分点表示。数值越高抗性越强，发病率越低"
+        ),
+        "DA": ("真胃移位抗性", "预测后代对真胃移位(Displaced Abomasum)的抵抗能力，以百分点表示"),
+        "KETO": ("酮病抗性", "预测后代对酮病(Ketosis)的抵抗能力，以百分点表示"),
+        "KET": ("酮病抗性", "预测后代对酮病(Ketosis)的抵抗能力，以百分点表示"),
+        "MF": ("低血钙症抗性", "预测后代对产后瘫痪/低血钙症(Milk Fever/Hypocalcemia)的抵抗能力"),
+        "METR": ("子宫炎抗性", "预测后代对子宫炎(Metritis)的抵抗能力，以百分点表示"),
+        "MET": ("子宫炎抗性", "预测后代对子宫炎(Metritis)的抵抗能力，以百分点表示"),
+        "RP": ("胎衣不下抗性", "预测后代对胎衣不下(Retained Placenta)的抵抗能力，以百分点表示"),
+        "HTH$": ("健康综合指数", "综合六个健康性状(乳房炎、酮病、真胃移位、胎衣不下、子宫炎、低血钙症)的经济指数"),
+
+        # ========== 繁殖性状 ==========
+        "DPR": (
+            "女儿妊娠率",
+            "每21天发情周期内非妊娠母牛的预期受孕百分比。每增加1%意味着空怀天数减少约4天。"
+            "在NM$中权重约5%，是主要的繁殖性状"
+        ),
+        "CCR": (
+            "经产牛受孕率",
+            "泌乳母牛的受孕能力，定义为预期受孕的百分比。在NM$中权重约1%"
+        ),
+        "HCR": (
+            "青年牛受孕率",
+            "未产青年牛的受孕能力，定义为预期受孕的百分比。在NM$中权重约1%"
+        ),
+        "GL": ("妊娠期", "预测后代对妊娠天数的影响，较短妊娠期可减少难产风险"),
+        "EFC": ("早期初产", "反映后备牛早期投产能力，在NM$中权重约1%"),
+        "CA$": ("产犊能力指数", "综合产犊难易度、死胎率等产犊相关性状的经济指数，在NM$中权重约5%"),
+
+        # ========== 体型综合性状 ==========
+        "PTAT": (
+            "体型综合PTA",
+            "遗传传递品种鉴定最终评分的能力。基于体型线性鉴定计算，正值表示体型优于平均"
+        ),
+        "UDC": (
+            "乳房综合指数",
+            "综合前乳房附着、后乳房高度、后乳房宽度、乳房深度、乳头位置等乳房性状，"
+            "按经济效益加权。在NM$中权重约7%，良好的乳房结构有利于机器挤奶和乳房健康"
+        ),
+        "FLC": (
+            "肢蹄综合指数",
+            "综合蹄角度、后肢侧视、后肢后视等肢蹄性状。在NM$中权重约3%，"
+            "良好的肢蹄结构有利于奶牛行走和使用寿命"
+        ),
+        "FS": ("最终得分", "体型鉴定的最终分类评分，反映整体外貌质量"),
+
+        # ========== 体型线性性状 ==========
+        "ST": ("体高", "从腰角到地面的垂直高度，反映奶牛的身高"),
+        "SR": ("体躯强度", "胸部宽度，反映胸宽和体躯结实程度"),
+        "BD": ("体深", "从背线到腹底的深度，反映奶牛的体躯容积"),
+        "DF": ("乳用特征", "反映奶牛的乳用型外貌特征，骨骼棱角分明、皮薄毛细的程度"),
+        "RA": ("尻角度", "从腰角到坐骨的倾斜度，适中角度有利于产犊和排出胎衣"),
+        "RW": ("尻宽", "两坐骨间的宽度，较宽有利于产犊"),
+        "RLS": ("后肢侧视", "从侧面观察飞节角度，适中角度有利于运动和承重"),
+        "RLR": ("后肢后视", "从后面观察后肢的角度，理想为两腿平行"),
+        "FA": ("蹄角度", "前蹄蹄壁与地面的角度，45度左右为理想"),
+        "FUA": ("前乳房附着", "前乳房与腹壁的连接强度和位置"),
+        "RUH": ("后乳房高度", "后乳房附着点相对于阴门的高度"),
+        "RUW": ("后乳房宽度", "后乳房在后视时的宽度"),
+        "UC": ("乳房深度", "乳房底部相对于飞节的位置，理想为高于飞节"),
+        "TP": ("乳头位置", "前乳头在乳区的位置，理想为位于乳区中央"),
+        "TL": ("乳头长度", "乳头的长度，中等长度便于机器挤奶"),
+    }
 
     def __init__(self, prs, chart_creator, farm_name: str):
         super().__init__(prs, chart_creator)
@@ -148,6 +276,205 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
         for r in range(max_rows, len(table.rows)):
             for c in range(len(table.columns)):
                 self._set_cell_text(table.cell(r, c), "")
+
+        # 生成并填充分析文本
+        analysis_text = self._generate_yearly_traits_analysis(df)
+        if analysis_text:
+            self._update_yearly_traits_analysis(slide, analysis_text)
+
+    # ------------------------------------------------------------------ #
+    def _generate_yearly_traits_analysis(self, df: pd.DataFrame) -> str:
+        """
+        生成在群母牛年份汇总表的分析文本
+
+        Args:
+            df: 年份汇总数据表（包含出生年份、头数及各性状均值）
+
+        Returns:
+            分析文本字符串
+        """
+        if df is None or df.empty:
+            return ""
+
+        try:
+            # 表格结构：第一列=出生年份，第二列=头数，后续列=各性状
+            # 最后几行通常是"合计"、"总计"、"对比"等汇总行
+            # 年份格式可能是"2021年"、"2020年及以前"等
+            year_col = df.columns[0]
+
+            def is_year_row(val):
+                """判断是否为年份数据行（支持"2021年"、"2020年及以前"等格式）"""
+                if pd.isna(val):
+                    return False
+                val_str = str(val).strip()
+                # 排除汇总行
+                if any(kw in val_str for kw in ["总计", "合计", "对比", "小计"]):
+                    return False
+                # 包含"年"且有4位数字的行认为是年份行
+                import re
+                if "年" in val_str and re.search(r'\d{4}', val_str):
+                    return True
+                # 纯4位数字也是年份
+                if val_str.isdigit() and len(val_str) == 4:
+                    return True
+                return False
+
+            data_rows = df[df[year_col].apply(is_year_row)].copy()
+
+            if data_rows.empty:
+                return ""
+
+            # 提取年份数字
+            import re
+            def extract_year(val):
+                match = re.search(r'(\d{4})', str(val))
+                return int(match.group(1)) if match else 0
+
+            years = [extract_year(v) for v in data_rows[year_col]]
+            years = [y for y in years if y > 0]
+            if not years:
+                return ""
+            min_year = min(years)
+            max_year = max(years)
+
+            # 统计各年份头数
+            count_col = df.columns[1]
+            total_count = data_rows[count_col].sum()
+
+            # 关键性状分析（选取NM$、TPI、MILK、FAT、PROT、SCS等）
+            key_traits = ["NM$", "TPI", "MILK", "FAT", "PROT", "SCS", "PL", "DPR"]
+            trait_trends = []
+
+            for trait in key_traits:
+                if trait in df.columns:
+                    trait_idx = df.columns.get_loc(trait)
+                    # 计算近年趋势（最近3-5年）
+                    recent_data = data_rows.iloc[-min(5, len(data_rows)):][df.columns[trait_idx]]
+                    recent_data = pd.to_numeric(recent_data, errors='coerce').dropna()
+                    if len(recent_data) >= 2:
+                        first_val = recent_data.iloc[0]
+                        last_val = recent_data.iloc[-1]
+                        if first_val != 0:
+                            change_pct = ((last_val - first_val) / abs(first_val)) * 100
+                            if abs(change_pct) > 5:
+                                direction = "提升" if change_pct > 0 else "下降"
+                                # SCS特殊处理：下降是好事
+                                if trait == "SCS" and change_pct < 0:
+                                    direction = "改善"
+                                trait_trends.append((trait, direction, abs(change_pct)))
+
+            # 构建分析文本
+            parts = []
+            parts.append(f"在群母牛出生年份分布为{min_year}-{max_year}年，共计{int(total_count)}头。")
+
+            # 整体趋势判断
+            if trait_trends:
+                improving = [t for t in trait_trends if t[1] in ("提升", "改善")]
+                declining = [t for t in trait_trends if t[1] == "下降"]
+
+                if len(improving) > len(declining):
+                    parts.append("近年遗传进展整体向好，")
+                    if improving:
+                        top_improve = sorted(improving, key=lambda x: x[2], reverse=True)[:2]
+                        traits_str = "、".join([f"{t[0]}" for t in top_improve])
+                        parts.append(f"{traits_str}等性状表现突出。")
+                elif declining:
+                    parts.append("部分性状有下降趋势，建议关注育种方向调整。")
+                else:
+                    parts.append("各性状整体保持稳定。")
+            else:
+                parts.append("各性状年度均值较为稳定。")
+
+            return "".join(parts)
+
+        except Exception as e:
+            logger.warning(f"生成年份汇总分析文本时出错: {e}")
+            return ""
+
+    def _update_yearly_traits_analysis(self, slide, analysis_text: str):
+        """
+        更新Slide 10的分析文本框
+
+        查找包含"分析："前缀的文本框（通常在页面底部）
+        """
+        if not analysis_text:
+            return
+
+        analysis_box = None
+
+        # 方法1: 查找包含"分析："或"分析:"的文本框（这是最可靠的标识）
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                text = shape.text.strip() if shape.text else ""
+                # 查找以"分析"开头的文本框
+                if text.startswith("分析：") or text.startswith("分析:"):
+                    analysis_box = shape
+                    logger.debug(f"找到分析文本框（通过'分析：'前缀）: {shape.name}")
+                    break
+
+        # 方法2: 查找名称为"文本框 14"的形状（常见的分析框名称）
+        if not analysis_box:
+            for shape in slide.shapes:
+                if shape.has_text_frame and shape.name == "文本框 14":
+                    analysis_box = shape
+                    logger.debug(f"找到分析文本框（通过名称'文本框 14'）")
+                    break
+
+        # 方法3: 查找页面下半部分的文本框（排除标题和表格）
+        if not analysis_box:
+            # 收集所有候选文本框
+            candidates = []
+            for shape in slide.shapes:
+                if shape.has_text_frame and not getattr(shape, "has_table", False):
+                    # 排除标题（通常在顶部，top值很小）
+                    if hasattr(shape, "top") and shape.top > 4000000:  # 约4cm以下
+                        text = shape.text.strip() if shape.text else ""
+                        # 排除明显的标题（字数很少且不包含"分析"）
+                        if "分析" in text or len(text) > 20:
+                            candidates.append((shape.top, shape))
+
+            # 选择位置最靠下的文本框
+            if candidates:
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                analysis_box = candidates[0][1]
+                logger.debug(f"找到分析文本框（通过位置）: {analysis_box.name}")
+
+        if analysis_box:
+            tf = analysis_box.text_frame
+            # 保留第一段的格式
+            if tf.paragraphs:
+                para = tf.paragraphs[0]
+                # 保存原始格式
+                font_size = None
+                font_name = None
+                font_color = None
+                if para.runs:
+                    run = para.runs[0]
+                    font_size = run.font.size
+                    font_name = run.font.name
+                    # 安全获取颜色（处理_NoneColor等情况）
+                    try:
+                        if run.font.color and run.font.color.type is not None:
+                            font_color = run.font.color.rgb
+                    except (AttributeError, TypeError):
+                        font_color = None
+
+                # 清空并设置新文本（避免重复"分析："前缀）
+                para.clear()
+                run = para.add_run()
+                if analysis_text.startswith("分析：") or analysis_text.startswith("分析:"):
+                    run.text = analysis_text
+                else:
+                    run.text = f"分析：{analysis_text}"
+
+                # 设置字体：微软雅黑15号非加粗
+                run.font.name = FONT_NAME_CN
+                run.font.size = Pt(15)
+                run.font.bold = False
+
+            logger.info(f"✓ 第10页年份汇总分析文本已更新")
+        else:
+            logger.warning("未找到第10页的分析文本框")
 
     # ------------------------------------------------------------------ #
     def _fill_genetic_distribution_slide(self, data: Dict):
@@ -311,6 +638,17 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
         else:
             logger.warning("在群牛遗传分布页未找到柱状图（Chart 2）")
 
+        # 生成并更新分析文本
+        distribution_data = [
+            {"interval": cat, "count": cnt, "percent": pct}
+            for cat, cnt, pct in zip(categories, present_counts, present_percents)
+            if cnt is not None
+        ]
+        total_count = sum(c for c in present_counts if c is not None)
+        analysis_text = self._generate_distribution_analysis("NM$", distribution_data, int(total_count))
+        self._update_distribution_analysis_textbox(slide, analysis_text)
+        logger.info("✓ NM$分布页分析文本更新完成")
+
     # ------------------------------------------------------------------ #
     def _fill_tpi_distribution_slide(self, data: Dict):
         """
@@ -451,6 +789,17 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
         else:
             logger.warning("在群母牛TPI分布页未找到柱状图（Chart 2）")
 
+        # 生成并更新分析文本
+        distribution_data = [
+            {"interval": cat, "count": cnt, "percent": pct}
+            for cat, cnt, pct in zip(categories, present_counts, present_percents)
+            if cnt is not None
+        ]
+        total_count = sum(c for c in present_counts if c is not None)
+        analysis_text = self._generate_distribution_analysis("TPI", distribution_data, int(total_count))
+        self._update_distribution_analysis_textbox(slide, analysis_text)
+        logger.info("✓ TPI分布页分析文本更新完成")
+
     # ------------------------------------------------------------------ #
     def _fill_index_distribution_slide(self, data: Dict):
         """
@@ -587,6 +936,17 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             bar_chart.replace_data(bar_data)
         else:
             logger.warning("在群母牛育种指数分布页未找到柱状图（Chart 2）")
+
+        # 生成并更新分析文本
+        distribution_data = [
+            {"interval": cat, "count": cnt, "percent": pct}
+            for cat, cnt, pct in zip(categories, present_counts, present_percents)
+            if cnt is not None
+        ]
+        total_count = sum(c for c in present_counts if c is not None)
+        analysis_text = self._generate_distribution_analysis("育种指数", distribution_data, int(total_count))
+        self._update_distribution_analysis_textbox(slide, analysis_text)
+        logger.info("✓ 育种指数分布页分析文本更新完成")
 
     # ------------------------------------------------------------------ #
     def _collect_slide_text(self, slide) -> str:
@@ -1183,6 +1543,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
                 overall_slide, "表格 7", sheet_name, "在群母牛-NM$五等份分析", font_size=12
             )
 
+            # 填充分析文本
+            analysis = "分析：NM$（净效益）反映牛只的综合经济价值。整体正态分布图展示了牧场在群母牛NM$的分布特征，分布越集中说明牛群遗传水平越一致，均值越高说明整体经济价值越好。"
+            self._update_distribution_analysis_textbox(overall_slide, analysis)
+
         # 2) 成母牛/后备牛NM$正态分布 - 索引2
         if maturity_slide:
             # 导出并插入Excel图表
@@ -1202,6 +1566,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             self._fill_table_from_excel(
                 maturity_slide, "表格 10", sheet_name, "在群母牛-后备牛组", font_size=12
             )
+
+            # 填充分析文本
+            analysis = "分析：成母牛与后备牛的NM$分布对比，可以反映牧场育种选配的效果。通常后备牛的NM$均值应高于成母牛，说明遗传进展良好；若后备牛均值偏低，需关注选种选配策略。"
+            self._update_distribution_analysis_textbox(maturity_slide, analysis)
 
         # 3) 不同阶段牛群NM$正态分布 - 索引4
         if stage_slide:
@@ -1228,6 +1596,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             self._fill_table_from_excel(
                 stage_slide, "表格 20", sheet_name, "在群母牛-12月龄以下0胎牛", font_size=12
             )
+
+            # 填充分析文本
+            analysis = "分析：不同阶段（胎次）牛群的NM$分布反映了各年龄段牛只的遗传水平。通过对比可评估淘汰策略的效果，理想状态下低胎次牛的NM$均值应高于高胎次牛。"
+            self._update_distribution_analysis_textbox(stage_slide, analysis)
 
         # 4) 不同出生年份牛群NM$正态分布 - 索引6
         if birth_year_slide:
@@ -1286,6 +1658,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
                 else:
                     self._delete_table(birth_year_slide, table_name)
 
+            # 填充分析文本
+            analysis = "分析：不同出生年份牛群的NM$分布反映了牧场遗传进展趋势。通常近年出生牛的NM$均值应高于早期出生牛，说明选种选配效果良好。"
+            self._update_distribution_analysis_textbox(birth_year_slide, analysis)
+
         logger.info("NM$正态分布页面填充完成")
 
     # ------------------------------------------------------------------ #
@@ -1331,6 +1707,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
                 overall_slide, "表格 7", sheet_name, "在群母牛-TPI五等份分析", font_size=12
             )
 
+            # 填充分析文本
+            analysis = "分析：TPI（总性能指数）综合反映牛只的生产性能和功能性状。整体正态分布展示了牧场在群母牛TPI的分布特征，均值越高说明牛群整体性能越优秀。"
+            self._update_distribution_analysis_textbox(overall_slide, analysis)
+
         # 2) 成母牛/后备牛TPI正态分布 - 索引2
         if maturity_slide:
             # 导出并插入Excel图表
@@ -1350,6 +1730,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             self._fill_table_from_excel(
                 maturity_slide, "表格 10", sheet_name, "在群母牛-后备牛组", font_size=12
             )
+
+            # 填充分析文本
+            analysis = "分析：成母牛与后备牛的TPI分布对比反映了牧场育种效果。后备牛TPI均值应高于成母牛，说明遗传进展良好；差距越大，遗传进展越明显。"
+            self._update_distribution_analysis_textbox(maturity_slide, analysis)
 
         # 3) 不同阶段牛群TPI正态分布 - 索引4
         if stage_slide:
@@ -1376,6 +1760,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             self._fill_table_from_excel(
                 stage_slide, "表格 20", sheet_name, "在群母牛-12月龄以下0胎牛", font_size=12
             )
+
+            # 填充分析文本
+            analysis = "分析：不同阶段（胎次）牛群的TPI分布反映了各年龄段牛只的综合性能水平。低胎次牛TPI均值高于高胎次牛，说明淘汰策略有效，遗传水平逐步提升。"
+            self._update_distribution_analysis_textbox(stage_slide, analysis)
 
         # 4) 不同出生年份牛群TPI正态分布 - 索引6
         if birth_year_slide:
@@ -1434,6 +1822,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
                 else:
                     self._delete_table(birth_year_slide, table_name)
 
+            # 填充分析文本
+            analysis = "分析：不同出生年份牛群的TPI分布反映了牧场遗传进展趋势。近年出生牛的TPI均值应高于早期出生牛，体现选种选配效果。"
+            self._update_distribution_analysis_textbox(birth_year_slide, analysis)
+
         logger.info("TPI正态分布页面填充完成")
 
     # ------------------------------------------------------------------ #
@@ -1479,6 +1871,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
                 overall_slide, "表格 7", sheet_name, "在群母牛-育种指数五等份分析", font_size=12
             )
 
+            # 填充分析文本
+            analysis = "分析：育种指数是牧场自定义的综合选择指数，反映牛只在牧场育种目标下的综合遗传价值。整体正态分布展示了牧场在群母牛育种指数的分布特征。"
+            self._update_distribution_analysis_textbox(overall_slide, analysis)
+
         # 2) 成母牛/后备牛育种指数正态分布 - 索引2
         if maturity_slide:
             # 导出并插入Excel图表
@@ -1498,6 +1894,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             self._fill_table_from_excel(
                 maturity_slide, "表格 10", sheet_name, "在群母牛-后备牛组", font_size=12
             )
+
+            # 填充分析文本
+            analysis = "分析：成母牛与后备牛的育种指数分布对比反映了牧场选种选配效果。后备牛育种指数均值应高于成母牛，说明遗传改良方向正确。"
+            self._update_distribution_analysis_textbox(maturity_slide, analysis)
 
         # 3) 不同阶段牛群育种指数正态分布 - 索引4
         if stage_slide:
@@ -1521,6 +1921,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
                 self._fill_table_from_excel(
                     stage_slide, table_name, sheet_name, label, font_size=12
                 )
+
+            # 填充分析文本
+            analysis = "分析：不同阶段（胎次）牛群的育种指数分布反映了各年龄段牛只在牧场育种目标下的价值。低胎次牛育种指数高于高胎次牛，说明牧场遗传改良有效。"
+            self._update_distribution_analysis_textbox(stage_slide, analysis)
 
         # 4) 不同出生年份牛群育种指数正态分布 - 索引6
         if birth_year_slide:
@@ -1585,6 +1989,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
                 else:
                     logger.info(f"育种指数：删除占位表格 {table_name} (title={title})")
                     self._delete_table(birth_year_slide, table_name)
+
+            # 填充分析文本
+            analysis = "分析：不同出生年份牛群的育种指数分布反映了牧场遗传进展趋势。近年出生牛的育种指数均值应高于早期出生牛，体现育种目标的持续实现。"
+            self._update_distribution_analysis_textbox(birth_year_slide, analysis)
 
         logger.info("育种指数正态分布页面填充完成")
 
@@ -1726,6 +2134,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             # 替换图表数据和小标题
             self._update_trait_chart(chart, present, comparison_data, trait_col, trait_name)
 
+            # 生成并更新分析文本
+            analysis_text = self._generate_trait_analysis(trait_name, present, trait_col)
+            self._update_trait_analysis_textbox(slide, analysis_text)
+
         # ==== 步骤3：如果模板有多余的页（>性状数），整页删除 ====
         if len(chart_slots) > trait_count:
             extra_indices = chart_slots[trait_count:]
@@ -1843,6 +2255,393 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             trait_name,
             1 + len(comparison_series),
         )
+
+    def _generate_trait_analysis(
+        self,
+        trait_name: str,
+        present_df: pd.DataFrame,
+        trait_col: str,
+    ) -> str:
+        """
+        为单个性状生成分析文本
+
+        Args:
+            trait_name: 性状名称（如 NM$, TPI, MILK 等）
+            present_df: 在群母牛年份汇总数据
+            trait_col: 性状列名（如 平均NM$）
+
+        Returns:
+            分析文本字符串
+        """
+        parts = []
+
+        # 1. 性状定义
+        trait_def = self.TRAIT_DEFINITIONS.get(trait_name)
+        if trait_def:
+            cn_name, description = trait_def
+            parts.append(f"{trait_name}（{cn_name}）：{description}。\n")  # 定义后换行
+        else:
+            parts.append(f"{trait_name}性状：\n")
+
+        # 2. 数据趋势分析
+        valid_data = present_df[
+            ~present_df["出生年份"].astype(str).str.contains("总计|对比", na=False)
+        ].copy()
+
+        if valid_data.empty or trait_col not in valid_data.columns:
+            parts.append(f"牧场{trait_name}性状数据暂无足够年份记录。")
+            return "".join(parts)
+
+        # 提取年份和数值
+        years = valid_data["出生年份"].astype(str).tolist()
+        values = pd.to_numeric(valid_data[trait_col], errors="coerce").tolist()
+
+        # 过滤有效数据点
+        valid_pairs = [(y, v) for y, v in zip(years, values) if pd.notna(v)]
+        if len(valid_pairs) < 2:
+            parts.append(f"牧场{trait_name}性状数据点不足，无法分析趋势。")
+            return "".join(parts)
+
+        years_clean = [p[0] for p in valid_pairs]
+        values_clean = [p[1] for p in valid_pairs]
+
+        # 计算趋势
+        first_val = values_clean[0]
+        last_val = values_clean[-1]
+        change = last_val - first_val
+        avg_val = sum(values_clean) / len(values_clean)
+
+        # 计算年均变化（简单线性趋势）
+        n = len(values_clean)
+        if n >= 2:
+            avg_change_per_year = change / (n - 1)
+        else:
+            avg_change_per_year = 0
+
+        # 3. 趋势描述
+        first_year = years_clean[0].replace("年", "").replace("及以前", "")
+        last_year = years_clean[-1].replace("年", "").replace("及以前", "")
+
+        # 根据性状类型判断趋势好坏
+        # SCS、RFI 是负向指标（数值越低越好），其他多为正向指标
+        is_negative_trait = trait_name in ("SCS", "RFI", "GL")
+
+        if abs(change) < 0.01 * abs(avg_val) if avg_val != 0 else abs(change) < 0.1:
+            trend_desc = "基本持平"
+            trend_eval = "保持稳定"
+        elif change > 0:
+            if is_negative_trait:
+                trend_desc = "呈上升趋势"
+                trend_eval = "需关注改善"
+            else:
+                trend_desc = "呈上升趋势"
+                trend_eval = "呈现良好的遗传进展"
+        else:
+            if is_negative_trait:
+                trend_desc = "呈下降趋势"
+                trend_eval = "呈现良好的改善趋势"
+            else:
+                trend_desc = "呈下降趋势"
+                trend_eval = "需关注提升"
+
+        parts.append(
+            f"从{first_year}年到{last_year}年，牧场在群母牛{trait_name}性状{trend_desc}，"
+            f"平均值从{first_val:.2f}变化到{last_val:.2f}，"
+            f"年均变化约{avg_change_per_year:+.2f}，{trend_eval}。"
+        )
+
+        # 4. 当前水平评价
+        parts.append(f"当前牛群{trait_name}平均值为{last_val:.2f}。")
+
+        return "".join(parts)
+
+    def _update_trait_analysis_textbox(self, slide, analysis_text: str):
+        """
+        更新性状进展页的分析文本框（文本框 13）
+
+        Args:
+            slide: 目标幻灯片
+            analysis_text: 分析文本
+        """
+        text_box = None
+        for shape in slide.shapes:
+            if shape.name == "文本框 13":
+                text_box = shape
+                break
+
+        if not text_box:
+            # 尝试查找包含"分析"的文本框
+            for shape in slide.shapes:
+                if shape.has_text_frame and "分析" in shape.text and len(shape.text) < 100:
+                    text_box = shape
+                    break
+
+        if not text_box:
+            logger.warning("未找到分析文本框（文本框 13），跳过分析文本更新")
+            return
+
+        if not text_box.has_text_frame:
+            logger.warning("文本框 13 没有文本框架")
+            return
+
+        # 设置文本，保持模板样式
+        tf = text_box.text_frame
+        if not tf.paragraphs:
+            para = tf.add_paragraph()
+        else:
+            para = tf.paragraphs[0]
+
+        # 清空段落并添加新run
+        para.clear()
+        run = para.add_run()
+
+        # 避免重复"分析："前缀
+        if analysis_text.startswith("分析：") or analysis_text.startswith("分析:"):
+            run.text = analysis_text
+        else:
+            run.text = f"分析：{analysis_text}"
+
+        # 设置字体：微软雅黑15号非加粗
+        run.font.name = FONT_NAME_CN
+        run.font.size = Pt(15)
+        run.font.bold = False
+
+        # 清理其他段落
+        for extra_para in tf.paragraphs[1:]:
+            for extra_run in extra_para.runs:
+                extra_run.text = ""
+
+        logger.debug("✓ 分析文本框更新完成")
+
+    def _generate_distribution_analysis(
+        self,
+        index_name: str,
+        distribution_data: list,
+        total_count: int = 0,
+    ) -> str:
+        """
+        为分布页面生成分析文本
+
+        Args:
+            index_name: 指数名称（NM$, TPI, 育种指数等）
+            distribution_data: 分布数据列表 [{"interval": "0-100", "count": 50, "percent": 10.0}, ...]
+            total_count: 总头数
+
+        Returns:
+            分析文本字符串
+        """
+        parts = []
+
+        # 1. 指数定义（简短版）
+        index_def = self.TRAIT_DEFINITIONS.get(index_name)
+        if index_def:
+            cn_name, _ = index_def
+            parts.append(f"{index_name}（{cn_name}）")
+        else:
+            parts.append(f"{index_name}指数")
+
+        if not distribution_data:
+            parts.append("分布数据暂无。")
+            return "".join(parts)
+
+        # 2. 计算关键统计
+        # 找出占比最高的区间
+        max_interval = max(distribution_data, key=lambda x: x.get("percent", 0))
+        max_interval_name = max_interval.get("interval", "")
+        max_interval_pct = max_interval.get("percent", 0)
+
+        # 计算低于0/负值的占比（如果有）
+        negative_pct = 0
+        low_pct = 0  # 低于某个阈值的占比
+        high_pct = 0  # 高于某个阈值的占比
+
+        for item in distribution_data:
+            interval = str(item.get("interval", ""))
+            pct = item.get("percent", 0) or 0
+
+            # 检查是否为负值区间
+            if interval.startswith("-") or interval.startswith("<0") or "以下" in interval:
+                if "0" in interval or interval.startswith("-"):
+                    negative_pct += pct
+
+            # 根据指数类型判断低/高阈值
+            if index_name == "NM$":
+                if any(x in interval for x in ["-", "<0", "以下"]) and "0" in interval:
+                    low_pct += pct
+                elif any(x in interval for x in ["500", "600", "700", "800"]):
+                    high_pct += pct
+            elif index_name == "TPI":
+                if any(x in interval for x in ["<2000", "2000以下", "1"]):
+                    low_pct += pct
+                elif any(x in interval for x in ["2800", "2900", "3000"]):
+                    high_pct += pct
+
+        # 3. 生成分析文本
+        total_str = f"共{total_count}头" if total_count > 0 else ""
+        parts.append(f"分布分析：牧场在群母牛{total_str}，")
+
+        parts.append(f"其中{max_interval_name}区间占比最高（{max_interval_pct:.1f}%）。")
+
+        # 评价
+        if negative_pct > 20:
+            parts.append(f"低于0的牛只占{negative_pct:.1f}%，建议关注低遗传水平牛只的淘汰或改良。")
+        elif negative_pct > 0:
+            parts.append(f"低于0的牛只占{negative_pct:.1f}%，整体遗传水平较好。")
+
+        if high_pct > 30:
+            parts.append(f"高遗传水平牛只占比{high_pct:.1f}%，牛群遗传基础优秀。")
+
+        return "".join(parts)
+
+    def _generate_normal_distribution_analysis(
+        self,
+        index_name: str,
+        group_name: str,
+        stats: Dict,
+    ) -> str:
+        """
+        为正态分布页面生成分析文本
+
+        Args:
+            index_name: 指数名称（NM$, TPI等）
+            group_name: 分组名称（整体、成母牛、后备牛、不同胎次等）
+            stats: 统计数据 {"mean": 均值, "std": 标准差, "count": 头数, "median": 中位数}
+
+        Returns:
+            分析文本字符串
+        """
+        parts = []
+
+        mean = stats.get("mean", 0)
+        std = stats.get("std", 0)
+        count = stats.get("count", 0)
+        median = stats.get("median", 0)
+
+        # 指数简介
+        index_def = self.TRAIT_DEFINITIONS.get(index_name)
+        if index_def:
+            cn_name, _ = index_def
+            parts.append(f"{index_name}（{cn_name}）")
+        else:
+            parts.append(f"{index_name}")
+
+        parts.append(f"{group_name}分布分析：")
+
+        if count > 0:
+            parts.append(f"样本量{count}头，均值{mean:.1f}，标准差{std:.1f}，中位数{median:.1f}。")
+
+            # 变异系数评价
+            if mean != 0:
+                cv = abs(std / mean) * 100
+                if cv < 20:
+                    parts.append("牛群遗传水平较为一致。")
+                elif cv < 40:
+                    parts.append("牛群遗传水平存在一定分化。")
+                else:
+                    parts.append("牛群遗传水平差异较大，建议针对性改良。")
+
+            # 均值评价（基于指数类型）
+            if index_name == "NM$":
+                if mean > 400:
+                    parts.append(f"平均NM$为{mean:.0f}，处于较高水平。")
+                elif mean > 200:
+                    parts.append(f"平均NM$为{mean:.0f}，处于中等水平。")
+                else:
+                    parts.append(f"平均NM$为{mean:.0f}，有较大提升空间。")
+            elif index_name == "TPI":
+                if mean > 2600:
+                    parts.append(f"平均TPI为{mean:.0f}，处于较高水平。")
+                elif mean > 2400:
+                    parts.append(f"平均TPI为{mean:.0f}，处于中等水平。")
+                else:
+                    parts.append(f"平均TPI为{mean:.0f}，有较大提升空间。")
+
+        else:
+            parts.append("暂无足够数据进行分析。")
+
+        return "".join(parts)
+
+    def _update_distribution_analysis_textbox(self, slide, analysis_text: str):
+        """
+        更新分布页的分析文本框
+
+        Args:
+            slide: 目标幻灯片
+            analysis_text: 分析文本
+        """
+        text_box = None
+
+        # 方法1: 查找以"分析："开头的文本框（最可靠）
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                text = shape.text.strip() if shape.text else ""
+                if text.startswith("分析：") or text.startswith("分析:"):
+                    text_box = shape
+                    logger.debug(f"分布页找到分析文本框（通过'分析：'前缀）: {shape.name}")
+                    break
+
+        # 方法2: 按常见名称查找
+        if not text_box:
+            for name in ["文本框 13", "文本框 14", "文本框 15", "文本框 16"]:
+                for shape in slide.shapes:
+                    if shape.name == name and shape.has_text_frame:
+                        text_box = shape
+                        logger.debug(f"分布页找到分析文本框（通过名称）: {name}")
+                        break
+                if text_box:
+                    break
+
+        # 方法3: 查找页面下部的文本框（通常分析框在页面下方）
+        if not text_box:
+            candidates = []
+            for shape in slide.shapes:
+                if shape.has_text_frame and not getattr(shape, "has_table", False):
+                    # 排除图表标题（通常在上方）
+                    if hasattr(shape, "top") and shape.top > 4000000:  # 约4cm以下
+                        text = shape.text.strip() if shape.text else ""
+                        # 排除小标题和数据标签
+                        if "分布" not in text and len(text) < 300:
+                            candidates.append((shape.top, shape))
+
+            if candidates:
+                # 选择位置最靠下的
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                text_box = candidates[0][1]
+                logger.debug(f"分布页找到分析文本框（通过位置）: {text_box.name}")
+
+        if not text_box:
+            logger.warning("分布页未找到分析文本框，跳过")
+            return
+
+        # 设置文本（保留原格式）
+        tf = text_box.text_frame
+        if not tf.paragraphs:
+            para = tf.add_paragraph()
+        else:
+            para = tf.paragraphs[0]
+
+        # 保存原始格式
+        font_size = None
+        font_name = None
+        if para.runs:
+            run = para.runs[0]
+            font_size = run.font.size
+            font_name = run.font.name
+
+        # 清空并设置新文本（避免重复"分析："前缀）
+        para.clear()
+        run = para.add_run()
+        if analysis_text.startswith("分析：") or analysis_text.startswith("分析:"):
+            run.text = analysis_text
+        else:
+            run.text = f"分析：{analysis_text}"
+
+        # 设置字体：微软雅黑15号非加粗
+        run.font.name = FONT_NAME_CN
+        run.font.size = Pt(15)
+        run.font.bold = False
+
+        logger.info(f"✓ 分布页分析文本已更新: {text_box.name}")
 
     # ------------------------------------------------------------------ #
     def _delete_slide(self, index: int):

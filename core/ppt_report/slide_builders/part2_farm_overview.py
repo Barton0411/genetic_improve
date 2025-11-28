@@ -6,8 +6,10 @@ import logging
 from typing import Dict, List, Optional
 
 from pptx.chart.data import CategoryChartData
+from pptx.util import Pt
 
 from ..base_builder import BaseSlideBuilder
+from ..config import FONT_NAME_CN
 
 logger = logging.getLogger(__name__)
 
@@ -200,46 +202,170 @@ class Part2FarmOverviewBuilder(BaseSlideBuilder):
                     self._set_cell_text(table.cell(idx, col_idx), str(value))
 
     def _update_basic_info_analysis(self, slide, farm_info: Dict):
+        """第4页：牧场基本数据信息分析"""
         shape = self._find_shape(slide, "文本框 9")
         if not shape or not shape.has_text_frame:
             return
+
         total = farm_info.get('total_count') or 0
         lact = farm_info.get('lactating_count') or 0
         heifer = farm_info.get('heifer_count') or 0
+
+        # 计算占比
         lact_pct = self._calc_percent(lact, total)
         heifer_pct = self._calc_percent(heifer, total)
+
+        # 牛群规模评价
+        if total >= 3000:
+            scale = "大型牧场"
+        elif total >= 1000:
+            scale = "中型牧场"
+        else:
+            scale = "小型牧场"
+
+        # 结构评价（正常比例：成母牛55%，后备牛45%）
+        # 后备牛<35%过低，<40%偏低；成母牛<45%过低
+        if heifer_pct < 35:
+            structure_eval = "后备牛占比过低，建议增加性控冻精使用比例以补充后备牛"
+        elif heifer_pct < 40:
+            structure_eval = "后备牛占比偏低，建议适当增加性控冻精使用比例"
+        elif lact_pct < 45:
+            structure_eval = "后备牛占比较高，可考虑淘汰低遗传水平牛只"
+        elif 50 <= lact_pct <= 60:
+            structure_eval = "成母牛与后备牛比例合理"
+        elif lact_pct > 60:
+            structure_eval = "成母牛占比较高，可考虑淘汰低产牛"
+        else:
+            structure_eval = "牛群结构基本正常"
+
+        # 数据完整性评价
+        upload_stats = farm_info.get('upload_stats', [])
+        has_genotype = any('基因组' in str(item.get('type', '')) for item in upload_stats)
+        has_body_score = any('体型' in str(item.get('type', '')) for item in upload_stats)
+
+        data_parts = []
+        if has_genotype:
+            data_parts.append("已有基因组检测数据")
+        if has_body_score:
+            data_parts.append("已有体型外貌测定数据")
+
+        data_eval = "，".join(data_parts) if data_parts else "基础数据尚待完善"
+
         text = (
-            f"分析：当前共有 {total} 头牛，其中成母牛 {lact} 头（{lact_pct:.1f}%），"
-            f"后备牛 {heifer} 头（{heifer_pct:.1f}%）。"
+            f"分析：牧场为{scale}，在群牛共{total}头，其中成母牛{lact}头（{lact_pct:.1f}%），"
+            f"后备牛{heifer}头（{heifer_pct:.1f}%）。{structure_eval}。{data_eval}，"
+            f"为精准选配提供了良好的数据基础。"
         )
         self._set_text(shape, text)
 
     def _update_structure_analysis(self, slide, farm_info: Dict, stats: List[Dict]):
+        """第5页：牛群结构分析"""
         shape = self._find_shape(slide, "文本框 5")
         if not shape:
             return
+
         avg_lact = farm_info.get('avg_lactation') or 0
         avg_dim = farm_info.get('avg_dim') or 0
+        cow_dist = farm_info.get('cow_type_distribution', [])
+
+        # 平均胎次评价
+        if avg_lact < 2.0:
+            lact_eval = "平均胎次偏低，牛群较年轻"
+        elif avg_lact > 3.5:
+            lact_eval = "平均胎次偏高，建议关注牛群更新"
+        else:
+            lact_eval = "平均胎次适中"
+
+        # 泌乳天数评价
+        if avg_dim < 150:
+            dim_eval = "平均泌乳天数较短，产奶效率较高"
+        elif avg_dim > 200:
+            dim_eval = "平均泌乳天数偏长，建议关注繁殖管理"
+        else:
+            dim_eval = "平均泌乳天数正常"
+
+        # 找出占比最大的牛群类型
+        if cow_dist:
+            main_type = max(cow_dist, key=lambda x: x.get('percent', 0))
+            main_info = f"其中{main_type.get('type', '')}占比最高（{main_type.get('percent', 0):.1f}%）"
+        else:
+            main_info = ""
+
         text = (
-            f"分析：成母牛/后备牛占比平衡，平均胎次 {avg_lact:.2f} 胎，"
-            f"平均泌乳天数 {avg_dim} 天。"
+            f"分析：牧场在群牛平均胎次{avg_lact:.2f}胎，{lact_eval}；"
+            f"平均泌乳天数{int(avg_dim)}天，{dim_eval}。{main_info}。"
         )
         self._set_text(shape, text)
 
     def _update_parity_analysis(self, slide, farm_info: Dict, stats: List[Dict]):
+        """
+        第6页：胎次分布分析
+
+        推荐比例（占成母牛）：
+        - 1胎~2胎牛：40%
+        - 3胎~5胎牛：40%
+        - 6胎及以上：20%
+        """
         shape = self._find_shape(slide, "文本框 2")
         if not shape:
             return
-        # 只在实际胎次类别中找占比最高的，不把“合计”当作一组牛
-        candidates = [x for x in stats if x.get("type") not in ("胎次", "合计")]
-        hottest = max(candidates, key=lambda x: x.get("percent", 0), default=None)
-        if hottest:
-            text = (
-                f"分析：{hottest['type']} 牛占比最高（{hottest.get('percent', 0):.1f}%），"
-                "整体胎次结构需结合牧场繁育目标进一步评估。"
-            )
-        else:
-            text = "分析：暂无有效胎次分布数据。"
+
+        # 过滤掉表头和合计
+        valid_data = [x for x in stats if x.get("type") not in ("胎次", "合计")]
+
+        if not valid_data:
+            self._set_text(shape, "分析：暂无有效胎次分布数据。")
+            return
+
+        # 计算各组胎次占比（占成母牛比例）
+        # 1-2胎
+        low_parity = [x for x in valid_data
+                      if str(x.get("type", "")).isdigit() and int(x.get("type", "0")) in (1, 2)]
+        low_pct = sum(x.get("percent", 0) for x in low_parity)
+
+        # 3-5胎
+        mid_parity = [x for x in valid_data
+                      if str(x.get("type", "")).isdigit() and int(x.get("type", "0")) in (3, 4, 5)]
+        mid_pct = sum(x.get("percent", 0) for x in mid_parity)
+
+        # 6胎及以上
+        high_parity = [x for x in valid_data
+                       if str(x.get("type", "")).isdigit() and int(x.get("type", "0")) >= 6]
+        high_pct = sum(x.get("percent", 0) for x in high_parity)
+
+        # 找占比最高的胎次
+        highest = max(valid_data, key=lambda x: x.get("percent", 0))
+
+        # 生成评价
+        parts = []
+        parts.append(
+            f"牧场成母牛胎次分布：1-2胎占{low_pct:.1f}%，3-5胎占{mid_pct:.1f}%，6胎及以上占{high_pct:.1f}%。"
+            f"其中{highest.get('type', '')}胎牛占比最高（{highest.get('percent', 0):.1f}%）。"
+        )
+
+        # 推荐比例：1-2胎40%、3-5胎40%、6胎及以上20%
+        evals = []
+        if low_pct < 30:
+            evals.append("1-2胎牛占比偏低，建议加强后备牛培育和及时配种")
+        elif low_pct > 50:
+            evals.append("1-2胎牛占比偏高，牛群较年轻")
+
+        if mid_pct < 30:
+            evals.append("3-5胎牛占比偏低")
+        elif mid_pct > 50:
+            evals.append("3-5胎牛占比较高，牛群生产效率较好")
+
+        if high_pct > 30:
+            evals.append("6胎及以上牛占比偏高，建议加快高胎次低产牛淘汰")
+        elif high_pct < 10:
+            evals.append("高胎次牛占比较低")
+
+        if not evals:
+            evals.append("胎次结构较为均衡，接近推荐比例（1-2胎40%、3-5胎40%、6胎+20%）")
+
+        parts.append("。".join(evals) + "。")
+
+        text = "分析：" + "".join(parts)
         self._set_text(shape, text)
 
     # ------------------------------------------------------------------ #
@@ -278,21 +404,25 @@ class Part2FarmOverviewBuilder(BaseSlideBuilder):
 
     @staticmethod
     def _set_text(shape, text: str):
-        """更新文本框内容，尽量复用首个 run 的样式"""
+        """更新分析文本框内容，设置微软雅黑15号非加粗"""
         if not shape or not shape.has_text_frame:
             return
         tf = shape.text_frame
+        # 清空并重新设置
+        tf.clear()
         if not tf.paragraphs:
             para = tf.add_paragraph()
         else:
             para = tf.paragraphs[0]
-        if para.runs:
-            run = para.runs[0]
-        else:
-            run = para.add_run()
+        run = para.add_run()
         run.text = text
-        for extra_run in para.runs[1:]:
-            extra_run.text = ""
+
+        # 设置字体：微软雅黑15号非加粗
+        run.font.name = FONT_NAME_CN
+        run.font.size = Pt(15)
+        run.font.bold = False
+
+        # 清理多余段落
         for extra_para in tf.paragraphs[1:]:
             for extra_run in extra_para.runs:
                 extra_run.text = ""

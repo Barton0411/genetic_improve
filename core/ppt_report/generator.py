@@ -171,6 +171,13 @@ class ExcelBasedPPTGenerator:
 
     def _initialize_components(self):
         """初始化各组件"""
+        # 查找Excel报告（如果还没找到）
+        if self.excel_report_path is None:
+            self.excel_report_path = find_excel_report(self.reports_folder)
+            if self.excel_report_path is None:
+                raise FileNotFoundError("未找到Excel综合报告，请先生成Excel报告")
+            logger.info(f"找到Excel报告: {self.excel_report_path.name}")
+
         # 数据收集器
         self.data_collector = DataCollector(self.excel_report_path)
 
@@ -260,19 +267,99 @@ class ExcelBasedPPTGenerator:
         builder.build(data)
 
     def _build_part5_breeding(self, data: dict):
-        """构建Part 5: 配种记录"""
-        logger.info("构建Part 5: 配种记录")
-        # TODO: 实现配种记录分析
-        pass
+        """构建Part 5: 配种记录分析"""
+        from .slide_builders.part5_breeding_records import Part5BreedingRecordsBuilder
+        from .slide_builders.part5_inbreeding import Part5InbreedingBuilder
+
+        logger.info("构建Part 5: 配种记录分析")
+
+        # 隐性基因分析（2页）
+        genes_builder = Part5BreedingRecordsBuilder(self.prs, self.chart_creator, self.farm_name)
+        genes_builder.build(data)
+
+        # 近交分析（2页）
+        inbreeding_builder = Part5InbreedingBuilder(self.prs, self.chart_creator, self.farm_name)
+        inbreeding_builder.build(data)
 
     def _build_part6_bulls(self, data: dict):
         """构建Part 6: 公牛使用"""
+        from .slide_builders.part6_bulls_usage import Part6BullsUsageBuilder
+        from .slide_builders.part6_bulls_detail import Part6BullsDetailBuilder
+        from .slide_builders.part6_traits_trends import Part6TraitsTrendsBuilder
+        from .slide_builders.part6_timeline import Part6TimelineBuilder
+
         logger.info("构建Part 6: 公牛使用")
-        # TODO: 实现公牛使用分析
-        pass
+
+        # 已用公牛性状汇总表（1页）
+        bulls_builder = Part6BullsUsageBuilder(self.prs, self.chart_creator, self.farm_name)
+        bulls_builder.build(data)
+
+        # 已用公牛明细（多页，每年一页）
+        bulls_detail_builder = Part6BullsDetailBuilder(self.prs, self.chart_creator, self.farm_name)
+        bulls_detail_builder.build(data)
+
+        # 性状进展折线图（多页，每页2个图表）
+        traits_trends_builder = Part6TraitsTrendsBuilder(self.prs, self.chart_creator, self.farm_name)
+        traits_trends_builder.build(data)
+
+        # 配种记录时间线（2页：全部记录、近一年）
+        timeline_builder = Part6TimelineBuilder(self.prs, self.chart_creator, self.farm_name)
+        timeline_builder.build(data)
 
     def _build_part7_mating(self, data: dict):
         """构建Part 7: 选配推荐"""
+        from .slide_builders.part7_candidate_bulls_ranking import Part7CandidateBullsRankingBuilder
+        from ..excel_report.data_collectors import collect_bull_ranking_data
+        from .slide_builders.template_slide_copier import copy_template_slide
+
         logger.info("构建Part 7: 选配推荐")
-        # TODO: 实现选配推荐
-        pass
+
+        # 注意：不复制模板页面，直接使用模板中已有的第172-174页
+        # 这些页面在模板加载时就已经存在于PPT中
+
+        # 添加Excel路径到数据字典
+        if self.excel_report_path:
+            data['excel_path'] = str(self.excel_report_path)
+            logger.info(f"✓ Excel报告路径: {self.excel_report_path.name}")
+        else:
+            logger.warning("⚠️  Excel报告路径未找到")
+
+        # 收集备选公牛排名数据（从analysis_results）
+        try:
+            bull_ranking_data = collect_bull_ranking_data(self.output_folder)
+            if bull_ranking_data:
+                data['bull_ranking'] = bull_ranking_data
+                logger.info(f"✓ 收集备选公牛排名数据: {len(bull_ranking_data.get('ranking_df', []))}头公牛")
+            else:
+                logger.warning("⚠️  备选公牛排名数据收集失败")
+        except Exception as e:
+            logger.warning(f"收集备选公牛排名数据时出错: {e}")
+
+        # 备选公牛排名分析（1页）
+        ranking_builder = Part7CandidateBullsRankingBuilder(self.prs, self.farm_name)
+        ranking_builder.build(data)
+
+        # 备选公牛-隐性基因分析（动态页数）
+        from .slide_builders.part7_candidate_bulls_genes import Part7CandidateBullsGenesBuilder
+        genes_builder = Part7CandidateBullsGenesBuilder(self.prs, self.farm_name)
+        genes_builder.build(data)
+
+        # 备选公牛-近交系数分析（动态页数）
+        from .slide_builders.part7_candidate_bulls_inbreeding import Part7CandidateBullsInbreedingBuilder
+        inbreeding_builder = Part7CandidateBullsInbreedingBuilder(self.prs, self.farm_name)
+        inbreeding_builder.build(data)
+
+        # 选配推荐方案章节页（页172）
+        from .slide_builders.part7_mating_section import Part7MatingSectionBuilder
+        section_builder = Part7MatingSectionBuilder(self.prs, self.chart_creator, self.farm_name)
+        section_builder.build(data)
+
+        # 个体选配推荐结果/选配统计摘要（页173）
+        from .slide_builders.part7_mating_recommendation import Part7MatingRecommendationBuilder
+        mating_rec_builder = Part7MatingRecommendationBuilder(self.prs, self.chart_creator, self.farm_name)
+        mating_rec_builder.build(data)
+
+        # 项目总结建议（页174）
+        from .slide_builders.part7_summary_suggestions import Part7SummaryBuilder
+        summary_builder = Part7SummaryBuilder(self.prs, self.chart_creator, self.farm_name)
+        summary_builder.build(data)

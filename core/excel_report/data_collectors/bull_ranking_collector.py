@@ -234,19 +234,40 @@ def collect_bull_ranking_data(analysis_folder) -> dict:
             suffixes=('_ranking', '_traits')
         )
 
-        # 4. 整理列顺序：ranking, bull_id, semen_type, 测试_index, 性状列, 支数
-        # 保留traits数据的支数和所有性状列，只从ranking数据中取ranking和测试_index
+        # 3.5 动态识别育种指数列名（在合并后，从_ranking列中找）
+        index_col_base = None
+        for col in df_merged.columns:
+            if col.endswith('_index_ranking'):
+                index_col_base = col.replace('_ranking', '')
+                logger.info(f"识别到育种指数列: {index_col_base}")
+                break
+
+        if index_col_base is None:
+            # 如果没有找到，尝试在原始df_ranking中找
+            for col in df_ranking.columns:
+                if col.endswith('_index') and col != 'ranking':
+                    index_col_base = col
+                    logger.info(f"在原始排名数据中识别到育种指数列: {index_col_base}")
+                    break
+
+        if index_col_base is None:
+            logger.warning("未找到育种指数列，使用默认列名'测试_index'")
+            index_col_base = '测试_index'
+
+        # 4. 整理列顺序：ranking, bull_id, semen_type, 育种指数, 性状列, 支数
+        # 保留traits数据的支数和所有性状列，只从ranking数据中取ranking和育种指数
 
         # 处理重复列：优先使用traits文件的数据
-        # 首先删除ranking文件中的性状列（保留ranking和测试_index）
+        # 首先删除ranking文件中的性状列（保留ranking和育种指数）
+        index_col_with_suffix = f'{index_col_base}_ranking'
         cols_to_drop = []
         for col in df_merged.columns:
-            if col.endswith('_ranking') and col != '测试_index_ranking':
+            if col.endswith('_ranking') and col != index_col_with_suffix:
                 # 删除ranking文件的非关键列
                 if col.replace('_ranking', '_traits') in df_merged.columns:
                     # 如果traits文件也有这个列，保留traits版本
                     cols_to_drop.append(col)
-                elif col.replace('_ranking', '') not in ['ranking', '测试_index']:
+                elif col.replace('_ranking', '') not in ['ranking', index_col_base]:
                     # 如果只有ranking版本且不是关键列，也删除
                     cols_to_drop.append(col)
 
@@ -335,8 +356,8 @@ def collect_bull_ranking_data(analysis_folder) -> dict:
         gene_cols = DEFECT_GENES
 
         # 动态构建最终列顺序
-        # 1. 固定列（排名、ID、类型等）
-        fixed_cols = ['ranking', 'bull_id', 'semen_type', '测试_index', '支数']
+        # 1. 固定列（排名、ID、类型等） - 使用之前识别的index_col_base
+        fixed_cols = ['ranking', 'bull_id', 'semen_type', index_col_base, '支数']
 
         # 2. 性状列（从DataFrame中动态获取，排除固定列和基因列）
         exclude_cols = set(fixed_cols + gene_cols)

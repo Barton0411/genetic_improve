@@ -431,3 +431,103 @@ class BaseSlideBuilder:
             label_para.font.color.rgb = RGBColor(255, 255, 255)
 
         logger.info(f"添加统计卡片: {len(stats)}个")
+
+    def find_slide_by_text(self, search_text: str, start_index: int = 0) -> Optional[int]:
+        """
+        通过搜索幻灯片中的文本内容来查找幻灯片索引
+
+        Args:
+            search_text: 要搜索的文本（支持部分匹配）
+            start_index: 从哪个索引开始搜索（默认从0开始）
+
+        Returns:
+            找到的幻灯片索引（0-based），未找到返回None
+        """
+        for slide_idx in range(start_index, len(self.prs.slides)):
+            slide = self.prs.slides[slide_idx]
+
+            # 搜索所有文本框和表格中的文本
+            for shape in slide.shapes:
+                try:
+                    # 检查文本框
+                    if hasattr(shape, "text_frame") and shape.text_frame:
+                        if search_text in shape.text_frame.text:
+                            logger.info(f"在第{slide_idx + 1}页（索引{slide_idx}）找到文本: {search_text}")
+                            return slide_idx
+
+                    # 检查表格 (使用 shape_type 避免访问非表格shape的table属性)
+                    if shape.shape_type == 19:  # MSO_SHAPE_TYPE.TABLE
+                        table = shape.table
+                        for row in table.rows:
+                            for cell in row.cells:
+                                if search_text in cell.text:
+                                    logger.info(f"在第{slide_idx + 1}页（索引{slide_idx}）的表格中找到文本: {search_text}")
+                                    return slide_idx
+                except:
+                    continue
+
+        logger.warning(f"未找到包含文本的幻灯片: {search_text}")
+        return None
+
+    def find_slides_by_text(self, search_text: str, start_index: int = 0, max_count: int = None) -> List[int]:
+        """
+        查找所有包含指定文本的幻灯片索引
+
+        Args:
+            search_text: 要搜索的文本
+            start_index: 从哪个索引开始搜索
+            max_count: 最多返回多少个结果（None表示不限制）
+
+        Returns:
+            找到的幻灯片索引列表
+        """
+        found_indices = []
+        logger.debug(f"开始搜索文本: '{search_text}', 从第{start_index+1}页开始")
+
+        for slide_idx in range(start_index, len(self.prs.slides)):
+            if max_count and len(found_indices) >= max_count:
+                break
+
+            slide = self.prs.slides[slide_idx]
+            slide_found = False
+
+            # 搜索所有文本框和表格中的文本
+            for shape in slide.shapes:
+                try:
+                    # 检查文本框
+                    if hasattr(shape, "text_frame") and shape.text_frame:
+                        text_content = shape.text_frame.text
+                        if search_text in text_content:
+                            if not slide_found:
+                                found_indices.append(slide_idx)
+                                slide_found = True
+                                logger.info(f"✓ 在第{slide_idx + 1}页（索引{slide_idx}）的文本框[{shape.name}]中找到: {search_text}")
+                                logger.debug(f"  完整内容: {text_content[:100]}")
+                            break
+
+                    # 检查表格 (使用 shape_type 避免访问非表格shape的table属性)
+                    if shape.shape_type == 19 and not slide_found:  # MSO_SHAPE_TYPE.TABLE
+                        table = shape.table
+                        for row in table.rows:
+                            for cell in row.cells:
+                                if search_text in cell.text:
+                                    if not slide_found:
+                                        found_indices.append(slide_idx)
+                                        slide_found = True
+                                        logger.info(f"✓ 在第{slide_idx + 1}页（索引{slide_idx}）的表格中找到: {search_text}")
+                                    break
+                            if slide_found:
+                                break
+                except Exception as e:
+                    logger.debug(f"检查形状 {shape.name} 时出错: {e}")
+                    continue
+
+                if slide_found:
+                    break
+
+        if not found_indices:
+            logger.warning(f"❌ 未找到包含文本 '{search_text}' 的幻灯片")
+        else:
+            logger.info(f"✓ 共找到 {len(found_indices)} 个匹配的幻灯片")
+
+        return found_indices

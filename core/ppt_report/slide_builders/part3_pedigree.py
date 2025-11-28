@@ -8,8 +8,10 @@ from typing import Dict, List, Optional
 import pandas as pd
 from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_FILL
+from pptx.util import Pt
 
 from ..base_builder import BaseSlideBuilder
+from ..config import FONT_NAME_CN
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +225,223 @@ class Part3PedigreeBuilder(BaseSlideBuilder):
                     fill = cell.fill
                     fill.solid()
                     fill.fore_color.rgb = pink_rgb
+
+        # 7) 创建三个系谱识别率饼图
+        self._add_pedigree_pie_charts(slide, df, header_row_idx)
+
+        # 8) 更新分析文本框
+        self._update_pedigree_analysis(slide, df, header_row_idx, rows)
+
+    # ------------------------------------------------------------------ #
+    def _update_pedigree_analysis(self, slide, df: pd.DataFrame, header_row_idx: int, rows: list):
+        """
+        第8页：系谱识别率分析
+
+        Args:
+            slide: 幻灯片对象
+            df: 系谱识别分析DataFrame
+            header_row_idx: 表头行索引
+            rows: 解析后的数据行列表
+        """
+        # 查找分析文本框
+        shape = None
+        for s in slide.shapes:
+            if s.name == "文本框 13":
+                shape = s
+                break
+
+        if not shape or not shape.has_text_frame:
+            logger.warning("未找到系谱识别分析文本框（文本框 13）")
+            return
+
+        if not rows:
+            self._set_analysis_text(shape, "分析：暂无系谱识别率数据。")
+            return
+
+        # 从合计行获取整体识别率
+        total_row = rows[-1] if rows[-1][0] == "合计" else None
+        if not total_row:
+            self._set_analysis_text(shape, "分析：暂无系谱识别率数据。")
+            return
+
+        # 解析三代识别率（列3、5、7为占比）
+        def parse_pct(val):
+            try:
+                return float(str(val).replace('%', '').replace('％', '').strip())
+            except (ValueError, TypeError):
+                return 0.0
+
+        sire_pct = parse_pct(total_row[3]) if len(total_row) > 3 else 0
+        mgs_pct = parse_pct(total_row[5]) if len(total_row) > 5 else 0
+        mggs_pct = parse_pct(total_row[7]) if len(total_row) > 7 else 0
+
+        # 识别问题指标（<80%）
+        problems = []
+        if sire_pct < 80:
+            problems.append(f"父号识别率{sire_pct:.1f}%")
+        if mgs_pct < 80:
+            problems.append(f"外祖父识别率{mgs_pct:.1f}%")
+        if mggs_pct < 80:
+            problems.append(f"外曾外祖父识别率{mggs_pct:.1f}%")
+
+        # 整体评价
+        avg_pct = (sire_pct + mgs_pct + mggs_pct) / 3
+        if avg_pct >= 90:
+            overall = "系谱档案完整度优秀"
+        elif avg_pct >= 80:
+            overall = "系谱档案完整度良好"
+        elif avg_pct >= 60:
+            overall = "系谱档案有待完善"
+        else:
+            overall = "系谱档案亟需补充"
+
+        # 年度趋势分析（找出识别率最低的年份）
+        trend_info = ""
+        year_rows = [r for r in rows if r[0] != "合计"]
+        if year_rows:
+            # 找父号识别率最低的年份
+            min_row = min(year_rows, key=lambda r: parse_pct(r[3]) if len(r) > 3 else 100)
+            worst_year = min_row[0]
+            worst_pct = parse_pct(min_row[3]) if len(min_row) > 3 else 0
+            if worst_pct < 80:
+                trend_info = f"{worst_year}年父号识别率最低（{worst_pct:.1f}%），建议重点补充该年份系谱信息。"
+
+        # 建议
+        if problems:
+            suggestion = f"当前{' / '.join(problems)}偏低，建议通过基因组检测或系谱追溯提升识别率。"
+        else:
+            suggestion = "各代系谱识别率均达标，为精准选配和近交控制提供了可靠基础。"
+
+        text = (
+            f"分析：牧场{overall}，父号识别率{sire_pct:.1f}%、外祖父识别率{mgs_pct:.1f}%、"
+            f"外曾外祖父识别率{mggs_pct:.1f}%。{trend_info}{suggestion}"
+        )
+        self._set_analysis_text(shape, text)
+        logger.info("✓ 系谱识别率分析文本更新完成")
+
+    @staticmethod
+    def _set_analysis_text(shape, text: str):
+        """设置分析文本框内容，设置微软雅黑15号非加粗"""
+        if not shape or not shape.has_text_frame:
+            return
+        tf = shape.text_frame
+        # 清空并重新设置
+        tf.clear()
+        if not tf.paragraphs:
+            para = tf.add_paragraph()
+        else:
+            para = tf.paragraphs[0]
+        run = para.add_run()
+        run.text = text
+
+        # 设置字体：微软雅黑15号非加粗
+        run.font.name = FONT_NAME_CN
+        run.font.size = Pt(15)
+        run.font.bold = False
+
+        # 清理多余段落
+        for extra_para in tf.paragraphs[1:]:
+            for extra_run in extra_para.runs:
+                extra_run.text = ""
+
+    # ------------------------------------------------------------------ #
+    def _add_pedigree_pie_charts(self, slide, df: pd.DataFrame, header_row_idx: int):
+        """
+        更新三个系谱识别率饼图的数据（保持模板格式不变）
+
+        Args:
+            slide: 幻灯片对象
+            df: 系谱识别分析DataFrame
+            header_row_idx: 表头行索引
+        """
+        try:
+            from pptx.chart.data import CategoryChartData
+
+            # 查找"二、系谱识别率可视化分析"区域的数据
+            viz_start_idx = None
+            for i in range(header_row_idx, len(df)):
+                cell = str(df.iloc[i, 0]).strip() if i < len(df) else ""
+                if "可视化分析" in cell:
+                    viz_start_idx = i
+                    break
+
+            if viz_start_idx is None:
+                logger.warning("未找到'系谱识别率可视化分析'区域，跳过饼图更新")
+                return
+
+            # 读取已识别/未识别数据（通常在viz_start_idx+2和+3行）
+            identified_row_idx = viz_start_idx + 2
+            unidentified_row_idx = viz_start_idx + 3
+
+            if identified_row_idx >= len(df) or unidentified_row_idx >= len(df):
+                logger.warning("可视化分析数据行不足，跳过饼图更新")
+                return
+
+            # 提取数据
+            # 列结构：col0=标签, col1=父号数值, col2=空, col3=标签, col4=外祖父数值,
+            #          col5=空, col6=标签, col7=外曾外祖父数值
+            sire_identified = self._parse_number(df.iloc[identified_row_idx, 1])
+            sire_unidentified = self._parse_number(df.iloc[unidentified_row_idx, 1])
+
+            mgs_identified = self._parse_number(df.iloc[identified_row_idx, 4])
+            mgs_unidentified = self._parse_number(df.iloc[unidentified_row_idx, 4])
+
+            mggs_identified = self._parse_number(df.iloc[identified_row_idx, 7])
+            mggs_unidentified = self._parse_number(df.iloc[unidentified_row_idx, 7])
+
+            logger.info(f"系谱识别数据: 父号({sire_identified}/{sire_unidentified}), "
+                       f"外祖父({mgs_identified}/{mgs_unidentified}), "
+                       f"外曾外祖父({mggs_identified}/{mggs_unidentified})")
+
+            # 收集模板中的饼图（按位置从左到右排序）
+            chart_shapes = []
+            for shape in slide.shapes:
+                if shape.has_chart:
+                    chart_shapes.append(shape)
+
+            # 按左边位置排序（从左到右对应：父号、外祖父、外曾外祖父）
+            chart_shapes.sort(key=lambda s: s.left)
+
+            if len(chart_shapes) < 3:
+                logger.warning(f"模板中只找到 {len(chart_shapes)} 个饼图，预期3个")
+
+            # 三个饼图的数据配置
+            chart_data_list = [
+                {'identified': sire_identified, 'unidentified': sire_unidentified},
+                {'identified': mgs_identified, 'unidentified': mgs_unidentified},
+                {'identified': mggs_identified, 'unidentified': mggs_unidentified},
+            ]
+
+            # 更新每个饼图的数据（保持模板格式不变）
+            for i, shape in enumerate(chart_shapes[:3]):
+                if i >= len(chart_data_list):
+                    break
+
+                data = chart_data_list[i]
+                chart = shape.chart
+
+                # 准备新数据
+                chart_data = CategoryChartData()
+                chart_data.categories = ['已识别', '未识别']
+                chart_data.add_series('数量', [data['identified'], data['unidentified']])
+
+                # 替换图表数据（保持格式不变）
+                chart.replace_data(chart_data)
+
+            logger.info("✓ 成功更新3个系谱识别率饼图数据")
+
+        except Exception as e:
+            logger.error(f"更新系谱识别率饼图失败: {e}", exc_info=True)
+
+    @staticmethod
+    def _parse_number(value) -> int:
+        """解析数值，处理空值和非数字"""
+        if pd.isna(value):
+            return 0
+        try:
+            return int(float(value))
+        except (ValueError, TypeError):
+            return 0
 
     # ------------------------------------------------------------------ #
     @staticmethod

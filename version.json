@@ -1,19 +1,16 @@
 {
-  "version": "1.2.1.8",
+  "version": "1.2.1.9",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.8/伊利奶牛选配_v1.2.1.8_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.8/伊利奶牛选配_v1.2.1.8_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.9/伊利奶牛选配_v1.2.1.9_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.1.9/伊利奶牛选配_v1.2.1.9_win.exe",
   "changes": [
-    "1. <b>修复</b>：修正近交系数计算中违反Wright通径规则的问题",
-    "   - 正确过滤虚拟节点（_dam、_mgd等）造成的重复节点通径",
-    "   - 修正路径验证规则，只检查路径中间节点（不包括终点祖先）",
+    "1. <b>修复</b>：PPT分析文本重复"分析："前缀问题",
+    "   - 所有分析文本框现在正确检查是否已有前缀，避免重复",
     "",
-    "2. <b>优化</b>：改进共同祖先识别逻辑",
-    "   - 公牛作为母牛祖先时正确计入共同祖先",
-    "   - 添加空路径表示起点到自己（路径长度=0）",
+    "2. <b>优化</b>：统一PPT分析文本字体样式",
+    "   - 所有分析文本统一为微软雅黑15号非加粗字体",
+    "   - 修复部分页面分析框字体过大的问题",
     "",
-    "3. <b>功能</b>：新增计算器缓存清除方法，支持系谱更新后重新计算",
-    "",
-    "4. <b>影响</b>：近交系数计算更准确，符合Wright通径系数理论"
+    "3. <b>功能</b>：新增备选公牛近交系数分析文本生成功能"
   ]
 }

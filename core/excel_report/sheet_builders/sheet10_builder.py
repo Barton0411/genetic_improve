@@ -144,7 +144,7 @@ class Sheet10Builder(BaseSheetBuilder):
         current_row = start_row
 
         # 标题
-        title = "三、优质冻精技术标准"
+        title = "优质冻精技术标准"
         title_cell = self.ws.cell(row=current_row, column=1, value=title)
         title_cell.font = Font(size=14, bold=True)
         title_cell.alignment = Alignment(horizontal='left', vertical='center')
