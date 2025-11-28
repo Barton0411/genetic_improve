@@ -192,31 +192,35 @@ class IndexCalculation(BaseCowCalculation):
                 else:
                     # 缺少部分性状，需要重新计算
                     print(f"基因组评估结果缺少性状: {missing_traits}")
-                    
+
+                    # 重要：合并原有性状和需要的性状，避免覆盖原有数据
+                    all_traits_to_calc = list(set(existing_traits) | set(selected_traits))
+                    print(f"将计算所有性状（保留原有 + 新增）: {len(all_traits_to_calc)} 个")
+
                     # 检查是否有基因组数据
                     genomic_data_path = project_path / "standardized_data" / "processed_genomic_data.xlsx"
                     if genomic_data_path.exists():
                         # 有基因组数据，重新计算包含基因组数据
-                        success, message = self.traits_calculator.process_data(main_window, selected_traits)
+                        success, message = self.traits_calculator.process_data(main_window, all_traits_to_calc)
                         if not success:
                             return False, message
                         df = pd.read_excel(project_path / "analysis_results" / "processed_cow_data_key_traits_scores_genomic.xlsx")
                     else:
                         # 没有基因组数据，使用系谱计算后更新基因组评估文件
-                        success, message = self.traits_calculator.process_data(main_window, selected_traits)
+                        success, message = self.traits_calculator.process_data(main_window, all_traits_to_calc)
                         if not success:
                             return False, message
-                        
+
                         # 读取新计算的系谱结果
                         pedigree_df = pd.read_excel(project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pedigree.xlsx")
-                        
+
                         # 更新基因组评估文件中的缺失性状
                         for trait in missing_traits:
                             score_col = f'{trait}_score'
                             source_col = f'{trait}_score_source'
                             genomic_df[score_col] = pedigree_df[score_col]
                             genomic_df[source_col] = 'P'  # 标记为系谱来源
-                        
+
                         # 保存更新后的基因组评估文件
                         genomic_df.to_excel(genomic_scores_path, index=False)
                         df = genomic_df
@@ -245,7 +249,12 @@ class IndexCalculation(BaseCowCalculation):
                         else:
                             # 系谱评估结果不完整，重新计算
                             print(f"系谱评估结果缺少性状: {missing_traits}")
-                            success, message = self.traits_calculator.process_data(main_window, selected_traits)
+
+                            # 重要：合并原有性状和需要的性状，避免覆盖原有数据
+                            all_traits_to_calc = list(set(existing_traits) | set(selected_traits))
+                            print(f"将计算所有性状（保留原有 + 新增）: {len(all_traits_to_calc)} 个")
+
+                            success, message = self.traits_calculator.process_data(main_window, all_traits_to_calc)
                             if not success:
                                 return False, message
                             df = pd.read_excel(project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pedigree.xlsx")

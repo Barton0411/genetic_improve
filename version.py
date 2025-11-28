@@ -3,10 +3,23 @@
 """
 
 # 版本号格式: 主版本号.次版本号.修订号.构建号 (xxx.xxx.xxx.xxx)
-VERSION = "1.2.2.1"
+VERSION = "1.2.2.2"
 
 # 版本历史（完整记录所有版本）
 VERSION_HISTORY = [
+    {
+        "version": "1.2.2.2",
+        "date": "2025-11-28",
+        "author": "Development Team",
+        "changes": [
+            "1. <b>修复</b>：母牛指数排名后育种值文件丢失性状的问题",
+            "   - 修复运行母牛指数排名后，processed_cow_data_key_traits_final.xlsx只剩3个性状的bug",
+            "   - 现在会保留所有原有性状，仅补充缺失的性状",
+            "2. <b>优化</b>：性状得分计算逻辑",
+            "   - calculate_trait_scores方法现在接受selected_traits参数",
+            "   - 确保生成所有选择的性状得分，避免依赖旧文件的sheet名称"
+        ]
+    },
     {
         "version": "1.2.2.1",
         "date": "2025-11-28",

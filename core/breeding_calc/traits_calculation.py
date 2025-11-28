@@ -175,7 +175,8 @@ class TraitsCalculation(BaseCowCalculation):
                 progress_callback(85, "正在计算性状得分...")
                 
             pedigree_output_path = output_dir / f"{self.output_prefix}_scores_pedigree.xlsx"
-            if not self.calculate_trait_scores(detail_output_path, yearly_output_path, pedigree_output_path, apply_formatting=False):
+            if not self.calculate_trait_scores(detail_output_path, yearly_output_path, pedigree_output_path,
+                                               apply_formatting=False, selected_traits=selected_traits):
                 return False, "计算性状得分失败"
 
             if progress_callback:
@@ -470,20 +471,29 @@ class TraitsCalculation(BaseCowCalculation):
             return False
 
     def calculate_trait_scores(self, detail_path: Path, yearly_path: Path,
-                             output_path: Path, apply_formatting: bool = False) -> bool:
-        """计算性状得分"""
+                             output_path: Path, apply_formatting: bool = False,
+                             selected_traits: list = None) -> bool:
+        """计算性状得分
+
+        Args:
+            detail_path: 详细数据文件路径
+            yearly_path: 年度数据文件路径
+            output_path: 输出文件路径
+            apply_formatting: 是否应用格式化
+            selected_traits: 选择的性状列表（用于确保生成所有性状的得分）
+        """
         try:
             df = pd.read_excel(detail_path)
-            
+
             # 处理日期列
             date_columns = ['birth_date', 'birth_date_dam', 'birth_date_mgd']
             for col in date_columns:
                 df[col] = pd.to_datetime(df[col], errors='coerce')
-            
+
             df['birth_year'] = df['birth_date'].dt.year
             df['dam_birth_year'] = df['birth_date_dam'].dt.year
             df['mgd_birth_year'] = df['birth_date_mgd'].dt.year
-            
+
             # 读取年度数据
             yearly_data = {}
             with pd.ExcelFile(yearly_path) as xls:
@@ -494,24 +504,35 @@ class TraitsCalculation(BaseCowCalculation):
             # 必需的性状（用于生成正态分布图）
             required_traits = ['NM$', 'TPI']
 
+            # 确定要处理的性状列表：优先使用 selected_traits 参数
+            if selected_traits:
+                all_traits_to_process = list(selected_traits)
+                # 确保必需性状被包含
+                for req_trait in required_traits:
+                    if req_trait not in all_traits_to_process:
+                        all_traits_to_process.append(req_trait)
+            else:
+                # 回退到从 yearly_data 获取（保持向后兼容）
+                all_traits_to_process = list(yearly_data.keys())
+
             # 确保必需的性状存在于 yearly_data 中
             min_year = int(df['birth_year'].min()) if df['birth_year'].notna().any() else 2020
             max_year = int(df['birth_year'].max()) if df['birth_year'].notna().any() else 2024
 
-            for required_trait in required_traits:
-                if required_trait not in yearly_data:
-                    print(f"警告: yearly 数据中缺少 {required_trait}，使用默认值创建")
+            # 为所有需要处理的性状创建年度数据（如果不存在）
+            for trait in all_traits_to_process:
+                if trait not in yearly_data:
+                    print(f"警告: yearly 数据中缺少 {trait}，使用默认值创建")
                     # 创建默认的年度数据
                     default_yearly = pd.DataFrame({
                         'birth_year': range(min_year, max_year + 1),
                         'mean': [0] * (max_year - min_year + 1)
                     })
                     default_yearly.set_index('birth_year', inplace=True)
-                    yearly_data[required_trait] = default_yearly
+                    yearly_data[trait] = default_yearly
 
-            # 获取默认值（包含所有性状）
-            all_traits = list(yearly_data.keys())
-            default_values = self.get_default_values(all_traits)
+            # 获取默认值（包含所有要处理的性状）
+            default_values = self.get_default_values(all_traits_to_process)
             
             # 设置权重
             weights = {
@@ -521,8 +542,8 @@ class TraitsCalculation(BaseCowCalculation):
                 'default': 0.125
             }
             
-            # 计算得分并保留source信息
-            for trait in yearly_data.keys():
+            # 计算得分并保留source信息（使用 all_traits_to_process 确保处理所有选择的性状）
+            for trait in all_traits_to_process:
                 score_column = f'{trait}_score'
                 df[score_column] = self.calculate_single_trait_score(
                     df, trait, yearly_data[trait], default_values[trait], weights

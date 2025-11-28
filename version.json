@@ -1,15 +1,15 @@
 {
-  "version": "1.2.2.1",
+  "version": "1.2.2.2",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.1/伊利奶牛选配_v1.2.2.1_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.1/伊利奶牛选配_v1.2.2.1_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.2/伊利奶牛选配_v1.2.2.2_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.2/伊利奶牛选配_v1.2.2.2_win.exe",
   "changes": [
-    "1. <b>优化</b>：PPT生成性能大幅提升",
-    "   - PPT生成时间从67秒优化到46秒（节省约21秒）",
-    "   - 时间线图片在Excel生成阶段预导出，避免重复加载workbook",
+    "1. <b>修复</b>：母牛指数排名后育种值文件丢失性状的问题",
+    "   - 修复运行母牛指数排名后，processed_cow_data_key_traits_final.xlsx只剩3个性状的bug",
+    "   - 现在会保留所有原有性状，仅补充缺失的性状",
     "",
-    "2. <b>优化</b>：智能workbook加载策略",
-    "   - 检测到预导出图片时跳过data_only=False加载",
-    "   - 保持向后兼容，无预导出图片时自动回退到从Excel提取"
+    "2. <b>优化</b>：性状得分计算逻辑",
+    "   - calculate_trait_scores方法现在接受selected_traits参数",
+    "   - 确保生成所有选择的性状得分，避免依赖旧文件的sheet名称"
   ]
 }
