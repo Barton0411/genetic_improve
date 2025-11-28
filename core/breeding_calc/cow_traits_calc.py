@@ -107,7 +107,9 @@ class CowKeyTraitsPage(QWidget):
             'FS', 'RFI', 'Milk Speed'
         ]
         
-        self.required_trait = 'NM$'
+        # 必选性状（用于生成正态分布图，不能被移除）
+        self.required_traits = ['NM$', 'TPI']
+        self.required_trait = 'NM$'  # 保持向后兼容
         self.setup_ui()
 
     def setup_ui(self):
@@ -221,7 +223,8 @@ class CowKeyTraitsPage(QWidget):
             item = self.selected_traits_list.currentItem()
         if item:
             trait = item.data(Qt.ItemDataRole.UserRole)
-            if trait != self.required_trait:
+            # 检查是否为必选性状（NM$ 和 TPI 用于生成正态分布图）
+            if trait not in self.required_traits:
                 self.selected_traits_list.takeItem(self.selected_traits_list.row(item))
 
     def is_trait_selected(self, trait):

@@ -36,17 +36,15 @@ class Part5InbreedingBuilder(BaseSlideBuilder):
         logger.info("开始构建Part 5: 配种记录分析-近交分析")
         logger.info("=" * 60)
 
-        # 重新读取配种记录-近交系数分析Sheet，使用header=None以获取完整数据
-        excel_path = data.get("excel_path")
-        if excel_path is None:
-            logger.error("excel_path 未找到，跳过近交分析")
+        # 使用 DataCollector 缓存读取配种记录-近交系数分析Sheet（header=None）
+        data_collector = data.get("data_collector")
+        if data_collector is None:
+            logger.error("data_collector 未找到，跳过近交分析")
             return
 
-        try:
-            df_inbreeding = pd.read_excel(excel_path, sheet_name="配种记录-近交系数分析", header=None)
-            logger.info(f"✓ 读取breeding_inbreeding数据（无header）: {len(df_inbreeding)}行 x {len(df_inbreeding.columns)}列")
-        except Exception as e:
-            logger.error(f"重新读取配种记录-近交系数分析Sheet失败: {e}")
+        df_inbreeding = data_collector.get_raw_sheet("配种记录-近交系数分析", header=None)
+        if df_inbreeding is None:
+            logger.error("配种记录-近交系数分析Sheet读取失败")
             return
 
         if df_inbreeding.empty:
@@ -189,18 +187,19 @@ class Part5InbreedingBuilder(BaseSlideBuilder):
         Returns:
             list of lists: [[区间, 配种次数, 占比, 风险等级], ...]
         """
+        end_row = min(start_row + num_rows, len(df))
+        max_cols = min(4, df.shape[1])
+
+        # P1优化：批量转换为numpy数组，减少iloc访问开销
+        data_slice = df.iloc[start_row:end_row, :max_cols].fillna("").astype(str)
+        data_array = data_slice.to_numpy()
+
         data = []
-        for i in range(start_row, min(start_row + num_rows, len(df))):
-            row_data = []
-            for j in range(4):  # 4列：区间、配种次数、占比、风险等级
-                if j < df.shape[1]:
-                    cell_value = df.iloc[i, j]
-                    if pd.isna(cell_value):
-                        row_data.append("")
-                    else:
-                        row_data.append(str(cell_value).strip())
-                else:
-                    row_data.append("")
+        for i in range(data_array.shape[0]):
+            row_data = [v.strip() for v in data_array[i]]
+            # 补齐到4列
+            while len(row_data) < 4:
+                row_data.append("")
             data.append(row_data)
         return data
 
@@ -211,23 +210,28 @@ class Part5InbreedingBuilder(BaseSlideBuilder):
         Returns:
             list of lists: [[年份, 总配种次数, 高风险配种数, 高风险占比, 极高风险配种数, 极高风险占比], ...]
         """
-        data = []
-        for i in range(start_row, len(df)):
-            # 检查第一列是否为空
-            cell_0 = df.iloc[i, 0]
-            if pd.isna(cell_0):
-                break  # 遇到空行，停止读取
+        max_cols = min(6, df.shape[1])
 
-            row_data = []
-            for j in range(6):  # 6列
-                if j < df.shape[1]:
-                    cell_value = df.iloc[i, j]
-                    if pd.isna(cell_value):
-                        row_data.append("")
-                    else:
-                        row_data.append(str(cell_value).strip())
-                else:
-                    row_data.append("")
+        # P1优化：先找到数据结束位置，然后批量转换
+        end_row = start_row
+        for i in range(start_row, len(df)):
+            if pd.isna(df.iloc[i, 0]):
+                break
+            end_row = i + 1
+
+        if end_row <= start_row:
+            return []
+
+        # 批量转换为numpy数组
+        data_slice = df.iloc[start_row:end_row, :max_cols].fillna("").astype(str)
+        data_array = data_slice.to_numpy()
+
+        data = []
+        for i in range(data_array.shape[0]):
+            row_data = [v.strip() for v in data_array[i]]
+            # 补齐到6列
+            while len(row_data) < 6:
+                row_data.append("")
             data.append(row_data)
 
         return data

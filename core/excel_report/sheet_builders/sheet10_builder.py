@@ -8,6 +8,9 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import pandas as pd
 import logging
+import platform
+from pathlib import Path
+from datetime import datetime
 from ..config.bull_quality_standards import (
     US_PROGENY_STANDARDS, US_GENOMIC_STANDARDS,
     DEFECT_GENES, QUALITY_STANDARD_TABLE
@@ -87,6 +90,20 @@ class Sheet10Builder(BaseSheetBuilder):
     1. 按育种指数排名表
     2. 包含主要育种性状值
     """
+
+    def __init__(self, workbook, style_manager, chart_builder, progress_callback=None, output_dir=None):
+        """
+        初始化Sheet10构建器
+
+        Args:
+            workbook: Excel工作簿对象
+            style_manager: 样式管理器
+            chart_builder: 图表构建器
+            progress_callback: 进度回调函数
+            output_dir: 图片输出目录（用于导出排名表图片）
+        """
+        super().__init__(workbook, style_manager, chart_builder, progress_callback)
+        self.output_dir = output_dir
 
     def build(self, data: dict):
         """
@@ -360,4 +377,133 @@ class Sheet10Builder(BaseSheetBuilder):
 
         logger.info(f"✓ Sheet 10排名表构建完成: {len(df)}头公牛")
 
+        # 导出排名表为图片（供PPT使用）
+        if self.output_dir:
+            self._export_ranking_table_image(df, summary, header_map)
+
         return current_row
+
+    def _export_ranking_table_image(self, df: pd.DataFrame, summary: dict, header_map: dict):
+        """
+        使用matplotlib将排名表导出为图片
+
+        Args:
+            df: 排名DataFrame
+            summary: 统计摘要
+            header_map: 表头映射
+        """
+        try:
+            import matplotlib.pyplot as plt
+            import matplotlib
+            matplotlib.use('Agg')  # 使用非交互式后端
+
+            # 设置中文字体（Mac和Windows兼容）
+            system = platform.system()
+            if system == 'Darwin':  # macOS
+                font_candidates = ['PingFang SC', 'Heiti SC', 'STHeiti', 'Arial Unicode MS']
+            else:  # Windows
+                font_candidates = ['Microsoft YaHei', 'SimHei', 'SimSun', 'Arial Unicode MS']
+
+            # 查找可用字体
+            from matplotlib import font_manager
+            available_fonts = [f.name for f in font_manager.fontManager.ttflist]
+            selected_font = None
+            for font in font_candidates:
+                if font in available_fonts:
+                    selected_font = font
+                    break
+
+            if selected_font:
+                plt.rcParams['font.sans-serif'] = [selected_font]
+            plt.rcParams['axes.unicode_minus'] = False
+
+            # 准备表格数据
+            # 表头（使用中英文映射）
+            headers = [header_map.get(col, col) for col in df.columns]
+
+            # 数据行
+            table_data = []
+            cell_colors = []
+
+            for _, row in df.iterrows():
+                row_data = []
+                row_colors = []
+                for col in df.columns:
+                    value = row[col]
+                    if pd.isna(value):
+                        value = ""
+                    row_data.append(str(value) if not isinstance(value, str) else value)
+
+                    # 确定单元格颜色
+                    color = 'white'
+                    if col in US_PROGENY_STANDARDS:
+                        below_progeny, below_genomic = self._check_below_standard(col, row[col])
+                        if below_progeny:
+                            color = '#FF0000'  # 红色
+                        elif below_genomic:
+                            color = '#FFB6C1'  # 粉色
+                    if col in DEFECT_GENES and row[col] == 'C':
+                        color = '#FF0000'  # 红色
+
+                    row_colors.append(color)
+
+                table_data.append(row_data)
+                cell_colors.append(row_colors)
+
+            # 计算图片尺寸
+            num_cols = len(df.columns)
+            num_rows = len(df) + 1  # +1 for header
+            col_width = 1.2  # 每列宽度（英寸）
+            row_height = 0.4  # 每行高度（英寸）
+
+            fig_width = max(num_cols * col_width, 12)
+            fig_height = max(num_rows * row_height + 1, 4)
+
+            fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+            ax.axis('off')
+
+            # 添加标题
+            title_text = f"备选公牛排名\n总计: {summary.get('total_bulls', 0)}头公牛 (性控: {summary.get('sexed_bulls', 0)}, 常规: {summary.get('regular_bulls', 0)})"
+            ax.set_title(title_text, fontsize=14, fontweight='bold', pad=20)
+
+            # 创建表格
+            table = ax.table(
+                cellText=table_data,
+                colLabels=headers,
+                cellColours=cell_colors,
+                colColours=['#4472C4'] * num_cols,  # 表头蓝色
+                cellLoc='center',
+                loc='center'
+            )
+
+            # 设置表格样式
+            table.auto_set_font_size(False)
+            table.set_fontsize(9)
+            table.scale(1.2, 1.5)
+
+            # 设置表头文字颜色为白色
+            for j in range(num_cols):
+                cell = table[(0, j)]
+                cell.set_text_props(color='white', fontweight='bold')
+
+            # 设置红色单元格的文字为白色
+            for i, row_colors in enumerate(cell_colors):
+                for j, color in enumerate(row_colors):
+                    if color == '#FF0000':
+                        cell = table[(i + 1, j)]
+                        cell.set_text_props(color='white', fontweight='bold')
+
+            plt.tight_layout()
+
+            # 保存图片
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = Path(self.output_dir) / f"备选公牛排名表_{timestamp}.png"
+            plt.savefig(output_path, dpi=150, bbox_inches='tight',
+                       facecolor='white', edgecolor='none')
+            plt.close(fig)
+
+            logger.info(f"✓ 排名表图片已导出: {output_path.name}")
+
+        except Exception as e:
+            logger.warning(f"导出排名表图片失败: {e}")
+            logger.debug("错误详情:", exc_info=True)

@@ -35,17 +35,15 @@ class Part5BreedingRecordsBuilder(BaseSlideBuilder):
         logger.info("开始构建Part 5: 配种记录分析")
         logger.info("=" * 60)
 
-        # 重新读取配种记录-隐性基因分析Sheet，使用header=None以获取完整数据（包括标题行）
-        excel_path = data.get("excel_path")
-        if excel_path is None:
-            logger.error("excel_path 未找到，跳过 Part 5")
+        # 使用 DataCollector 缓存读取配种记录-隐性基因分析Sheet（header=None）
+        data_collector = data.get("data_collector")
+        if data_collector is None:
+            logger.error("data_collector 未找到，跳过 Part 5")
             return
 
-        try:
-            df_genes = pd.read_excel(excel_path, sheet_name="配种记录-隐性基因分析", header=None)
-            logger.info(f"✓ 重新读取breeding_genes数据（无header）: {len(df_genes)}行 x {len(df_genes.columns)}列")
-        except Exception as e:
-            logger.error(f"重新读取配种记录-隐性基因分析Sheet失败: {e}")
+        df_genes = data_collector.get_raw_sheet("配种记录-隐性基因分析", header=None)
+        if df_genes is None:
+            logger.error("配种记录-隐性基因分析Sheet读取失败")
             return
 
         if df_genes.empty:
@@ -207,18 +205,19 @@ class Part5BreedingRecordsBuilder(BaseSlideBuilder):
             ...
         ]
         """
+        end_row = min(start_row + num_rows, len(df))
+        max_cols = min(10, df.shape[1])
+
+        # P1优化：批量转换为numpy数组，减少iloc访问开销
+        data_slice = df.iloc[start_row:end_row, :max_cols].fillna("").astype(str)
+        data_array = data_slice.to_numpy()
+
         gene_data = []
-        for i in range(start_row, min(start_row + num_rows, len(df))):
-            row_data = []
-            for j in range(10):  # 10列
-                if j < df.shape[1]:
-                    cell_value = df.iloc[i, j]
-                    if pd.isna(cell_value):
-                        row_data.append("")
-                    else:
-                        row_data.append(str(cell_value).strip())
-                else:
-                    row_data.append("")
+        for i in range(data_array.shape[0]):
+            row_data = [v.strip() for v in data_array[i]]
+            # 补齐到10列
+            while len(row_data) < 10:
+                row_data.append("")
             gene_data.append(row_data)
 
         return gene_data

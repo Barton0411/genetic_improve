@@ -411,7 +411,8 @@ class ExcelReportGenerator:
     def _build_sheet10(self, data: dict):
         """构建Sheet 10: 备选公牛排名"""
         from .sheet_builders import Sheet10Builder
-        builder = Sheet10Builder(self.wb, self.style_manager, self.chart_builder, self.progress_callback)
+        builder = Sheet10Builder(self.wb, self.style_manager, self.chart_builder, self.progress_callback,
+                                 output_dir=self.analysis_folder)
         builder.build(data)
 
     def _build_sheet11(self, data: dict):

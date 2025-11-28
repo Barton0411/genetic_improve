@@ -531,3 +531,101 @@ class BaseSlideBuilder:
             logger.info(f"✓ 共找到 {len(found_indices)} 个匹配的幻灯片")
 
         return found_indices
+
+    # ------------------------------------------------------------------ #
+    # P4优化：统一的表格操作方法
+    # ------------------------------------------------------------------ #
+
+    def _find_table(self, slide, name: str):
+        """
+        在幻灯片中按名称查找表格
+
+        Args:
+            slide: 幻灯片对象
+            name: 表格名称（如"表格 1"）
+
+        Returns:
+            表格对象或None
+        """
+        for shape in slide.shapes:
+            if shape.name == name and getattr(shape, "has_table", False):
+                return shape.table
+        return None
+
+    @staticmethod
+    def _set_cell_text(cell, text: str, font_size: int = None, bold: bool = None):
+        """
+        更新单元格文字，并可选设置字体样式
+
+        Args:
+            cell: 单元格对象
+            text: 文本内容
+            font_size: 字体大小（可选）
+            bold: 是否加粗（可选）
+        """
+        tf = cell.text_frame
+        if not tf.paragraphs:
+            para = tf.add_paragraph()
+        else:
+            para = tf.paragraphs[0]
+        if para.runs:
+            run = para.runs[0]
+        else:
+            run = para.add_run()
+        run.text = text
+        if font_size is not None or bold is not None:
+            font = run.font
+            font.name = FONT_NAME_CN
+            if font_size is not None:
+                font.size = Pt(font_size)
+            if bold is not None:
+                font.bold = bold
+        # 清理其它 run/段落中的旧文本
+        for extra_run in para.runs[1:]:
+            extra_run.text = ""
+        for extra_para in tf.paragraphs[1:]:
+            for extra_run in extra_para.runs:
+                extra_run.text = ""
+
+    def _add_table_row(self, table):
+        """
+        添加表格行（复制最后一行的结构）
+
+        Args:
+            table: 表格对象
+        """
+        try:
+            from copy import deepcopy
+            tbl = table._tbl
+            # 复制最后一行的结构
+            last_row_idx = len(table.rows) - 1
+            last_tr = table.rows[last_row_idx]._tr
+            new_tr = deepcopy(last_tr)
+            # 添加到表格
+            tbl.append(new_tr)
+
+            # 清空新行的文本
+            new_row_idx = len(table.rows) - 1
+            for col_idx in range(len(table.columns)):
+                try:
+                    cell = table.cell(new_row_idx, col_idx)
+                    cell.text = ""
+                except:
+                    pass
+        except Exception as e:
+            logger.warning(f"添加表格行失败: {e}")
+
+    def _delete_table_row(self, table, row_idx: int):
+        """
+        删除表格中的指定行
+
+        Args:
+            table: 表格对象
+            row_idx: 要删除的行索引
+        """
+        try:
+            tbl = table._tbl
+            tr = table.rows[row_idx]._tr
+            tbl.remove(tr)
+        except Exception as e:
+            logger.warning(f"删除表格行{row_idx}失败: {e}")

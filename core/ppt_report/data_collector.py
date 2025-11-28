@@ -77,6 +77,8 @@ class DataCollector:
 
         # 记录Excel源路径，供后续PPT构建器按需直接读取原始Sheet
         self.data_cache['excel_path'] = self.excel_path
+        # 添加 data_collector 引用，供 builder 使用 get_raw_sheet() 缓存方法
+        self.data_cache['data_collector'] = self
 
         # 特殊处理：farm_info需要解析成dict（因为Sheet1是横向布局）
         if 'farm_info' in self.data_cache:
@@ -124,6 +126,35 @@ class DataCollector:
         """
         return self.data_cache.get(key)
 
+    def get_raw_sheet(self, sheet_name: str, header=None) -> Optional[pd.DataFrame]:
+        """
+        获取原始Sheet数据（带缓存）
+
+        用于需要 header=None 读取的场景，避免 builder 独立调用 pd.read_excel()
+
+        Args:
+            sheet_name: Sheet名称
+            header: header参数，默认None表示无表头
+
+        Returns:
+            DataFrame或None
+        """
+        # 生成缓存键：sheet名称 + header参数
+        cache_key = f"_raw_{sheet_name}_h{header}"
+
+        if cache_key in self.data_cache:
+            logger.debug(f"使用缓存: {cache_key}")
+            return self.data_cache[cache_key]
+
+        try:
+            df = pd.read_excel(self.excel_path, sheet_name=sheet_name, header=header)
+            self.data_cache[cache_key] = df
+            logger.info(f"✓ 读取原始Sheet '{sheet_name}' (header={header}): {len(df)}行 x {len(df.columns)}列")
+            return df
+        except Exception as e:
+            logger.error(f"✗ 读取原始Sheet '{sheet_name}' 失败: {e}")
+            return None
+
     def get_farm_info(self) -> Dict[str, any]:
         """
         获取牧场基本信息（从Excel Sheet1横向布局中提取）
@@ -136,6 +167,8 @@ class DataCollector:
         Returns:
             牧场信息字典
         """
+        import numpy as np
+
         df = self.get_data('farm_info')
         if df is None or df.empty:
             logger.warning("farm_info数据为空")
@@ -160,72 +193,82 @@ class DataCollector:
             logger.info(f"开始解析farm_info，DataFrame形状: {df.shape}")
             logger.info(f"列名: {df.columns.tolist()}")
 
-            # Excel Sheet1是横向布局，直接读取时列名可能是Unnamed
-            # 遍历所有行和列查找数据
-            for row_idx in range(len(df)):
-                for col_idx in range(len(df.columns)):
-                    cell_value = df.iloc[row_idx, col_idx]
+            # P2优化：批量转换为字符串数组，减少重复转换
+            str_array = df.fillna("").astype(str).to_numpy()
+            n_rows, n_cols = str_array.shape
 
-                    if pd.isna(cell_value):
-                        continue
+            def find_keyword_and_value(keyword, check_func=None, value_offsets=[1]):
+                """向量化查找关键字并获取相邻单元格的值"""
+                for r in range(n_rows):
+                    for c in range(n_cols):
+                        cell_str = str_array[r, c].strip()
+                        if keyword in cell_str:
+                            if check_func and not check_func(cell_str):
+                                continue
+                            for offset in value_offsets:
+                                if c + offset < n_cols:
+                                    val = str_array[r, c + offset].strip()
+                                    if val:
+                                        return val
+                return None
 
-                    cell_str = str(cell_value).strip()
+            def find_exact_and_value(keyword, value_offsets=[1, 2]):
+                """查找精确匹配的关键字并获取数值"""
+                for r in range(n_rows):
+                    for c in range(n_cols):
+                        cell_str = str_array[r, c].strip()
+                        if cell_str == keyword:
+                            for offset in value_offsets:
+                                if c + offset < n_cols:
+                                    val = str_array[r, c + offset].strip()
+                                    if val.replace('.', '').replace(',', '').isdigit():
+                                        return val
+                return None
 
-                    # 基本信息部分（A-B列，第0-1列）
-                    if '牧场名称' in cell_str and col_idx + 1 < len(df.columns):
-                        info['farm_name'] = str(df.iloc[row_idx, col_idx + 1]).strip()
-                    elif ('报告生成时间' in cell_str or '报告时间' in cell_str) and col_idx + 1 < len(df.columns):
-                        info['report_time'] = str(df.iloc[row_idx, col_idx + 1]).strip()
-                    elif '服务人员' in cell_str and col_idx + 1 < len(df.columns):
-                        info['service_staff'] = str(df.iloc[row_idx, col_idx + 1]).strip()
+            # 基本信息提取
+            val = find_keyword_and_value('牧场名称')
+            if val:
+                info['farm_name'] = val
 
-                    # 成母牛数量
-                    elif '成母牛' in cell_str and '胎次>0' in cell_str:
-                        # 找到这一行的数量列（下一列或下两列）
-                        for offset in [1, 2]:
-                            if col_idx + offset < len(df.columns):
-                                val = df.iloc[row_idx, col_idx + offset]
-                                if pd.notnull(val) and str(val).replace('.', '').isdigit():
-                                    info['lactating_count'] = int(float(val))
-                                    break
+            val = find_keyword_and_value('报告生成时间') or find_keyword_and_value('报告时间')
+            if val:
+                info['report_time'] = val
 
-                    # 后备牛数量
-                    elif '后备牛' in cell_str and '胎次=0' in cell_str:
-                        for offset in [1, 2]:
-                            if col_idx + offset < len(df.columns):
-                                val = df.iloc[row_idx, col_idx + offset]
-                                if pd.notnull(val) and str(val).replace('.', '').isdigit():
-                                    info['heifer_count'] = int(float(val))
-                                    break
+            val = find_keyword_and_value('服务人员')
+            if val:
+                info['service_staff'] = val
 
-                    # 合计（总头数）
-                    elif cell_str == '合计':
-                        for offset in [1, 2]:
-                            if col_idx + offset < len(df.columns):
-                                val = df.iloc[row_idx, col_idx + offset]
-                                if pd.notnull(val) and str(val).replace('.', '').isdigit():
-                                    info['total_count'] = int(float(val))
-                                    break
+            # 成母牛数量
+            val = find_keyword_and_value('成母牛', lambda s: '胎次>0' in s, [1, 2])
+            if val and val.replace('.', '').replace(',', '').isdigit():
+                info['lactating_count'] = int(float(val.replace(',', '')))
 
-                    # 平均胎次
-                    elif '平均胎次' in cell_str and col_idx + 1 < len(df.columns):
-                        val = df.iloc[row_idx, col_idx + 1]
-                        if pd.notnull(val):
-                            try:
-                                info['avg_lactation'] = float(val)
-                            except:
-                                pass
+            # 后备牛数量
+            val = find_keyword_and_value('后备牛', lambda s: '胎次=0' in s, [1, 2])
+            if val and val.replace('.', '').replace(',', '').isdigit():
+                info['heifer_count'] = int(float(val.replace(',', '')))
 
-                    # 平均泌乳天数
-                    elif '平均泌乳天数' in cell_str and col_idx + 1 < len(df.columns):
-                        val = df.iloc[row_idx, col_idx + 1]
-                        if pd.notnull(val):
-                            try:
-                                # 可能是类似 "123.0天" 的格式
-                                raw = str(val).replace('天', '').strip()
-                                info['avg_dim'] = int(float(raw))
-                            except Exception:
-                                pass
+            # 合计（总头数）
+            val = find_exact_and_value('合计')
+            if val:
+                info['total_count'] = int(float(val.replace(',', '')))
+
+            # 平均胎次
+            val = find_keyword_and_value('平均胎次')
+            if val:
+                try:
+                    info['avg_lactation'] = float(val.replace(',', ''))
+                except:
+                    pass
+
+            # 平均泌乳天数
+            val = find_keyword_and_value('平均泌乳天数')
+            if val:
+                try:
+                    raw = val.replace('天', '').replace(',', '').strip()
+                    info['avg_dim'] = int(float(raw))
+                except:
+                    pass
 
             # 尝试解析报告日期
             if info['report_time']:

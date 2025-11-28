@@ -256,15 +256,17 @@ class IndexCalculation(BaseCowCalculation):
                             return False, message
                         df = pd.read_excel(project_path / "analysis_results" / "processed_cow_data_key_traits_scores_pedigree.xlsx")
 
-            # 4. 计算指数得分
+            # 4. 计算指数得分 (向量化优化)
             weight_values = weights[weight_name]
-            df[f'{weight_name}_index'] = df.apply(
-                lambda row: self.calculate_index_score(
-                    {trait: row[f'{trait}_score'] for trait in selected_traits},
-                    weight_values
-                ),
-                axis=1
-            )
+            score = np.zeros(len(df))
+            for trait, weight in weight_values.items():
+                if trait in TRAIT_SD:
+                    score_col = f'{trait}_score'
+                    if score_col in df.columns:
+                        # 使用向量化操作，NaN 值用 0 填充
+                        trait_scores = df[score_col].fillna(0).values
+                        score += (trait_scores / TRAIT_SD[trait]) * weight
+            df[f'{weight_name}_index'] = score
 
             # 5. 排序并添加排名
             df = df.sort_values(f'{weight_name}_index', ascending=False)
@@ -343,14 +345,14 @@ class IndexCalculation(BaseCowCalculation):
             else:
                 print("\n[检查点-指数] 所有公牛数据完整，无缺失公牛")
 
-            # 7. 计算指数得分
-            bull_df[f'{weight_name}_index'] = bull_df.apply(
-                lambda row: self.calculate_index_score(
-                    {trait: row[trait] for trait in selected_traits}, 
-                    weight_values
-                ),
-                axis=1
-            )
+            # 7. 计算指数得分 (向量化优化)
+            score = np.zeros(len(bull_df))
+            for trait, weight in weight_values.items():
+                if trait in TRAIT_SD and trait in bull_df.columns:
+                    # 使用向量化操作，NaN 值用 0 填充
+                    trait_values = bull_df[trait].fillna(0).values
+                    score += (trait_values / TRAIT_SD[trait]) * weight
+            bull_df[f'{weight_name}_index'] = score
             
             # 8. 排序并添加排名
             bull_df = bull_df.sort_values(f'{weight_name}_index', ascending=False)
@@ -488,75 +490,79 @@ class IndexCalculation(BaseCowCalculation):
                     for idx, cow_id in enumerate(original_sources['cow_id']):
                         cow_id_map[cow_id] = idx
 
-                # 遍历所有数据行应用格式
-                for row_idx in range(len(df)):
-                    cow_id = df.iloc[row_idx]['cow_id'] if 'cow_id' in df.columns else None
+                # 批量收集需要格式化的单元格 (性能优化)
+                red_cells = []  # source == 2 (年份预估值)
+                yellow_cells = []  # source == 3 (默认预估值)
 
-                    for col_name in df.columns:
-                        # 检查是否是需要格式化的列
-                        # 1. _score列（如NM$_score）
-                        # 2. sire_*、mgs_*、mmgs_*列（如sire_NM$）
-                        needs_format = False
-                        trait = None
-                        source_value = None
+                # 处理 _score 列
+                for col_name in df.columns:
+                    if '_score' in col_name and not col_name.endswith('_source'):
+                        trait = col_name.replace('_score', '')
+                        col_idx = col_map[col_name]
 
-                        if '_score' in col_name and not col_name.endswith('_source'):
-                            # 处理_score列
-                            needs_format = True
-                            trait = col_name.replace('_score', '')
+                        # 优先使用原始source数据（从detail文件）
+                        if original_sources and cow_id_map:
+                            # 对于每个 cow_id，计算最大的 source 值
+                            max_sources = pd.Series(index=df.index, dtype=float)
+                            for idx, row in df.iterrows():
+                                cow_id = row['cow_id'] if 'cow_id' in df.columns else None
+                                if cow_id and cow_id in cow_id_map:
+                                    detail_idx = cow_id_map[cow_id]
+                                    source_vals = []
+                                    for prefix in ['sire_', 'mgs_', 'mmgs_']:
+                                        source_col = f'{prefix}{trait}_source'
+                                        if source_col in original_sources:
+                                            val = original_sources[source_col].iloc[detail_idx]
+                                            if pd.notna(val):
+                                                source_vals.append(val)
+                                    if source_vals:
+                                        max_sources.at[idx] = max(source_vals)
 
-                            # 如果有原始source数据
-                            if cow_id and cow_id in cow_id_map:
-                                detail_idx = cow_id_map[cow_id]
-                                # 收集所有相关的source值，使用最大值（最差的数据质量）
-                                source_values = []
-                                for prefix in ['sire_', 'mgs_', 'mmgs_']:
-                                    source_col = f'{prefix}{trait}_source'
-                                    if source_col in original_sources:
-                                        val = original_sources[source_col].iloc[detail_idx]
-                                        if pd.notna(val):
-                                            source_values.append(val)
+                            # 使用向量化掩码
+                            mask_red = max_sources == 2
+                            mask_yellow = max_sources == 3
+                            red_cells.extend([(r + 2, col_idx) for r in df.index[mask_red]])
+                            yellow_cells.extend([(r + 2, col_idx) for r in df.index[mask_yellow]])
+                        else:
+                            # 使用直接的 source 列
+                            direct_source_col = col_name + '_source'
+                            if direct_source_col in df.columns:
+                                mask_red = df[direct_source_col] == 2
+                                mask_yellow = df[direct_source_col] == 3
+                                red_cells.extend([(r + 2, col_idx) for r in df.index[mask_red]])
+                                yellow_cells.extend([(r + 2, col_idx) for r in df.index[mask_yellow]])
 
-                                # 使用最大的source值（表示最差的数据质量）
-                                if source_values:
-                                    source_value = max(source_values)
+                # 处理 sire_*、mgs_*、mmgs_* 列
+                for col_name in df.columns:
+                    if (col_name.startswith('sire_') or col_name.startswith('mgs_') or
+                        col_name.startswith('mmgs_')) and not col_name.endswith('_source'):
+                        col_idx = col_map[col_name]
+                        source_col = col_name + '_source'
 
-                            # 如果没有找到原始source，尝试使用数字source列（如果存在）
-                            if source_value is None:
-                                direct_source_col = col_name + '_source'
-                                if direct_source_col in df.columns:
-                                    val = df.iloc[row_idx][direct_source_col]
-                                    # 如果是数字，直接使用
-                                    if isinstance(val, (int, float)) and not pd.isna(val):
-                                        source_value = val
+                        if source_col in df.columns:
+                            mask_red = df[source_col] == 2
+                            mask_yellow = df[source_col] == 3
+                            red_cells.extend([(r + 2, col_idx) for r in df.index[mask_red]])
+                            yellow_cells.extend([(r + 2, col_idx) for r in df.index[mask_yellow]])
+                        elif original_sources and cow_id_map and source_col in original_sources:
+                            # 从 original_sources 获取
+                            for idx, row in df.iterrows():
+                                cow_id = row['cow_id'] if 'cow_id' in df.columns else None
+                                if cow_id and cow_id in cow_id_map:
+                                    detail_idx = cow_id_map[cow_id]
+                                    source_value = original_sources[source_col].iloc[detail_idx]
+                                    if source_value == 2:
+                                        red_cells.append((idx + 2, col_idx))
+                                    elif source_value == 3:
+                                        yellow_cells.append((idx + 2, col_idx))
 
-                        elif (col_name.startswith('sire_') or col_name.startswith('mgs_') or
-                              col_name.startswith('mmgs_')) and not col_name.endswith('_source'):
-                            # 处理sire_*、mgs_*、mmgs_*列
-                            needs_format = True
-                            # 直接查找对应的source列
-                            source_col = col_name + '_source'
-
-                            # 先尝试从当前dataframe中查找
-                            if source_col in df.columns:
-                                source_value = df.iloc[row_idx][source_col]
-                            # 如果没有，尝试从original_sources中查找
-                            elif cow_id and cow_id in cow_id_map and source_col in original_sources:
-                                detail_idx = cow_id_map[cow_id]
-                                source_value = original_sources[source_col].iloc[detail_idx]
-
-                        # 应用格式
-                        if needs_format and source_value is not None:
-                            if source_value == 2:
-                                # 年份预估值 - 红色字体
-                                cell = worksheet.cell(row=row_idx + 2, column=col_map[col_name])
-                                cell.font = red_font
-                            elif source_value == 3:
-                                # 默认预估值 - 灰底黄字
-                                cell = worksheet.cell(row=row_idx + 2, column=col_map[col_name])
-                                cell.font = yellow_font
-                                cell.fill = gray_fill
-                            # source_value == 1 时不需要格式化（真实数据）
+                # 批量应用格式
+                for row, col in red_cells:
+                    worksheet.cell(row=row, column=col).font = red_font
+                for row, col in yellow_cells:
+                    cell = worksheet.cell(row=row, column=col)
+                    cell.font = yellow_font
+                    cell.fill = gray_fill
 
             print(f"文件已保存并格式化: {output_path}")
             return True

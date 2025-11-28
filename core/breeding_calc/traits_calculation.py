@@ -158,7 +158,7 @@ class TraitsCalculation(BaseCowCalculation):
                 progress_callback(75, "正在保存详细计算结果...")
 
             detail_output_path = output_dir / f"{self.output_prefix}_detail.xlsx"
-            if not self.save_results_with_retry(cow_df, detail_output_path, apply_formatting=True):
+            if not self.save_results_with_retry(cow_df, detail_output_path, apply_formatting=False):
                 return False, "保存详细结果失败"
 
             if progress_callback:
@@ -175,7 +175,7 @@ class TraitsCalculation(BaseCowCalculation):
                 progress_callback(85, "正在计算性状得分...")
                 
             pedigree_output_path = output_dir / f"{self.output_prefix}_scores_pedigree.xlsx"
-            if not self.calculate_trait_scores(detail_output_path, yearly_output_path, pedigree_output_path, apply_formatting=True):
+            if not self.calculate_trait_scores(detail_output_path, yearly_output_path, pedigree_output_path, apply_formatting=False):
                 return False, "计算性状得分失败"
 
             if progress_callback:
@@ -195,7 +195,7 @@ class TraitsCalculation(BaseCowCalculation):
                 print("发现基因组数据，开始更新...")
                 if progress_callback:
                     progress_callback(97, "发现基因组数据，正在更新...")
-                if not self.update_genomic_data(pedigree_output_path, genomic_data_path, genomic_output_path, apply_formatting=True):
+                if not self.update_genomic_data(pedigree_output_path, genomic_data_path, genomic_output_path, apply_formatting=False):
                     return False, "更新基因组数据失败"
                 print("基因组数据更新完成")
                 if progress_callback:
@@ -206,7 +206,7 @@ class TraitsCalculation(BaseCowCalculation):
                     progress_callback(97, "未找到基因组数据，创建占位文件...")
 
                 # 即使没有基因组数据，也创建genomic文件（内容与pedigree相同）
-                if not self.create_genomic_placeholder(pedigree_output_path, genomic_output_path, apply_formatting=True):
+                if not self.create_genomic_placeholder(pedigree_output_path, genomic_output_path, apply_formatting=False):
                     return False, "创建基因组占位文件失败"
 
                 print("基因组占位文件已创建")
@@ -291,12 +291,22 @@ class TraitsCalculation(BaseCowCalculation):
             min_year = int(df['birth_year'].min())
             max_year = int(df['birth_year'].max())
             
-            # 获取默认值
-            default_values = self.get_default_values(selected_traits)
-            
+            # 必需的性状（用于生成正态分布图）
+            required_traits = ['NM$', 'TPI']
+
+            # 确保必需性状被包含在处理列表中
+            all_traits_to_process = list(selected_traits)
+            for req_trait in required_traits:
+                if req_trait not in all_traits_to_process:
+                    all_traits_to_process.append(req_trait)
+                    print(f"信息: 自动添加必需性状 {req_trait} 到处理列表")
+
+            # 获取默认值（包含所有要处理的性状）
+            default_values = self.get_default_values(all_traits_to_process)
+
             # 处理每个性状
             results = {}
-            for trait in selected_traits:
+            for trait in all_traits_to_process:
                 trait_col = f'sire_{trait}'
 
                 if trait_col not in df.columns:
@@ -361,12 +371,21 @@ class TraitsCalculation(BaseCowCalculation):
         all_years['mean'] = np.nan
         all_years['interpolated'] = False
 
-        # 填充实际数据
-        for _, row in yearly_data.iterrows():
-            year_idx = all_years[all_years['birth_year'] == row['birth_year']].index
-            if len(year_idx) > 0:
-                all_years.loc[year_idx[0], 'count'] = row['count']
-                all_years.loc[year_idx[0], 'mean'] = row['mean']
+        # 填充实际数据 - 使用向量化操作替代循环
+        if not yearly_data.empty:
+            # 设置索引以便快速查找
+            all_years_indexed = all_years.set_index('birth_year')
+            yearly_data_indexed = yearly_data.set_index('birth_year')
+
+            # 找出共同的年份
+            common_years = all_years_indexed.index.intersection(yearly_data_indexed.index)
+
+            # 批量更新
+            all_years_indexed.loc[common_years, 'count'] = yearly_data_indexed.loc[common_years, 'count']
+            all_years_indexed.loc[common_years, 'mean'] = yearly_data_indexed.loc[common_years, 'mean']
+
+            # 重置索引
+            all_years = all_years_indexed.reset_index()
 
         # 找出需要插值的年份（没有数据或样本量<10）
         needs_interpolation = (all_years['count'] < 10) | all_years['mean'].isna()
@@ -471,9 +490,28 @@ class TraitsCalculation(BaseCowCalculation):
                 for sheet in xls.sheet_names:
                     yearly_data[sheet] = pd.read_excel(xls, sheet_name=sheet)
                     yearly_data[sheet].set_index('birth_year', inplace=True)
-            
-            # 获取默认值
-            default_values = self.get_default_values(list(yearly_data.keys()))
+
+            # 必需的性状（用于生成正态分布图）
+            required_traits = ['NM$', 'TPI']
+
+            # 确保必需的性状存在于 yearly_data 中
+            min_year = int(df['birth_year'].min()) if df['birth_year'].notna().any() else 2020
+            max_year = int(df['birth_year'].max()) if df['birth_year'].notna().any() else 2024
+
+            for required_trait in required_traits:
+                if required_trait not in yearly_data:
+                    print(f"警告: yearly 数据中缺少 {required_trait}，使用默认值创建")
+                    # 创建默认的年度数据
+                    default_yearly = pd.DataFrame({
+                        'birth_year': range(min_year, max_year + 1),
+                        'mean': [0] * (max_year - min_year + 1)
+                    })
+                    default_yearly.set_index('birth_year', inplace=True)
+                    yearly_data[required_trait] = default_yearly
+
+            # 获取默认值（包含所有性状）
+            all_traits = list(yearly_data.keys())
+            default_values = self.get_default_values(all_traits)
             
             # 设置权重
             weights = {
@@ -490,7 +528,7 @@ class TraitsCalculation(BaseCowCalculation):
                     df, trait, yearly_data[trait], default_values[trait], weights
                 )
 
-                # 复制source列（如果存在）
+                # 复制source列（如果存在）- 使用向量化操作替代apply()
                 for bull_type in ['sire', 'mgs', 'mmgs']:
                     source_col = f'{bull_type}_{trait}_source'
                     if source_col not in df.columns:
@@ -505,12 +543,11 @@ class TraitsCalculation(BaseCowCalculation):
                             else:
                                 year_col = 'mgd_birth_year'
 
-                            # 根据数据情况设置source值
-                            df[source_col] = df.apply(
-                                lambda row: 1 if pd.notna(row[trait_col]) else
-                                           (2 if year_col in df.columns and pd.notna(row.get(year_col)) else 3),
-                                axis=1
-                            )
+                            # 使用向量化操作设置source值
+                            has_trait = df[trait_col].notna()
+                            has_year = df[year_col].notna() if year_col in df.columns else pd.Series(False, index=df.index)
+                            # source=1 如果有trait值，否则 source=2 如果有年份，否则 source=3
+                            df[source_col] = np.where(has_trait, 1, np.where(has_year, 2, 3))
             
             return self.save_results_with_retry(df, output_path, apply_formatting=apply_formatting)
             
@@ -568,83 +605,98 @@ class TraitsCalculation(BaseCowCalculation):
         return contribution
 
     def update_genomic_data(self, pedigree_path: Path, genomic_path: Path, output_path: Path, apply_formatting: bool = False) -> bool:
-        """用基因组数据更新关键性状得分"""
+        """用基因组数据更新关键性状得分 - 优化版本，使用向量化操作替代循环"""
         try:
             # 1. 读取系谱数据文件
             df_pedigree = pd.read_excel(pedigree_path)
-            
+
             # 2. 读取基因组数据
             df_genomic = pd.read_excel(genomic_path)
-            
+
             # 打印基因组数据的列名以便调试
             print(f"基因组数据列名: {df_genomic.columns.tolist()[:30]}...")  # 打印前30个
             print(f"基因组数据行数: {len(df_genomic)}")
-            
+
             # 检查cow_id列是否存在
             if 'cow_id' not in df_genomic.columns:
                 print("警告：基因组数据中缺少cow_id列")
                 return False
-            
+
             # 打印部分cow_id以验证
             print(f"基因组数据中的前5个cow_id: {df_genomic['cow_id'].head().tolist()}")
             print(f"系谱数据中的前5个cow_id: {df_pedigree['cow_id'].head().tolist()}")
-            
+
             # 3. 初始化数据来源标记
             score_columns = [col for col in df_pedigree.columns if col.endswith('_score')]
             for col in score_columns:
                 df_pedigree[f"{col}_source"] = "P"  # 默认标记为系谱来源
-            
-            # 4. 更新得分和数据来源
+
+            # 4. 更新得分和数据来源 - 使用向量化操作
             traits = [col[:-6] for col in score_columns]  # 去掉 '_score' 后缀
             print(f"需要匹配的性状: {traits}")
-            
+
             # 检查基因组数据中存在哪些性状列
-            existing_traits = []
-            for trait in traits:
-                if trait in df_genomic.columns:
-                    existing_traits.append(trait)
+            existing_traits = [trait for trait in traits if trait in df_genomic.columns]
             print(f"基因组数据中存在的性状: {existing_traits}")
-            
+
+            # 确保cow_id类型一致（都转为字符串）
+            df_pedigree['cow_id_str'] = df_pedigree['cow_id'].astype(str)
+            df_genomic['cow_id_str'] = df_genomic['cow_id'].astype(str)
+
+            # 为基因组数据设置索引以便快速查找
+            df_genomic_indexed = df_genomic.set_index('cow_id_str')
+
+            # 找出在基因组数据中存在的母牛
+            matched_mask = df_pedigree['cow_id_str'].isin(df_genomic_indexed.index)
+            matched_cows = matched_mask.sum()
+            print(f"匹配到的母牛数: {matched_cows}")
+
             # 统计更新数量
             update_count = 0
-            matched_cows = 0
-            
-            for idx, row in df_pedigree.iterrows():
-                cow_id = row['cow_id']
-                # 确保cow_id类型一致（都转为字符串）
-                genomic_row = df_genomic[df_genomic['cow_id'].astype(str) == str(cow_id)]
-                
-                if not genomic_row.empty:
-                    matched_cows += 1
-                    # 遍历每个性状
-                    for trait in traits:
-                        score_col = f'{trait}_score'
-                        source_col = f'{trait}_score_source'
-                        
-                        # 直接检查该性状是否在基因组数据中
-                        if trait in genomic_row.columns:
-                            trait_value = genomic_row[trait].iloc[0]
-                            if pd.notna(trait_value):
-                                df_pedigree.loc[idx, score_col] = trait_value
-                                df_pedigree.loc[idx, source_col] = "G"
-                                update_count += 1
-                                if update_count <= 10:  # 只打印前10个更新
-                                    print(f"更新: 母牛 {cow_id} 的 {trait} = {trait_value}")
-            
-            print(f"匹配到的母牛数: {matched_cows}")
+
+            # 对每个性状进行向量化更新
+            for trait in existing_traits:
+                score_col = f'{trait}_score'
+                source_col = f'{trait}_score_source'
+
+                if score_col not in df_pedigree.columns:
+                    continue
+
+                # 创建cow_id到性状值的映射
+                trait_map = df_genomic_indexed[trait].to_dict()
+
+                # 获取匹配母牛的性状值
+                matched_ids = df_pedigree.loc[matched_mask, 'cow_id_str']
+                new_values = matched_ids.map(trait_map)
+
+                # 只更新有效值（非NaN）
+                valid_mask = matched_mask & new_values.reindex(df_pedigree.index).notna()
+                if valid_mask.any():
+                    df_pedigree.loc[valid_mask, score_col] = new_values.reindex(df_pedigree.index)[valid_mask]
+                    df_pedigree.loc[valid_mask, source_col] = "G"
+                    trait_update_count = valid_mask.sum()
+                    update_count += trait_update_count
+
             print(f"总共更新了 {update_count} 个性状值")
-            
-            # 5. 添加基因组性状计数列
-            source_cols = [col for col in df_pedigree.columns if col.endswith('_source')]
-            df_pedigree['genomic_traits_count'] = df_pedigree[source_cols].apply(
-                lambda x: (x == "G").sum(), axis=1
-            )
-            
+
+            # 清理临时列
+            df_pedigree.drop(columns=['cow_id_str'], inplace=True)
+
+            # 5. 添加基因组性状计数列 - 优化版本
+            source_cols = [col for col in df_pedigree.columns if col.endswith('_score_source')]
+            if source_cols:
+                # 使用向量化操作计算每行的 "G" 数量
+                df_pedigree['genomic_traits_count'] = (df_pedigree[source_cols] == "G").sum(axis=1)
+            else:
+                df_pedigree['genomic_traits_count'] = 0
+
             # 6. 保存结果
             return self.save_results_with_retry(df_pedigree, output_path, apply_formatting=apply_formatting)
-                
+
         except Exception as e:
             print(f"更新基因组数据时发生错误: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def get_bull_traits(self, bull_id: str, selected_traits: list) -> dict:
@@ -721,7 +773,7 @@ class TraitsCalculation(BaseCowCalculation):
             return False
 
     def fill_estimated_values(self, cow_df, yearly_data_path, selected_traits):
-        """填充缺失公牛的预估值"""
+        """填充缺失公牛的预估值 - 优化版本，使用向量化操作替代循环"""
         try:
             # 首先确保年份列存在
             if 'birth_year' not in cow_df.columns and 'birth_date' in cow_df.columns:
@@ -733,30 +785,35 @@ class TraitsCalculation(BaseCowCalculation):
             if 'mgd_birth_year' not in cow_df.columns and 'birth_date_mgd' in cow_df.columns:
                 cow_df['mgd_birth_year'] = pd.to_datetime(cow_df['birth_date_mgd'], errors='coerce').dt.year
 
-            # 读取年度数据
-            yearly_data_dict = {}
+            # 读取年度数据并创建年份到均值的映射字典
+            yearly_mean_maps = {}  # {trait: {year: mean}}
             with pd.ExcelFile(yearly_data_path) as xlsx:
                 for trait in selected_traits:
                     if trait in xlsx.sheet_names:
-                        yearly_data_dict[trait] = pd.read_excel(xlsx, sheet_name=trait, index_col='birth_year')
+                        yearly_df = pd.read_excel(xlsx, sheet_name=trait, index_col='birth_year')
+                        yearly_mean_maps[trait] = yearly_df['mean'].to_dict()
 
             # 获取默认值（999HO99999的值）
             default_values = self.get_default_values(selected_traits)
 
-            # 为每个公牛类型和性状创建标记列
-            bull_types = ['sire', 'mgs', 'mmgs']
+            # 公牛类型和对应的年份列映射
+            bull_type_year_cols = {
+                'sire': 'birth_year',
+                'mgs': 'dam_birth_year',
+                'mmgs': 'mgd_birth_year'
+            }
 
-            for bull_type in bull_types:
-                # 确定使用哪个年份列
-                if bull_type == 'sire':
-                    year_col = 'birth_year'
-                elif bull_type == 'mgs':
-                    year_col = 'dam_birth_year'
-                else:  # mmgs
-                    year_col = 'mgd_birth_year'
-
-                # 获取identified列
+            for bull_type, year_col in bull_type_year_cols.items():
                 identified_col = f'{bull_type}_identified'
+
+                # 获取未识别的公牛掩码（一次性计算）
+                if identified_col in cow_df.columns:
+                    unidentified_mask = cow_df[identified_col] == False
+                else:
+                    unidentified_mask = pd.Series(False, index=cow_df.index)
+
+                # 获取有效年份的掩码
+                has_year_mask = cow_df[year_col].notna() if year_col in cow_df.columns else pd.Series(False, index=cow_df.index)
 
                 for trait in selected_traits:
                     trait_col = f'{bull_type}_{trait}'
@@ -765,31 +822,43 @@ class TraitsCalculation(BaseCowCalculation):
                     # 初始化source列，默认为1（真实数据）
                     cow_df[source_col] = 1
 
-                    # 处理未识别的公牛
-                    if identified_col in cow_df.columns:
-                        unidentified_mask = cow_df[identified_col] == False
+                    if not unidentified_mask.any():
+                        continue  # 没有未识别的公牛，跳过
 
-                        for idx in cow_df[unidentified_mask].index:
-                            # 检查是否有对应的年份数据
-                            if pd.notna(cow_df.loc[idx, year_col]) and trait in yearly_data_dict:
-                                year = int(cow_df.loc[idx, year_col])
-                                if year in yearly_data_dict[trait].index:
-                                    # 使用年份预估值
-                                    cow_df.loc[idx, trait_col] = yearly_data_dict[trait].loc[year, 'mean']
-                                    cow_df.loc[idx, source_col] = 2  # 年份预估
-                                else:
-                                    # 使用默认值
-                                    cow_df.loc[idx, trait_col] = default_values[trait]
-                                    cow_df.loc[idx, source_col] = 3  # 默认预估
-                            else:
-                                # 没有年份信息，使用默认值
-                                cow_df.loc[idx, trait_col] = default_values[trait]
-                                cow_df.loc[idx, source_col] = 3  # 默认预估
+                    # 获取年份到均值的映射
+                    year_to_mean = yearly_mean_maps.get(trait, {})
+                    default_val = default_values.get(trait, 0)
+
+                    # 情况1：未识别 + 有年份数据 -> 使用年份预估值
+                    mask_with_year = unidentified_mask & has_year_mask
+                    if mask_with_year.any():
+                        # 获取年份并转为整数
+                        years = cow_df.loc[mask_with_year, year_col].astype(int)
+                        # 使用map批量获取年份对应的均值
+                        estimated_values = years.map(year_to_mean)
+
+                        # 有年份映射的行 -> source=2
+                        has_mapping = estimated_values.notna()
+                        cow_df.loc[mask_with_year & has_mapping.reindex(cow_df.index, fill_value=False), trait_col] = estimated_values[has_mapping].values
+                        cow_df.loc[mask_with_year & has_mapping.reindex(cow_df.index, fill_value=False), source_col] = 2
+
+                        # 没有年份映射的行 -> source=3，使用默认值
+                        no_mapping_mask = mask_with_year & (~has_mapping).reindex(cow_df.index, fill_value=True)
+                        cow_df.loc[no_mapping_mask, trait_col] = default_val
+                        cow_df.loc[no_mapping_mask, source_col] = 3
+
+                    # 情况2：未识别 + 无年份数据 -> 使用默认值
+                    mask_no_year = unidentified_mask & ~has_year_mask
+                    if mask_no_year.any():
+                        cow_df.loc[mask_no_year, trait_col] = default_val
+                        cow_df.loc[mask_no_year, source_col] = 3
 
             return cow_df
 
         except Exception as e:
             print(f"填充预估值时发生错误: {e}")
+            import traceback
+            traceback.print_exc()
             return cow_df
 
     def save_with_formatting(self, df, output_path):

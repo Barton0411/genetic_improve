@@ -88,12 +88,12 @@ class ProgressDialog(QDialog):
             self.current_progress = min(self.current_progress + increment, self.target_progress)
             self.progress_bar.setValue(int(self.current_progress))
         elif self.current_progress >= self.target_progress and self.current_progress < 95:
-            # 即使已经到达目标值，只要还没到95%，就继续缓慢增长
-            # 这样可以避免在长时间任务期间进度条完全停止
-            # 但限制在不超过目标值+3%，避免进度条跑得太超前
-            max_allowed = min(self.target_progress + 3, 95)
+            # 等待新进度时继续缓慢增长，给用户视觉反馈
+            # 扩大允许范围：目标值+10%（适应长时间任务）
+            # 增加速度：每50ms增长0.3%（约6%/秒）
+            max_allowed = min(self.target_progress + 10, 95)
             if self.current_progress < max_allowed:
-                self.current_progress += 0.1  # 每50ms增长0.1%，非常缓慢
+                self.current_progress += 0.3  # 更快的等待增长
                 self.progress_bar.setValue(int(self.current_progress))
         elif self.current_progress > self.target_progress:
             # 如果目标值降低了（一般不应该发生），直接设置

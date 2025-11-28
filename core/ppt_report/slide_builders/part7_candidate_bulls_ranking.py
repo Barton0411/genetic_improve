@@ -70,13 +70,19 @@ class Part7CandidateBullsRankingBuilder(BaseSlideBuilder):
             slide = self.prs.slides[slide_index]
             logger.info(f"✓ 定位到第{slide_index + 1}页（备选公牛排名分析）")
 
-            # 1. 将Excel排名表转换为图片
-            ranking_image = self._convert_excel_table_to_image(excel_path)
+            # 1. 优先使用预生成的图片（Excel生成阶段已导出）
+            ranking_image = self._find_pregenerated_image(excel_path)
+
+            # 2. 如果没有预生成图片，回退到AppleScript方式
             if ranking_image is None:
-                logger.error("❌ 无法转换Excel表格为图片")
+                logger.info("  未找到预生成图片，使用AppleScript方式导出...")
+                ranking_image = self._convert_excel_table_to_image(excel_path)
+
+            if ranking_image is None:
+                logger.error("❌ 无法获取排名表图片")
                 return
 
-            # 2. 将图片插入到PPT
+            # 3. 将图片插入到PPT
             self._insert_table_image_to_slide(slide, ranking_image)
 
             logger.info("✓ Part 7 备选公牛排名分析完成")
@@ -84,6 +90,44 @@ class Part7CandidateBullsRankingBuilder(BaseSlideBuilder):
         except Exception as e:
             logger.error(f"❌ 构建备选公牛排名分析失败: {e}")
             logger.debug("错误详情:", exc_info=True)
+
+    def _find_pregenerated_image(self, excel_path: str) -> Optional[Path]:
+        """
+        查找Excel生成阶段预导出的排名表图片
+
+        Args:
+            excel_path: Excel文件路径（用于定位analysis_results目录）
+
+        Returns:
+            Path: 图片路径，未找到返回None
+        """
+        try:
+            # 从excel_path推断analysis_results目录
+            # Excel通常在 project/reports/ 下，analysis_results在 project/analysis_results/
+            excel_path = Path(excel_path)
+            project_folder = excel_path.parent.parent  # reports的父目录
+            analysis_folder = project_folder / "analysis_results"
+
+            if not analysis_folder.exists():
+                logger.debug(f"  analysis_results目录不存在: {analysis_folder}")
+                return None
+
+            # 查找最新的排名表图片（按文件名中的时间戳排序）
+            pattern = "备选公牛排名表_*.png"
+            matching_files = list(analysis_folder.glob(pattern))
+
+            if not matching_files:
+                logger.debug(f"  未找到匹配的图片文件: {pattern}")
+                return None
+
+            # 按修改时间排序，取最新的
+            latest_image = max(matching_files, key=lambda f: f.stat().st_mtime)
+            logger.info(f"  ✓ 找到预生成图片: {latest_image.name}")
+            return latest_image
+
+        except Exception as e:
+            logger.debug(f"查找预生成图片失败: {e}")
+            return None
 
     def _convert_excel_table_to_image(self, excel_path: str) -> Optional[Path]:
         """

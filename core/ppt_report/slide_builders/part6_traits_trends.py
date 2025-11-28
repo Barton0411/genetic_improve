@@ -78,7 +78,7 @@ class Part6TraitsTrendsBuilder(BaseSlideBuilder):
         Returns:
             List[Dict]: [{'index': 1, 'title': '经济指数', 'data': {...}}, ...]
         """
-        wb = load_workbook(str(excel_path))
+        wb = load_workbook(str(excel_path), data_only=True)  # data_only=True 获取计算后的值
         ws = wb['已用公牛性状汇总']
 
         charts_data = []
@@ -97,8 +97,8 @@ class Part6TraitsTrendsBuilder(BaseSlideBuilder):
                                                 title_text = r.t
                                                 break
 
-                # 立即提取图表数据（在工作簿关闭前）
-                chart_data = self._extract_chart_data_for_update(chart)
+                # 立即提取图表数据（传入worksheet以便直接读取源数据）
+                chart_data = self._extract_chart_data_for_update(chart, wb)
 
                 # 检查是否成功提取到数据
                 has_data = False
@@ -362,9 +362,67 @@ class Part6TraitsTrendsBuilder(BaseSlideBuilder):
             logger.warning(f"更新图表数据失败: {e}")
             logger.debug(f"错误详情: {e}", exc_info=True)
 
-    def _extract_chart_data_for_update(self, excel_chart) -> Dict:
+    def _parse_cell_reference(self, formula: str):
+        """
+        解析Excel公式引用，提取sheet名称和单元格范围
+
+        Args:
+            formula: 如 "'已用公牛性状汇总'!$B$2:$B$10" 或 "Sheet1!$A$1:$A$5"
+
+        Returns:
+            (sheet_name, start_cell, end_cell) 或 None
+        """
+        import re
+        try:
+            # 匹配格式: 'Sheet Name'!$A$1:$A$10 或 Sheet1!$A$1:$A$10
+            pattern = r"(?:'([^']+)'|([^!]+))!\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)"
+            match = re.match(pattern, formula)
+            if match:
+                sheet_name = match.group(1) or match.group(2)
+                start_col, start_row = match.group(3), int(match.group(4))
+                end_col, end_row = match.group(5), int(match.group(6))
+                return sheet_name, (start_col, start_row), (end_col, end_row)
+        except Exception as e:
+            logger.debug(f"解析公式引用失败: {formula}, 错误: {e}")
+        return None
+
+    def _read_range_from_worksheet(self, wb, sheet_name: str, start: tuple, end: tuple) -> list:
+        """
+        从worksheet读取指定范围的数据
+
+        Args:
+            wb: workbook对象
+            sheet_name: sheet名称
+            start: (列字母, 行号)
+            end: (列字母, 行号)
+
+        Returns:
+            数据列表
+        """
+        try:
+            ws = wb[sheet_name]
+            start_col, start_row = start
+            end_col, end_row = end
+
+            values = []
+            for row in range(start_row, end_row + 1):
+                cell_value = ws[f"{start_col}{row}"].value
+                if cell_value is not None:
+                    values.append(cell_value)
+                else:
+                    values.append(0)
+            return values
+        except Exception as e:
+            logger.debug(f"从worksheet读取数据失败: {e}")
+            return []
+
+    def _extract_chart_data_for_update(self, excel_chart, wb=None) -> Dict:
         """
         从Excel图表中提取数据用于更新PPT图表
+
+        Args:
+            excel_chart: openpyxl图表对象
+            wb: workbook对象（用于直接读取源数据）
 
         Returns:
             {
@@ -393,42 +451,71 @@ class Part6TraitsTrendsBuilder(BaseSlideBuilder):
                                         series_name = pt.v
                                         break
 
-                # 提取Y轴数据
+                # 提取Y轴数据 - 优先从源数据读取
                 y_values = []
                 if hasattr(series, 'val') and series.val:
                     if hasattr(series.val, 'numRef') and series.val.numRef:
-                        # 优先使用numCache（缓存数据）
-                        if hasattr(series.val.numRef, 'numCache') and series.val.numRef.numCache:
-                            if hasattr(series.val.numRef.numCache, 'pt') and series.val.numRef.numCache.pt:
-                                for pt in series.val.numRef.numCache.pt:
-                                    if hasattr(pt, 'v'):
-                                        try:
-                                            y_values.append(float(pt.v))
-                                        except:
-                                            y_values.append(0)
-                        # 如果numCache不存在，尝试从公式引用中读取
-                        elif hasattr(series.val.numRef, 'f') and series.val.numRef.f:
-                            # 公式引用格式如：'Sheet1!$B$2:$B$4'
-                            # 这里简单处理：记录公式但不尝试解析
-                            # 实际上Excel图表应该包含numCache
-                            logger.debug(f"            仅有公式引用：{series.val.numRef.f}，无缓存数据")
+                        # 优先从公式引用读取源数据（修复：不再依赖可能过期的numCache）
+                        if wb and hasattr(series.val.numRef, 'f') and series.val.numRef.f:
+                            formula = series.val.numRef.f
+                            parsed = self._parse_cell_reference(formula)
+                            if parsed:
+                                sheet_name, start, end = parsed
+                                y_values = self._read_range_from_worksheet(wb, sheet_name, start, end)
+                                # 转换为浮点数
+                                y_values = [float(v) if v is not None else 0 for v in y_values]
+                                logger.debug(f"            从源数据读取: {formula} -> {len(y_values)}个值")
 
-                # 提取X轴标签（只需要一次）
+                        # 如果从源数据读取失败，回退到numCache
+                        if not y_values:
+                            if hasattr(series.val.numRef, 'numCache') and series.val.numRef.numCache:
+                                if hasattr(series.val.numRef.numCache, 'pt') and series.val.numRef.numCache.pt:
+                                    for pt in series.val.numRef.numCache.pt:
+                                        if hasattr(pt, 'v'):
+                                            try:
+                                                y_values.append(float(pt.v))
+                                            except:
+                                                y_values.append(0)
+                                    logger.debug(f"            从numCache读取: {len(y_values)}个值")
+
+                # 提取X轴标签（只需要一次）- 同样优先从源数据读取
                 if not categories and hasattr(series, 'cat') and series.cat:
-                    # 尝试字符串类型的categories
-                    if hasattr(series.cat, 'strRef') and series.cat.strRef:
-                        if hasattr(series.cat.strRef, 'strCache') and series.cat.strRef.strCache:
-                            if hasattr(series.cat.strRef.strCache, 'pt') and series.cat.strRef.strCache.pt:
-                                for pt in series.cat.strRef.strCache.pt:
-                                    if hasattr(pt, 'v'):
-                                        categories.append(pt.v)
-                    # 尝试数值类型的categories
-                    elif hasattr(series.cat, 'numRef') and series.cat.numRef:
-                        if hasattr(series.cat.numRef, 'numCache') and series.cat.numRef.numCache:
-                            if hasattr(series.cat.numRef.numCache, 'pt') and series.cat.numRef.numCache.pt:
-                                for pt in series.cat.numRef.numCache.pt:
-                                    if hasattr(pt, 'v'):
-                                        categories.append(str(int(float(pt.v))))
+                    # 尝试从源数据读取categories
+                    if wb:
+                        # 尝试字符串引用
+                        if hasattr(series.cat, 'strRef') and series.cat.strRef:
+                            if hasattr(series.cat.strRef, 'f') and series.cat.strRef.f:
+                                parsed = self._parse_cell_reference(series.cat.strRef.f)
+                                if parsed:
+                                    sheet_name, start, end = parsed
+                                    categories = self._read_range_from_worksheet(wb, sheet_name, start, end)
+                                    categories = [str(v) for v in categories]
+                                    logger.debug(f"            categories从源数据读取: {len(categories)}个")
+
+                        # 尝试数值引用
+                        if not categories and hasattr(series.cat, 'numRef') and series.cat.numRef:
+                            if hasattr(series.cat.numRef, 'f') and series.cat.numRef.f:
+                                parsed = self._parse_cell_reference(series.cat.numRef.f)
+                                if parsed:
+                                    sheet_name, start, end = parsed
+                                    cat_values = self._read_range_from_worksheet(wb, sheet_name, start, end)
+                                    categories = [str(int(float(v))) if v else '' for v in cat_values]
+                                    logger.debug(f"            categories从源数据(num)读取: {len(categories)}个")
+
+                    # 如果从源数据读取失败，回退到缓存
+                    if not categories:
+                        if hasattr(series.cat, 'strRef') and series.cat.strRef:
+                            if hasattr(series.cat.strRef, 'strCache') and series.cat.strRef.strCache:
+                                if hasattr(series.cat.strRef.strCache, 'pt') and series.cat.strRef.strCache.pt:
+                                    for pt in series.cat.strRef.strCache.pt:
+                                        if hasattr(pt, 'v'):
+                                            categories.append(pt.v)
+                        elif hasattr(series.cat, 'numRef') and series.cat.numRef:
+                            if hasattr(series.cat.numRef, 'numCache') and series.cat.numRef.numCache:
+                                if hasattr(series.cat.numRef.numCache, 'pt') and series.cat.numRef.numCache.pt:
+                                    for pt in series.cat.numRef.numCache.pt:
+                                        if hasattr(pt, 'v'):
+                                            categories.append(str(int(float(pt.v))))
 
                 series_list.append({
                     'name': series_name or f'系列{len(series_list)+1}',

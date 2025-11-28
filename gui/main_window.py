@@ -360,6 +360,13 @@ class MainWindow(QMainWindow):
             self.selected_project_path = None
             self.templates_path = Path(__file__).parent.parent / "templates"
 
+            # PPT后台生成状态
+            self.ppt_thread = None
+            self.ppt_worker = None
+            self.ppt_generating = False
+            self.ppt_output_path = None
+            self.ppt_progress_dialog = None
+
             # 分组模式状态：'manual' 或 'auto'，None表示未选择
             self.grouping_mode = None
 
@@ -1147,6 +1154,10 @@ class MainWindow(QMainWindow):
 
         if self.check_project_structure(project_path):
             QMessageBox.information(self, "成功", f"已选择项目：{project_path.name}")
+
+            # 项目切换时取消正在进行的PPT生成
+            self._cancel_ppt_generation()
+
             self.selected_project_path = project_path
 
             # TODO: 在这里添加选择项目后的逻辑
@@ -3730,151 +3741,47 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "错误", f"选配分配失败:\n{str(e)}")
     
     def on_generate_ppt(self):
-        """生成PPT报告"""
+        """生成PPT报告按钮回调"""
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
 
-        try:
-            # 优先使用新的Excel报告模式 ✨
-            reports_folder = self.selected_project_path / "reports"
-            excel_reports = list(reports_folder.glob("育种分析综合报告_*.xlsx")) if reports_folder.exists() else []
+        # 情况1: PPT已生成完成
+        if self.ppt_output_path and Path(self.ppt_output_path).exists():
+            reply = QMessageBox.question(
+                self,
+                "PPT已生成",
+                f"PPT报告已生成完成：\n{Path(self.ppt_output_path).name}\n\n是否打开？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                import subprocess
+                subprocess.run(['open', self.ppt_output_path])
+            return
 
-            if excel_reports:
-                # 使用新的Excel报告模式
-                from core.ppt_report import ExcelBasedPPTGenerator
-                from auth.auth_service import AuthService
-                import pandas as pd
+        # 情况2: PPT正在生成中 - 显示进度弹窗
+        if self.ppt_generating:
+            self._show_ppt_progress_dialog()
+            return
 
-                # 获取登录用户的账号和姓名
-                reporter_name = "用户"  # 默认值
-                try:
-                    auth_service = AuthService()
-                    user_name = auth_service.get_user_name()
+        # 情况3: 未开始生成 - 检查Excel报告是否存在后启动
+        reports_folder = self.selected_project_path / "reports"
+        excel_reports = list(reports_folder.glob("育种分析综合报告_*.xlsx")) if reports_folder.exists() else []
 
-                    # 同时显示账号和姓名
-                    if user_name and self.username:
-                        # 如果有姓名，显示为 "姓名 (账号)"
-                        reporter_name = f"{user_name} ({self.username})"
-                    elif user_name:
-                        # 只有姓名
-                        reporter_name = user_name
-                    elif self.username:
-                        # 只有账号
-                        reporter_name = self.username
-                except Exception as e:
-                    logging.warning(f"无法获取用户信息: {e}")
-                    if self.username:
-                        reporter_name = self.username
+        if not excel_reports:
+            reply = QMessageBox.question(
+                self,
+                "缺少Excel报告",
+                "生成PPT报告需要先生成Excel综合报告。\n\n是否现在生成Excel报告？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.on_generate_excel_report()
+            return
 
-                # 从Excel报告中读取真实的牧场名称
-                farm_name = "牧场"  # 默认值
-                try:
-                    # 尝试从最新的Excel报告中读取牧场名称
-                    if excel_reports:
-                        latest_excel = max(excel_reports, key=lambda p: p.stat().st_mtime)
-                        # 读取Sheet1（牧场基础信息）
-                        df_info = pd.read_excel(latest_excel, sheet_name='牧场基础信息', nrows=1)
-                        if '牧场名称' in df_info.columns:
-                            farm_name = str(df_info['牧场名称'].iloc[0])
-                        elif '项目名称' in df_info.columns:
-                            farm_name = str(df_info['项目名称'].iloc[0])
-                except Exception as e:
-                    logging.warning(f"无法从Excel读取牧场名称: {e}")
-                    # 如果读取失败，尝试清理文件夹名称
-                    raw_name = self.selected_project_path.name
-                    # 移除日期时间戳部分（如 _2025_10_12_13_13）
-                    import re
-                    farm_name = re.sub(r'_\d{4}_\d{2}_\d{2}_\d{2}_\d{2}$', '', raw_name)
-                    if not farm_name or farm_name == raw_name:
-                        farm_name = raw_name
-
-                ppt_generator = ExcelBasedPPTGenerator(
-                    project_path=self.selected_project_path,
-                    farm_name=farm_name,
-                    reporter_name=reporter_name
-                )
-
-                # 检查Excel报告
-                can_generate, error_msg = ppt_generator.check_required_files()
-                if not can_generate:
-                    reply = QMessageBox.question(
-                        self,
-                        "缺少Excel报告",
-                        f"{error_msg}\n\n是否现在生成Excel报告？",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                    )
-
-                    if reply == QMessageBox.StandardButton.Yes:
-                        # 调用生成Excel报告
-                        self.on_generate_excel_report()
-                        # 等待Excel生成完成后再继续
-                        QMessageBox.information(self, "提示", "Excel报告生成完成，请再次点击'生成PPT报告'")
-                        return
-                    else:
-                        return
-
-                # 创建进度对话框
-                progress_dialog = ProgressDialog(self)
-                progress_dialog.setWindowTitle("生成PPT报告")
-                progress_dialog.set_task_info("正在生成PPT报告...")
-                progress_dialog.show()
-
-                # 生成PPT
-                def progress_callback(message, progress):
-                    progress_dialog.set_task_info(message)
-                    progress_dialog.update_progress(progress)
-                    QApplication.processEvents()
-
-                success = ppt_generator.generate_ppt(progress_callback)
-                progress_dialog.close()
-
-                if success:
-                    # 优先使用生成器返回的最后输出路径，防止 farm_name 不一致导致匹配不到文件
-                    latest_ppt = getattr(ppt_generator, "last_output_path", None)
-
-                    if latest_ppt is None:
-                        reports_folder = self.selected_project_path / "reports"
-                        ppt_files = list(reports_folder.glob("*牧场育种分析报告_*.pptx")) if reports_folder.exists() else []
-                        if ppt_files:
-                            latest_ppt = max(ppt_files, key=lambda p: p.stat().st_mtime)
-
-                    if latest_ppt and latest_ppt.exists():
-                        reply = QMessageBox.question(
-                            self,
-                            "生成成功",
-                            f"PPT报告已生成！\n\n文件：{latest_ppt.name}\n\n是否立即打开查看？",
-                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                            QMessageBox.StandardButton.Yes
-                        )
-
-                        if reply == QMessageBox.StandardButton.Yes:
-                            from PyQt6.QtCore import QUrl
-                            from PyQt6.QtGui import QDesktopServices
-                            QDesktopServices.openUrl(QUrl.fromLocalFile(str(latest_ppt)))
-                else:
-                    QMessageBox.warning(self, "生成失败", "PPT报告生成失败，请查看日志")
-
-                return
-            else:
-                # 如果没有Excel报告，提示用户先生成
-                reply = QMessageBox.question(
-                    self,
-                    "缺少Excel报告",
-                    "生成PPT报告需要先生成Excel综合报告。\n\n是否现在生成Excel报告？",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-
-                if reply == QMessageBox.StandardButton.Yes:
-                    self.on_generate_excel_report()
-                    QMessageBox.information(self, "提示", "Excel报告生成完成后，请再次点击'生成PPT报告'")
-                return
-
-        except Exception as e:
-            logging.error(f"生成PPT报告失败: {e}")
-            import traceback
-            logging.error(traceback.format_exc())
-            QMessageBox.critical(self, "错误", f"生成PPT报告时发生错误：\n{str(e)}")
+        # 启动PPT后台生成并显示进度
+        self._start_ppt_background_generation()
+        self._show_ppt_progress_dialog()
 
     def on_generate_excel_report(self):
         """生成Excel综合报告（使用后台线程）"""
@@ -3953,6 +3860,9 @@ class MainWindow(QMainWindow):
                     QDesktopServices.openUrl(QUrl.fromLocalFile(str(result)))
                 except Exception as e:
                     QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}")
+
+            # 静默启动PPT后台生成
+            self._start_ppt_background_generation()
         else:
             # 生成失败
             error_msg = result
@@ -3968,6 +3878,151 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "缺少必要文件", message)
             else:
                 QMessageBox.critical(self, "生成失败", f"生成Excel报告时发生错误：\n{error_msg}")
+
+    def _start_ppt_background_generation(self):
+        """静默启动PPT后台生成"""
+        if self.ppt_generating:
+            return  # 已在生成中
+
+        if not self.selected_project_path:
+            return
+
+        # 检查Excel报告是否存在
+        reports_folder = self.selected_project_path / "reports"
+        excel_reports = list(reports_folder.glob("育种分析综合报告_*.xlsx")) if reports_folder.exists() else []
+        if not excel_reports:
+            return  # 没有Excel报告，不自动启动
+
+        # 获取必要参数
+        farm_name, reporter_name = self._get_ppt_params()
+
+        # 创建Worker和线程
+        from gui.ppt_report_worker import PPTReportWorker
+
+        self.ppt_worker = PPTReportWorker(
+            self.selected_project_path,
+            farm_name,
+            reporter_name
+        )
+        self.ppt_thread = QThread()
+        self.ppt_worker.moveToThread(self.ppt_thread)
+
+        # 连接信号
+        self.ppt_thread.started.connect(self.ppt_worker.run)
+        self.ppt_worker.progress.connect(self._on_ppt_progress)
+        self.ppt_worker.finished.connect(self._on_ppt_finished)
+        self.ppt_worker.finished.connect(self.ppt_thread.quit)
+        self.ppt_worker.finished.connect(self.ppt_worker.deleteLater)
+        self.ppt_thread.finished.connect(self.ppt_thread.deleteLater)
+
+        # 启动
+        self.ppt_generating = True
+        self.ppt_output_path = None
+        self.ppt_thread.start()
+        logging.info("PPT后台生成已启动")
+
+    def _get_ppt_params(self):
+        """获取PPT生成所需的参数"""
+        import pandas as pd
+        import re
+
+        # 获取汇报人
+        reporter_name = "用户"
+        try:
+            from auth.auth_service import AuthService
+            auth_service = AuthService()
+            user_name = auth_service.get_user_name()
+
+            if user_name and self.username:
+                reporter_name = f"{user_name} ({self.username})"
+            elif user_name:
+                reporter_name = user_name
+            elif self.username:
+                reporter_name = self.username
+        except Exception as e:
+            logging.warning(f"无法获取用户信息: {e}")
+            if self.username:
+                reporter_name = self.username
+
+        # 获取牧场名称
+        farm_name = "牧场"
+        try:
+            reports_folder = self.selected_project_path / "reports"
+            excel_reports = list(reports_folder.glob("育种分析综合报告_*.xlsx")) if reports_folder.exists() else []
+            if excel_reports:
+                latest_excel = max(excel_reports, key=lambda p: p.stat().st_mtime)
+                df_info = pd.read_excel(latest_excel, sheet_name='牧场基础信息', nrows=1)
+                if '牧场名称' in df_info.columns:
+                    farm_name = str(df_info['牧场名称'].iloc[0])
+                elif '项目名称' in df_info.columns:
+                    farm_name = str(df_info['项目名称'].iloc[0])
+        except Exception as e:
+            logging.warning(f"无法从Excel读取牧场名称: {e}")
+            raw_name = self.selected_project_path.name
+            farm_name = re.sub(r'_\d{4}_\d{2}_\d{2}_\d{2}_\d{2}$', '', raw_name)
+            if not farm_name or farm_name == raw_name:
+                farm_name = raw_name
+
+        return farm_name, reporter_name
+
+    def _on_ppt_progress(self, progress: int, message: str):
+        """处理PPT生成进度"""
+        if self.ppt_progress_dialog is not None:
+            try:
+                self.ppt_progress_dialog.update_progress(progress)
+                self.ppt_progress_dialog.set_task_info(message)
+            except RuntimeError:
+                pass
+
+    def _on_ppt_finished(self, success: bool, result: str):
+        """处理PPT生成完成"""
+        self.ppt_generating = False
+
+        # 关闭进度对话框
+        if self.ppt_progress_dialog is not None:
+            try:
+                self.ppt_progress_dialog.close()
+            except RuntimeError:
+                pass
+            self.ppt_progress_dialog = None
+
+        if success:
+            self.ppt_output_path = result
+            logging.info(f"PPT报告后台生成完成: {result}")
+        else:
+            self.ppt_output_path = None
+            logging.error(f"PPT报告后台生成失败: {result}")
+
+    def _show_ppt_progress_dialog(self):
+        """显示PPT生成进度弹窗（无取消按钮）"""
+        if self.ppt_progress_dialog is None:
+            from gui.progress import ProgressDialog
+            self.ppt_progress_dialog = ProgressDialog(self)
+            self.ppt_progress_dialog.setWindowTitle("PPT报告生成中...")
+            self.ppt_progress_dialog.cancel_button.hide()  # 隐藏取消按钮
+
+        self.ppt_progress_dialog.show()
+
+    def _cancel_ppt_generation(self):
+        """取消正在进行的PPT生成"""
+        if self.ppt_generating and self.ppt_worker:
+            self.ppt_worker.cancel()
+            if self.ppt_thread:
+                self.ppt_thread.quit()
+                self.ppt_thread.wait(1000)
+
+        # 重置状态
+        self.ppt_generating = False
+        self.ppt_output_path = None
+        self.ppt_thread = None
+        self.ppt_worker = None
+
+        if self.ppt_progress_dialog:
+            try:
+                self.ppt_progress_dialog.close()
+            except RuntimeError:
+                pass
+            self.ppt_progress_dialog = None
 
     def load_benchmark_farms(self):
         """加载对比数据（对比牧场+外部参考数据）到表格"""

@@ -259,17 +259,12 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             max_cols,
         )
 
-        for r in range(max_rows):
-            row_values = []
-            for c in range(max_cols):
-                value = df.iloc[r, c]
-                if pd.isna(value):
-                    row_values.append("")
-                else:
-                    row_values.append(str(value))
+        # P1优化：批量转换为numpy数组，减少iloc访问开销
+        data_array = df.iloc[:max_rows, :max_cols].fillna("").astype(str).to_numpy()
 
+        for r in range(max_rows):
             for c in range(len(table.columns)):
-                cell_text = row_values[c] if c < len(row_values) else ""
+                cell_text = data_array[r, c] if c < max_cols else ""
                 self._set_cell_text(table.cell(r, c), cell_text)
 
         # 若模板行数多于数据行数，清空剩余行内容
