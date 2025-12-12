@@ -43,6 +43,51 @@ class BaseSlideBuilder:
         """
         self.prs = prs
         self.chart_creator = chart_creator
+        # 记录需要删除的页面索引（用于空数据时删除模板页面）
+        self._slides_to_delete: List[int] = []
+
+    # ------------------------------------------------------------------ #
+    # 空数据页面处理方法
+    # ------------------------------------------------------------------ #
+
+    def mark_slides_for_deletion(self, slide_indices: List[int]):
+        """
+        标记页面待删除（用于数据为空时）
+
+        Args:
+            slide_indices: 需要删除的页面索引列表
+        """
+        for idx in slide_indices:
+            if idx not in self._slides_to_delete:
+                self._slides_to_delete.append(idx)
+                logger.info(f"标记第 {idx + 1} 页（索引{idx}）待删除")
+
+    def get_slides_to_delete(self) -> List[int]:
+        """
+        获取待删除的页面索引列表
+
+        Returns:
+            待删除的页面索引列表
+        """
+        return self._slides_to_delete
+
+    def _delete_slide(self, slide_index: int):
+        """
+        删除指定索引的幻灯片
+
+        Args:
+            slide_index: 要删除的幻灯片索引（0-based）
+        """
+        try:
+            if slide_index < 0 or slide_index >= len(self.prs.slides):
+                logger.warning(f"幻灯片索引 {slide_index} 超出范围，跳过删除")
+                return
+            rId = self.prs.slides._sldIdLst[slide_index].rId
+            self.prs.part.drop_rel(rId)
+            del self.prs.slides._sldIdLst[slide_index]
+            logger.info(f"✓ 已删除第 {slide_index + 1} 页（索引{slide_index}）")
+        except Exception as e:
+            logger.warning(f"删除幻灯片 {slide_index} 失败: {e}")
 
     def add_title(self, slide: Slide, title: str, subtitle: Optional[str] = None):
         """

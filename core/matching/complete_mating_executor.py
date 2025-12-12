@@ -34,9 +34,11 @@ class CompleteMatingExecutor:
         self.cached_bull_data = None
         self.cached_sexed_bulls = None
         self.cached_regular_bulls = None
+        self.bull_id_original_mapping = {}  # 标准化公牛号 → 原始公牛号的映射
         self.group_manager = GroupManager(project_path)
         self.recommendation_generator = MatrixRecommendationGenerator(project_path)
         self.matcher = CycleBasedMatcher()
+        self.inbreeding_threshold = 6.25  # 默认近交系数阈值(%)
         
     def execute(self,
                 bull_inventory: Dict[str, int],
@@ -281,6 +283,7 @@ class CompleteMatingExecutor:
                 progress_callback("正在生成推荐矩阵...", 40)
             
             # 设置参数
+            self.inbreeding_threshold = inbreeding_threshold  # 保存近交系数阈值(%)
             self.recommendation_generator.inbreeding_threshold = inbreeding_threshold / 100.0  # 转换为小数
             self.recommendation_generator.control_defect_genes = control_defect_genes
             
@@ -447,6 +450,14 @@ class CompleteMatingExecutor:
                 # 确保bull_id保持为字符串格式
                 if 'bull_id' in self.cached_bull_data.columns:
                     self.cached_bull_data['bull_id'] = self.cached_bull_data['bull_id'].astype(str)
+                # 创建标准化公牛号 → 原始公牛号的映射（用于输出时还原）
+                if 'bull_id_original' in self.cached_bull_data.columns:
+                    self.cached_bull_data['bull_id_original'] = self.cached_bull_data['bull_id_original'].astype(str)
+                    self.bull_id_original_mapping = dict(zip(
+                        self.cached_bull_data['bull_id'],
+                        self.cached_bull_data['bull_id_original']
+                    ))
+                    logger.info(f"已创建公牛号还原映射: {len(self.bull_id_original_mapping)}条")
                 # 分别缓存性控和常规公牛（使用semen_type列）
                 self.cached_sexed_bulls = self.cached_bull_data[self.cached_bull_data['semen_type'] == '性控'].copy()
                 self.cached_regular_bulls = self.cached_bull_data[self.cached_bull_data['semen_type'] == '常规'].copy()
@@ -580,7 +591,7 @@ class CompleteMatingExecutor:
                 if pd.notna(inbreeding_str) and str(inbreeding_str).strip():
                     try:
                         inbreeding_value = float(str(inbreeding_str).strip('%')) / 100
-                        if inbreeding_value > 0.03125:  # 3.125%
+                        if inbreeding_value > self.inbreeding_threshold / 100:  # 使用用户设置的阈值
                             inbreeding_blocked = True
                     except (ValueError, TypeError):
                         pass
@@ -613,21 +624,23 @@ class CompleteMatingExecutor:
     def _generate_no_recommendation_note(self, semen_type: str, constraint_analysis: Dict) -> str:
         """生成完全没有推荐的备注"""
         blocked_details = []
-        
+
         for bull_id, data in constraint_analysis.items():
             if data['blocked']:
                 details = []
                 if data['inbreeding_blocked']:
-                    details.append(f"与{bull_id}公牛近交系数为{data['inbreeding_value']*100:.2f}%，大于3.125%阈值")
+                    details.append(f"与{bull_id}公牛近交系数为{data['inbreeding_value']*100:.2f}%，大于{self.inbreeding_threshold}%阈值")
                 if data['gene_blocked']:
                     for gene in data['high_risk_genes']:
                         details.append(f"与{bull_id}公牛存在{gene}基因纯合高风险")
                 blocked_details.extend(details)
-        
+
         if blocked_details:
             return f"无{semen_type}推荐：{';'.join(blocked_details)}"
         else:
-            return f"无{semen_type}推荐（其他约束）"
+            # 分析具体的"其他约束"原因
+            other_reasons = self._analyze_other_constraints(semen_type, constraint_analysis)
+            return f"无{semen_type}推荐（{other_reasons}）"
     
     def _generate_partial_recommendation_note(self, semen_type: str, missing_positions: List[int], constraint_analysis: Dict) -> str:
         """生成部分推荐缺失的备注"""
@@ -635,21 +648,23 @@ class CompleteMatingExecutor:
             prefix = f"缺少{semen_type}{missing_positions[0]}选、{missing_positions[1]}选"
         else:
             prefix = f"缺少{semen_type}{missing_positions[0]}选"
-        
+
         # 找出被阻挡的公牛的具体约束信息
         blocked_details = []
         for bull_id, data in constraint_analysis.items():
             if data['blocked']:
                 if data['inbreeding_blocked']:
-                    blocked_details.append(f"与{bull_id}公牛近交系数为{data['inbreeding_value']*100:.2f}%，大于3.125%阈值")
+                    blocked_details.append(f"与{bull_id}公牛近交系数为{data['inbreeding_value']*100:.2f}%，大于{self.inbreeding_threshold}%阈值")
                 if data['gene_blocked']:
                     for gene in data['high_risk_genes']:
                         blocked_details.append(f"与{bull_id}公牛存在{gene}基因纯合高风险")
-        
+
         if blocked_details:
             return f"{prefix}：{';'.join(blocked_details)}"
         else:
-            return f"{prefix}（其他约束）"
+            # 分析具体的"其他约束"原因
+            other_reasons = self._analyze_other_constraints(semen_type, constraint_analysis)
+            return f"{prefix}（{other_reasons}）"
     
     def _generate_skipped_better_bulls_note(self, semen_type: str, constraint_analysis: Dict) -> str:
         """生成跳过更优公牛的备注"""
@@ -662,16 +677,47 @@ class CompleteMatingExecutor:
         for i, (bull_id, data) in enumerate(all_bulls[:5]):  # 检查前5名
             if data['blocked']:
                 if data['inbreeding_blocked']:
-                    skipped_details.append(f"与{bull_id}公牛近交系数为{data['inbreeding_value']*100:.2f}%，大于3.125%阈值")
+                    skipped_details.append(f"与{bull_id}公牛近交系数为{data['inbreeding_value']*100:.2f}%，大于{self.inbreeding_threshold}%阈值")
                 if data['gene_blocked']:
                     for gene in data['high_risk_genes']:
                         skipped_details.append(f"与{bull_id}公牛存在{gene}基因纯合高风险")
         
         if skipped_details:
             return ';'.join(skipped_details)
-        
+
         return ""  # 没有发现被跳过的优质公牛
-    
+
+    def _analyze_other_constraints(self, semen_type: str, constraint_analysis: Dict) -> str:
+        """
+        分析"其他约束"的具体原因
+
+        Args:
+            semen_type: 冻精类型（'性控' 或 '常规'）
+            constraint_analysis: 公牛约束分析结果
+
+        Returns:
+            具体的约束原因描述
+        """
+        reasons = []
+
+        # 检查是否有可用的公牛数据
+        if not constraint_analysis:
+            reasons.append(f"无{semen_type}公牛约束数据")
+        else:
+            # 统计可用公牛数量
+            total_bulls = len(constraint_analysis)
+            available_bulls = sum(1 for data in constraint_analysis.values() if not data['blocked'])
+
+            if available_bulls == 0:
+                reasons.append(f"所有{total_bulls}头{semen_type}公牛均不满足约束条件")
+            elif available_bulls < 3:
+                reasons.append(f"仅{available_bulls}头{semen_type}公牛满足约束条件，不足3头")
+            else:
+                # 可能是分配原因
+                reasons.append(f"可用{semen_type}公牛已优先分配给其他母牛")
+
+        return '；'.join(reasons) if reasons else "未知约束"
+
     def _generate_final_report(self,
                               allocation_df: pd.DataFrame,
                               recommendations_df: pd.DataFrame,
@@ -729,17 +775,23 @@ class CompleteMatingExecutor:
             # 生成备注信息
             sexed_note = self._generate_breeding_notes(cow_id, rec_info, '性控', alloc_row)
             regular_note = self._generate_breeding_notes(cow_id, rec_info, '常规', alloc_row)
-            
+
+            # 辅助函数：还原公牛号为原始格式
+            def restore_bull_id(bull_id):
+                if not bull_id or pd.isna(bull_id) or str(bull_id).strip() == '':
+                    return ''
+                return self.bull_id_original_mapping.get(str(bull_id), str(bull_id))
+
             report_row = {
                 '母牛号': cow_id,
                 '分组': group_value,
-                '1选性控': alloc_row.get('1选性控', ''),
-                '2选性控': alloc_row.get('2选性控', ''),
-                '3选性控': alloc_row.get('3选性控', ''),
+                '1选性控': restore_bull_id(alloc_row.get('1选性控', '')),
+                '2选性控': restore_bull_id(alloc_row.get('2选性控', '')),
+                '3选性控': restore_bull_id(alloc_row.get('3选性控', '')),
                 '性控备注': sexed_note,
-                '1选常规': alloc_row.get('1选常规', ''),
-                '2选常规': alloc_row.get('2选常规', ''),
-                '3选常规': alloc_row.get('3选常规', ''),
+                '1选常规': restore_bull_id(alloc_row.get('1选常规', '')),
+                '2选常规': restore_bull_id(alloc_row.get('2选常规', '')),
+                '3选常规': restore_bull_id(alloc_row.get('3选常规', '')),
                 '常规备注': regular_note,
                 '胎次': cow_info.get('lac', ''),
                 '本胎次奶厅高峰产量': cow_info.get('peak_milk', ''),

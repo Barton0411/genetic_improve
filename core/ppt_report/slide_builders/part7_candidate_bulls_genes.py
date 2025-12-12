@@ -51,22 +51,23 @@ class Part7CandidateBullsGenesBuilder(BaseSlideBuilder):
             return
 
         try:
-            # 1. 读取Excel数据
-            # 优先使用缓存的workbook（避免重复加载，每次加载需要约21秒）
-            cached_wb = data.get("_cached_workbook_data_only")
-            bulls_data = self._read_bulls_genes_data(excel_path, cached_wb)
-            if not bulls_data:
-                logger.warning("⚠️  未找到备选公牛隐性基因数据，跳过")
-                return
-
-            bull_count = len(bulls_data)
-            logger.info(f"✓ 读取到 {bull_count} 头备选公牛的隐性基因数据")
-
-            # 2. 定位页面范围
+            # 1. 定位页面范围
             target_slides = self.find_slides_by_text("备选公牛-隐性基因分析", start_index=0)
             if not target_slides:
                 logger.error("❌ 未找到备选公牛-隐性基因分析页面，跳过")
                 return
+
+            # 2. 读取Excel数据
+            # 优先使用缓存的workbook（避免重复加载，每次加载需要约21秒）
+            cached_wb = data.get("_cached_workbook_data_only")
+            bulls_data = self._read_bulls_genes_data(excel_path, cached_wb)
+            if not bulls_data:
+                logger.warning("⚠️  未找到备选公牛隐性基因数据，标记页面待删除")
+                self.mark_slides_for_deletion(target_slides)
+                return
+
+            bull_count = len(bulls_data)
+            logger.info(f"✓ 读取到 {bull_count} 头备选公牛的隐性基因数据")
 
             start_slide_index = target_slides[0]
             logger.info(f"✓ 定位到第{start_slide_index + 1}页（备选公牛-隐性基因分析起始页）")

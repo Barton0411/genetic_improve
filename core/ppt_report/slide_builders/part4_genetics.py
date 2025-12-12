@@ -196,6 +196,18 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
         if not self.excel_path:
             logger.warning("未获取到Excel路径，无法从源Excel复制统计表")
 
+        # 检查主要数据是否为空
+        df_yearly = data.get("traits_yearly")
+        if df_yearly is None or df_yearly.empty:
+            logger.warning("traits_yearly 数据为空，标记Part4章节页和年度页待删除")
+            # 只标记章节页和年度表格页，其他页面有各自的数据检查
+            slides_to_delete = [
+                self.SECTION_SLIDE_INDEX,
+                self.YEARLY_SLIDE_INDEX
+            ]
+            self.mark_slides_for_deletion(slides_to_delete)
+            # 继续执行其他子方法，让它们各自处理空数据情况
+
         # 优先使用缓存的workbook（避免重复加载，每次加载需要约21秒）
         cached_wb = data.get("_cached_workbook_data_only")
         if cached_wb is not None:

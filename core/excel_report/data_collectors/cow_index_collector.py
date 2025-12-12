@@ -64,8 +64,12 @@ def collect_cow_index_data(analysis_folder: Path, project_folder: Path = None) -
             )
 
             # 填充缺失值（对于在指数文件中但不在基础数据中的牛）
-            df_merged['是否在场'].fillna('是', inplace=True)
-            df_merged['sex'].fillna('母', inplace=True)
+            df_merged['是否在场'] = df_merged['是否在场'].fillna('是')
+            # 确保sex列正确填充（处理全NaN的情况）
+            if df_merged['sex'].isna().all():
+                df_merged['sex'] = '母'
+            else:
+                df_merged['sex'] = df_merged['sex'].fillna('母')
             logger.info(f"从母牛基础数据合并了 {len(df_merged)} 条记录")
         else:
             # 都没有，使用默认值

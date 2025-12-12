@@ -54,16 +54,17 @@ class Part7CandidateBullsRankingBuilder(BaseSlideBuilder):
         # 确保excel_path是字符串
         excel_path = str(excel_path)
 
-        if not bull_ranking_data:
-            logger.warning("⚠️  bull_ranking 数据为空，跳过备选公牛排名分析")
-            return
-
         try:
             # 动态查找包含"备选公牛排名分析"的页面
             target_slides = self.find_slides_by_text("备选公牛排名分析", start_index=0)
 
             if not target_slides:
                 logger.error("❌ 未找到备选公牛排名分析页面，跳过")
+                return
+
+            if not bull_ranking_data:
+                logger.warning("⚠️  bull_ranking 数据为空，标记页面待删除")
+                self.mark_slides_for_deletion(target_slides)
                 return
 
             slide_index = target_slides[0]

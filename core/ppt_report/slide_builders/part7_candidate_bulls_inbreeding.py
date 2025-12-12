@@ -52,24 +52,25 @@ class Part7CandidateBullsInbreedingBuilder(BaseSlideBuilder):
                 logger.error("Excel报告路径未提供或文件不存在")
                 return
 
-            logger.info(f"从Excel读取数据: {Path(excel_path).name}")
-            # 优先使用缓存的workbook（避免重复加载，每次加载需要约21秒）
-            cached_wb = data.get("_cached_workbook_data_only")
-            bulls_data = self._read_bulls_inbreeding_data(excel_path, cached_wb)
-
-            if not bulls_data:
-                logger.warning("未读取到备选公牛近交系数分析数据")
-                return
-
-            bull_count = len(bulls_data)
-            logger.info(f"读取到 {bull_count} 头备选公牛的近交系数数据")
-
             # 2. 定位模板页面（查找"备选公牛-近交系数分析"标题）
             pages = self.find_slides_by_text("备选公牛-近交系数分析")
 
             if not pages:
                 logger.warning("未找到备选公牛-近交系数分析模板页面")
                 return
+
+            logger.info(f"从Excel读取数据: {Path(excel_path).name}")
+            # 优先使用缓存的workbook（避免重复加载，每次加载需要约21秒）
+            cached_wb = data.get("_cached_workbook_data_only")
+            bulls_data = self._read_bulls_inbreeding_data(excel_path, cached_wb)
+
+            if not bulls_data:
+                logger.warning("未读取到备选公牛近交系数分析数据，标记页面待删除")
+                self.mark_slides_for_deletion(pages)
+                return
+
+            bull_count = len(bulls_data)
+            logger.info(f"读取到 {bull_count} 头备选公牛的近交系数数据")
 
             start_slide_index = pages[0]
             logger.info(f"找到起始页面索引: {start_slide_index} (第{start_slide_index + 1}页)")

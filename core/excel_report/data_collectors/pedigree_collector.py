@@ -82,6 +82,12 @@ def collect_pedigree_data(analysis_folder: Path) -> dict:
 
         # 读取原始明细数据文件
         detail_source_df = pd.read_excel(detail_file)
+        # 确保sex列正确填充（处理全NaN的情况，母牛数据默认为'母'）
+        if 'sex' in detail_source_df.columns:
+            if detail_source_df['sex'].isna().all():
+                detail_source_df['sex'] = '母'
+            else:
+                detail_source_df['sex'] = detail_source_df['sex'].fillna('母')
         # 只保留母牛
         detail_source_df = detail_source_df[detail_source_df['sex'] == '母'].copy()
 

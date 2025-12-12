@@ -29,7 +29,15 @@ class Part2FarmOverviewBuilder(BaseSlideBuilder):
     def build(self, data: dict, versions: Optional[List[str]] = None):
         farm_info = data.get('farm_info_dict') or {}
         if not farm_info:
-            logger.warning("farm_info_dict 为空，跳过Part2")
+            logger.warning("farm_info_dict 为空，标记Part2页面待删除")
+            # 标记固定索引页面待删除
+            slides_to_delete = [
+                self.SECTION_SLIDE_INDEX,
+                self.BASIC_INFO_SLIDE_INDEX,
+                self.STRUCTURE_SLIDE_INDEX,
+                self.PARITY_SLIDE_INDEX
+            ]
+            self.mark_slides_for_deletion(slides_to_delete)
             return
 
         self._fill_section_slide()

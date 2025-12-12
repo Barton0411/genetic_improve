@@ -158,7 +158,7 @@ def main():
             
             # 创建主窗口
             logging.info("Creating MainWindow instance...")
-            window = MainWindow(username=login_dialog.username)
+            window = MainWindow(username=login_dialog.username, login_type=login_dialog.login_type)
             logging.info("MainWindow created successfully")
             
             # 先显示窗口，再最大化（Windows需要这个顺序）

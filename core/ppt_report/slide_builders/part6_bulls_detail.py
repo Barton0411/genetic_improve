@@ -41,25 +41,6 @@ class Part6BullsDetailBuilder(BaseSlideBuilder):
             logger.error("excel_path 未找到，跳过已用公牛明细")
             return
 
-        try:
-            df_bulls_detail = pd.read_excel(excel_path, sheet_name="已用公牛性状明细", header=None)
-            logger.info(f"✓ 读取bulls_detail数据（无header）: {len(df_bulls_detail)}行 x {len(df_bulls_detail.columns)}列")
-        except Exception as e:
-            logger.error(f"读取已用公牛性状明细Sheet失败: {e}")
-            return
-
-        if df_bulls_detail.empty:
-            logger.warning("bulls_detail 数据为空DataFrame，跳过已用公牛明细")
-            return
-
-        # 解析Excel中每年的数据
-        yearly_data = self._parse_yearly_data(df_bulls_detail)
-        logger.info(f"✓ 解析到 {len(yearly_data)} 年的数据")
-
-        if not yearly_data:
-            logger.warning("未解析到任何年份数据")
-            return
-
         # 查找PPT中所有"配种记录分析-使用公牛分析"页面
         logger.info(f"开始查找包含'配种记录分析-使用公牛分析'的页面，模板共{len(self.prs.slides)}页")
         all_target_slides = self.find_slides_by_text("配种记录分析-使用公牛分析", start_index=0)
@@ -69,6 +50,29 @@ class Part6BullsDetailBuilder(BaseSlideBuilder):
 
         if len(detail_slides) == 0:
             logger.error("❌ 未找到已用公牛明细页面，跳过")
+            return
+
+        try:
+            df_bulls_detail = pd.read_excel(excel_path, sheet_name="已用公牛性状明细", header=None)
+            logger.info(f"✓ 读取bulls_detail数据（无header）: {len(df_bulls_detail)}行 x {len(df_bulls_detail.columns)}列")
+        except Exception as e:
+            logger.error(f"读取已用公牛性状明细Sheet失败: {e}")
+            # 数据读取失败，标记所有明细页面待删除
+            self.mark_slides_for_deletion(detail_slides)
+            return
+
+        if df_bulls_detail.empty:
+            logger.warning("bulls_detail 数据为空DataFrame，标记明细页面待删除")
+            self.mark_slides_for_deletion(detail_slides)
+            return
+
+        # 解析Excel中每年的数据
+        yearly_data = self._parse_yearly_data(df_bulls_detail)
+        logger.info(f"✓ 解析到 {len(yearly_data)} 年的数据")
+
+        if not yearly_data:
+            logger.warning("未解析到任何年份数据，标记明细页面待删除")
+            self.mark_slides_for_deletion(detail_slides)
             return
 
         logger.info(f"✓ 找到 {len(detail_slides)} 个明细页面")

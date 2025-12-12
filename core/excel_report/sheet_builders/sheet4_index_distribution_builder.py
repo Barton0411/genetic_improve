@@ -104,10 +104,10 @@ class Sheet4IndexDistributionBuilder(BaseSheetBuilder):
             current_chart_row += chart_row_span + row_gap
 
             # === 全部母牛图表（右侧） ===
+            # 图表占用：横7列 + 空2列 = 从第10列开始（在条件外定义，避免后续使用时未定义）
+            right_chart_col = 1 + 7 + 2  # 左侧图表起始列(1) + 图表占用(7列) + 间隔(2列)
             if all_df is not None and not all_df.empty:
                 current_chart_row_right = chart_start_row
-                # 图表占用：横7列 + 空2列 = 从第10列开始
-                right_chart_col = 1 + 7 + 2  # 左侧图表起始列(1) + 图表占用(7列) + 间隔(2列)
                 right_data_col = right_start_col  # 全部母牛数据的起始列
 
                 # 饼图

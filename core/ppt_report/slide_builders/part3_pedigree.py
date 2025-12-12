@@ -34,6 +34,17 @@ class Part3PedigreeBuilder(BaseSlideBuilder):
         logger.info("开始构建Part 3: 系谱分析")
         logger.info("=" * 60)
 
+        # 检查数据是否为空
+        df = data.get("pedigree_analysis")
+        if df is None or df.empty:
+            logger.warning("pedigree_analysis 数据为空，标记Part3页面待删除")
+            slides_to_delete = [
+                self.SECTION_SLIDE_INDEX,
+                self.SUMMARY_SLIDE_INDEX
+            ]
+            self.mark_slides_for_deletion(slides_to_delete)
+            return
+
         # 章节页（Slide 7）模板已就绪，这里暂不做动态修改
         self._fill_summary_slide(data)
         logger.info("✓ Part 3 模板页更新完成")

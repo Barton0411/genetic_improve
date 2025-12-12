@@ -17,7 +17,7 @@ import pandas as pd
 # 设置日志配置（可选）
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def upload_and_standardize_breeding_data(input_files: list[Path], project_path: Path, progress_callback=None) -> Path:
+def upload_and_standardize_breeding_data(input_files: list[Path], project_path: Path, progress_callback=None, source_system: str = "伊起牛") -> Path:
     """
     处理上传的配种记录数据并进行标准化。
 
@@ -25,6 +25,7 @@ def upload_and_standardize_breeding_data(input_files: list[Path], project_path: 
         input_files (list[Path]): 要上传的配种记录数据文件列表。
         project_path (Path): 当前项目的路径。
         progress_callback (callable, optional): 进度回调函数，用于更新进度条或显示信息。
+        source_system (str): 数据来源系统，可选值：伊起牛、慧牧云、优源-DC305
 
     返回:
         Path: 标准化后的配种记录数据文件路径。
@@ -83,13 +84,59 @@ def upload_and_standardize_breeding_data(input_files: list[Path], project_path: 
         logging.info(f"已上传并重命名配种记录文件至: {target_file}")
     print(f"[DEBUG-BREEDING-UPLOAD-5] 已上传配种记录文件至: {target_file}")
 
+    # 预检查：读取文件列名，检测是否缺少必需列
+    print(f"[DEBUG-BREEDING-UPLOAD-5.1] 开始预检查配种记录数据格式...")
+    try:
+        preview_df = pd.read_excel(target_file, nrows=5)  # 只读前5行用于检测列名
+        actual_columns = list(preview_df.columns)
+        print(f"[DEBUG-BREEDING-UPLOAD-5.2] 检测到的列名: {actual_columns}")
+
+        # 定义列名映射（与 processor.py 保持一致）
+        column_mappings = {
+            '耳号': ['耳号', '牛号', '母牛号', '母牛耳号', 'cow_id'],
+            '配种日期': ['配种日期', '配种时间', '授精日期', '授精时间', '事件日期', '日期'],
+            '冻精编号': ['冻精编号', '冻精号', '公牛号', '精液号', '备注'],
+            '冻精类型': ['冻精类型', '精液类型', '类型', '是否性控']
+        }
+
+        # 检查每个必需列是否存在（考虑别名）
+        missing_columns = []
+        for target_col, aliases in column_mappings.items():
+            found = any(alias in actual_columns for alias in aliases)
+            if not found:
+                missing_columns.append(target_col)
+
+        # 如果有缺失的必需列，给出友好提示
+        if missing_columns:
+            # 特别提示冻精类型列
+            if '冻精类型' in missing_columns:
+                hint_msg = '配种记录数据缺少"冻精类型"列\n\n'
+                hint_msg += '【重要提示】请在Excel文件中新建一列"冻精类型"，\n'
+                hint_msg += '并为每条配种记录填写对应的冻精类型：\n'
+                hint_msg += '  • 普通冻精\n'
+                hint_msg += '  • 性控冻精'
+            else:
+                hint_msg = f"配种记录数据缺少以下必需列: {', '.join(missing_columns)}"
+
+            print(f"[DEBUG-BREEDING-UPLOAD-5.4] 预检查发现缺失列: {missing_columns}")
+            logging.warning(hint_msg)
+            raise ValueError(hint_msg)
+
+        print(f"[DEBUG-BREEDING-UPLOAD-5.5] 预检查通过，所有必需列都存在")
+    except ValueError:
+        raise  # 重新抛出我们自己的 ValueError
+    except Exception as e:
+        print(f"[DEBUG-BREEDING-UPLOAD-5.6] 预检查时发生错误（将继续处理）: {e}")
+        # 预检查失败不阻止后续处理，让 processor.py 给出更详细的错误
+
     # 处理配种记录，传入母牛数据用于父号匹配
-    print("[DEBUG-BREEDING-UPLOAD-6] 开始处理配种记录数据...")
+    print(f"[DEBUG-BREEDING-UPLOAD-6] 开始处理配种记录数据..., source_system={source_system}")
     final_path = process_breeding_record_file(
         target_file,
         project_path,
         cow_df=cow_df,  # 传入母牛数据，用于匹配父号
-        progress_callback=progress_callback
+        progress_callback=progress_callback,
+        source_system=source_system  # 传递数据来源系统
     )
     
     if final_path is None or not final_path.exists():
@@ -101,7 +148,7 @@ def upload_and_standardize_breeding_data(input_files: list[Path], project_path: 
     return final_path
 
 
-def upload_and_standardize_cow_data(input_files: list[Path], project_path: Path, progress_callback=None) -> Path:
+def upload_and_standardize_cow_data(input_files: list[Path], project_path: Path, progress_callback=None, source_system: str = "伊起牛") -> Path:
     """
     处理上传的母牛数据并进行标准化，同时自动重新映射配种记录中的父号。
 
@@ -109,6 +156,7 @@ def upload_and_standardize_cow_data(input_files: list[Path], project_path: Path,
         input_files (list[Path]): 要上传的母牛数据文件列表。
         project_path (Path): 当前项目的路径。
         progress_callback (callable, optional): 进度回调函数，用于更新进度条或显示信息。
+        source_system (str): 数据来源系统，可选值：伊起牛、慧牧云、优源-DC305
 
     返回:
         Path: 标准化后的母牛数据文件路径。
@@ -219,14 +267,15 @@ def upload_and_standardize_cow_data(input_files: list[Path], project_path: Path,
 
     # 处理母牛数据
     try:
-        print("[DEBUG-UPLOAD-12] 开始处理母牛数据...")
+        print(f"[DEBUG-UPLOAD-12] 开始处理母牛数据..., source_system={source_system}")
         if progress_callback:
-            progress_callback(10, "开始处理母牛数据...")
-        
+            progress_callback(10, f"开始处理母牛数据（{source_system}系统）...")
+
         final_path = process_cow_data_file(
             target_file,
             project_path,
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            source_system=source_system  # 传递数据来源系统
         )
         
         print(f"[DEBUG-UPLOAD-13] 处理完成，得到结果路径: {final_path}")
@@ -308,7 +357,8 @@ def upload_and_standardize_cow_data(input_files: list[Path], project_path: Path,
                             raw_breeding_records_file,
                             project_path,
                             cow_df=cow_df,
-                            progress_callback=safe_progress_callback
+                            progress_callback=safe_progress_callback,
+                            source_system=source_system  # 传递数据来源系统
                         )
                         print("[DEBUG-UPLOAD-19] 配种记录中的父号映射已完成")
                     except Exception as e:

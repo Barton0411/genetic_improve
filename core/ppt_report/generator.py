@@ -153,6 +153,10 @@ class ExcelBasedPPTGenerator:
             current_progress += progress_per_part
             self._report_progress(progress_callback, "✓ Part 7 完成", 90)
 
+            # 4.5 清理空数据页面
+            self._report_progress(progress_callback, "正在清理空数据页面...", 90)
+            self._cleanup_empty_slides()
+
             # 5. 保存PPT (90-100%)
             self._report_progress(progress_callback, "正在保存PPT文件...", 90)
             output_path = self._save_presentation()
@@ -196,6 +200,9 @@ class ExcelBasedPPTGenerator:
 
         # 图表生成器
         self.chart_creator = ChartCreator()
+
+        # 跟踪所有 builder 实例（用于收集待删除的空数据页面）
+        self._builders = []
 
         # 预加载openpyxl workbook (data_only=True)
         # 这是耗时操作，约21秒，但只需加载一次
@@ -253,6 +260,42 @@ class ExcelBasedPPTGenerator:
             callback(message, progress)
         logger.info(f"[{progress}%] {message}")
 
+    def _cleanup_empty_slides(self):
+        """
+        统一删除所有标记为空数据的页面
+
+        收集所有 builder 标记的待删除页面，从后往前删除避免索引偏移
+        """
+        # 收集所有待删除的页面索引
+        all_indices = set()
+        for builder in self._builders:
+            if hasattr(builder, 'get_slides_to_delete'):
+                indices = builder.get_slides_to_delete()
+                if indices:
+                    all_indices.update(indices)
+                    logger.debug(f"{builder.__class__.__name__} 标记了 {len(indices)} 个页面待删除")
+
+        if not all_indices:
+            logger.info("没有空数据页面需要删除")
+            return
+
+        logger.info(f"开始清理空数据页面，共 {len(all_indices)} 个")
+
+        # 从后往前删除，避免索引偏移问题
+        for idx in sorted(all_indices, reverse=True):
+            try:
+                if idx < 0 or idx >= len(self.prs.slides):
+                    logger.warning(f"页面索引 {idx} 超出范围，跳过")
+                    continue
+                rId = self.prs.slides._sldIdLst[idx].rId
+                self.prs.part.drop_rel(rId)
+                del self.prs.slides._sldIdLst[idx]
+                logger.info(f"✓ 已删除空数据页面：第 {idx + 1} 页（索引{idx}）")
+            except Exception as e:
+                logger.warning(f"删除页面 {idx} 失败: {e}")
+
+        logger.info(f"✓ 空数据页面清理完成")
+
     # ==================== 各部分构建方法（占位） ====================
 
     def _build_part1_cover_and_toc(self):
@@ -276,6 +319,7 @@ class ExcelBasedPPTGenerator:
         logger.info("构建Part 2: 牧场概况")
         builder = Part2FarmOverviewBuilder(self.prs, self.chart_creator, self.farm_name)
         builder.build(data)
+        self._builders.append(builder)
 
     def _build_part3_pedigree(self, data: dict):
         """构建Part 3: 系谱分析"""
@@ -284,6 +328,7 @@ class ExcelBasedPPTGenerator:
         logger.info("构建Part 3: 系谱分析")
         builder = Part3PedigreeBuilder(self.prs, self.chart_creator, self.farm_name)
         builder.build(data)
+        self._builders.append(builder)
 
     def _build_part4_genetics(self, data: dict):
         """构建Part 4: 遗传评估"""
@@ -296,6 +341,7 @@ class ExcelBasedPPTGenerator:
 
         builder = Part4GeneticsBuilder(self.prs, self.chart_creator, self.farm_name)
         builder.build(data)
+        self._builders.append(builder)
 
     def _build_part5_breeding(self, data: dict):
         """构建Part 5: 配种记录分析"""
@@ -307,10 +353,12 @@ class ExcelBasedPPTGenerator:
         # 隐性基因分析（2页）
         genes_builder = Part5BreedingRecordsBuilder(self.prs, self.chart_creator, self.farm_name)
         genes_builder.build(data)
+        self._builders.append(genes_builder)
 
         # 近交分析（2页）
         inbreeding_builder = Part5InbreedingBuilder(self.prs, self.chart_creator, self.farm_name)
         inbreeding_builder.build(data)
+        self._builders.append(inbreeding_builder)
 
     def _build_part6_bulls(self, data: dict):
         """构建Part 6: 公牛使用"""
@@ -327,14 +375,17 @@ class ExcelBasedPPTGenerator:
         # 已用公牛性状汇总表（1页）
         bulls_builder = Part6BullsUsageBuilder(self.prs, self.chart_creator, self.farm_name)
         bulls_builder.build(data)
+        self._builders.append(bulls_builder)
 
         # 已用公牛明细（多页，每年一页）
         bulls_detail_builder = Part6BullsDetailBuilder(self.prs, self.chart_creator, self.farm_name)
         bulls_detail_builder.build(data)
+        self._builders.append(bulls_detail_builder)
 
         # 性状进展折线图（多页，每页2个图表）
         traits_trends_builder = Part6TraitsTrendsBuilder(self.prs, self.chart_creator, self.farm_name)
         traits_trends_builder.build(data)
+        self._builders.append(traits_trends_builder)
 
         # 配种记录时间线（2页：全部记录、近一年）
         # 优化：优先使用预导出的图片，避免加载data_only=False workbook（节省约20秒）
@@ -358,6 +409,7 @@ class ExcelBasedPPTGenerator:
             logger.info("✓ 检测到预导出的时间线图片，跳过加载data_only=False workbook（节省约20秒）")
 
         timeline_builder.build(data)
+        self._builders.append(timeline_builder)
 
     def _build_part7_mating(self, data: dict):
         """构建Part 7: 选配推荐"""
@@ -394,28 +446,34 @@ class ExcelBasedPPTGenerator:
         # 备选公牛排名分析（1页）
         ranking_builder = Part7CandidateBullsRankingBuilder(self.prs, self.farm_name)
         ranking_builder.build(data)
+        self._builders.append(ranking_builder)
 
         # 备选公牛-隐性基因分析（动态页数）
         from .slide_builders.part7_candidate_bulls_genes import Part7CandidateBullsGenesBuilder
         genes_builder = Part7CandidateBullsGenesBuilder(self.prs, self.farm_name)
         genes_builder.build(data)
+        self._builders.append(genes_builder)
 
         # 备选公牛-近交系数分析（动态页数）
         from .slide_builders.part7_candidate_bulls_inbreeding import Part7CandidateBullsInbreedingBuilder
         inbreeding_builder = Part7CandidateBullsInbreedingBuilder(self.prs, self.farm_name)
         inbreeding_builder.build(data)
+        self._builders.append(inbreeding_builder)
 
         # 选配推荐方案章节页（页172）
         from .slide_builders.part7_mating_section import Part7MatingSectionBuilder
         section_builder = Part7MatingSectionBuilder(self.prs, self.chart_creator, self.farm_name)
         section_builder.build(data)
+        self._builders.append(section_builder)
 
         # 个体选配推荐结果/选配统计摘要（页173）
         from .slide_builders.part7_mating_recommendation import Part7MatingRecommendationBuilder
         mating_rec_builder = Part7MatingRecommendationBuilder(self.prs, self.chart_creator, self.farm_name)
         mating_rec_builder.build(data)
+        self._builders.append(mating_rec_builder)
 
         # 项目总结建议（页174）
         from .slide_builders.part7_summary_suggestions import Part7SummaryBuilder
         summary_builder = Part7SummaryBuilder(self.prs, self.chart_creator, self.farm_name)
         summary_builder.build(data)
+        self._builders.append(summary_builder)

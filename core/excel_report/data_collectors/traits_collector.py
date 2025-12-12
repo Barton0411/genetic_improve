@@ -56,6 +56,15 @@ def collect_traits_data(analysis_folder: Path, project_folder: Path) -> dict:
         if detail_file.exists():
             detail_df = pd.read_excel(detail_file)
             logger.info(f"✓ 读取育种性状明细数据: {len(detail_df)}行")
+            # 确保 sex 列存在且正确填充（母牛数据默认为'母'）
+            if 'sex' not in detail_df.columns:
+                detail_df['sex'] = '母'
+                logger.info("  - sex列不存在，已创建并填充为'母'")
+            elif detail_df['sex'].isna().all() or (detail_df['sex'] == '').all():
+                detail_df['sex'] = '母'
+                logger.info("  - sex列全为空，已填充为'母'")
+            else:
+                detail_df['sex'] = detail_df['sex'].fillna('母')
         else:
             logger.warning(f"育种性状明细文件不存在: {detail_file}")
 

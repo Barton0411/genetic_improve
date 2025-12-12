@@ -5,6 +5,7 @@ from pathlib import Path
 import json
 import logging
 import re
+from PyQt6 import sip  # 用于检查 Qt 对象是否已被删除
 
 from PyQt6.QtCore import (
     Qt, QDir, QUrl, pyqtSignal, QThread, QTimer, QEvent
@@ -343,19 +344,20 @@ class DragDropArea(QFrame):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, username=None):
+    def __init__(self, username=None, login_type=None):
         try:
-            logging.info(f"MainWindow.__init__ started with username: {username}")
+            logging.info(f"MainWindow.__init__ started with username: {username}, login_type: {login_type}")
             super().__init__()
             logging.info("QMainWindow initialized")
-            
+
             # 设置窗口图标
             icon_path = Path(__file__).parent.parent / "icon.ico"
             if icon_path.exists():
                 self.setWindowIcon(QIcon(str(icon_path)))
-            
+
             self.settings = Settings()
             self.username = username
+            self.login_type = login_type  # 'yili' 或 'yqn'
             self.content_stack = QStackedWidget()
             self.selected_project_path = None
             self.templates_path = Path(__file__).parent.parent / "templates"
@@ -426,19 +428,10 @@ class MainWindow(QMainWindow):
                 self.inbreeding_page = QWidget()
                 logging.warning("Using placeholder for InbreedingPage")
             
-            logging.info("Setting up UI...")
-            self.setup_ui()
-            logging.info("UI setup completed")
-            # Delay database update until after window is shown
-            # self.check_and_update_database_on_startup()
-            # Note: _db_update_triggered is already initialized above
-            
-            logging.info("MainWindow.__init__ completed successfully")
-
             # 初始化表格引用
             self.semen_tables = {}
 
-            # 初始化对比牧场管理器
+            # 初始化对比牧场管理器（必须在 setup_ui 之前，因为 load_benchmark_farms 会在 setup_ui 中被调用）
             from core.benchmark import BenchmarkManager
             self.benchmark_manager = BenchmarkManager()
             self.selected_comparisons = []  # 已选择的对比牧场列表 [{farm_id, color}, ...]
@@ -454,6 +447,15 @@ class MainWindow(QMainWindow):
                 '#5F27CD',  # 紫色
                 '#00D2D3',  # 青绿
             ]
+
+            logging.info("Setting up UI...")
+            self.setup_ui()
+            logging.info("UI setup completed")
+            # Delay database update until after window is shown
+            # self.check_and_update_database_on_startup()
+            # Note: _db_update_triggered is already initialized above
+
+            logging.info("MainWindow.__init__ completed successfully")
 
         except Exception as e:
             logging.exception(f"Error in MainWindow.__init__: {e}")
@@ -578,8 +580,11 @@ class MainWindow(QMainWindow):
         nav_layout.setSpacing(0)
         
         # 修改导航项结构，使用嵌套列表表示父子关系
-        nav_items = [
-            ("伊起牛牧场数据对接", "platform", []),  # 新增：数据平台对接
+        nav_items = []
+        # 只有伊起牛账号登录才显示"伊起牛牧场数据对接"
+        if self.login_type == "yqn":
+            nav_items.append(("伊起牛牧场数据对接", "platform", []))
+        nav_items.extend([
             ("育种项目管理", "folder", []),
             ("数据上传", "upload", []),
             ("关键育种性状分析", "chart", []),
@@ -587,7 +592,7 @@ class MainWindow(QMainWindow):
             ("近交系数及隐性基因分析", "analysis", []),
             ("个体选配", "match", []),
             ("自动化生成", "report", [])
-        ]
+        ])
 
         self.nav_list = QListWidget()
         self.nav_list.setStyleSheet("""
@@ -1247,6 +1252,21 @@ class MainWindow(QMainWindow):
             self.file_system_model.setRootPath(folder)
             self.file_tree.setRootIndex(self.file_system_model.index(folder))
 
+    def _show_data_source_dialog(self) -> str:
+        """
+        弹出数据源选择对话框
+
+        Returns:
+            选择的数据源名称，取消返回None
+        """
+        items = ["伊起牛", "慧牧云", "优源-DC305"]
+        item, ok = QInputDialog.getItem(
+            self, "选择数据系统",
+            "请选择您的数据来源系统：",
+            items, 0, False
+        )
+        return item if ok else None
+
     def on_nav_item_changed(self, index):
         current_item = self.nav_list.item(index)
         if current_item:
@@ -1258,6 +1278,24 @@ class MainWindow(QMainWindow):
             elif text == "育种项目管理":
                 self.content_stack.setCurrentIndex(1)  # 项目管理
             elif text == "数据上传":
+                # 强制选择数据源
+                source = self._show_data_source_dialog()
+                if source is None:
+                    # 用户取消，恢复之前的导航项
+                    self.nav_list.blockSignals(True)
+                    # 找到之前选中的项并选中它
+                    for i in range(self.nav_list.count()):
+                        item = self.nav_list.item(i)
+                        if item and item.isSelected() and item != current_item:
+                            self.nav_list.setCurrentItem(item)
+                            break
+                    self.nav_list.blockSignals(False)
+                    return
+                # 设置选择的数据源
+                if hasattr(self, 'system_type_combo'):
+                    self.system_type_combo.setCurrentText(source)
+                if hasattr(self, 'system_type_label'):
+                    self.system_type_label.setText(f"当前数据系统: {source}")
                 self.content_stack.setCurrentIndex(2)  # 数据上传
             elif text == "关键育种性状分析":
                 self.content_stack.setCurrentIndex(3)  # 性状分析
@@ -1306,6 +1344,37 @@ class MainWindow(QMainWindow):
             cell_widget = self.create_upload_cell(display_name, template_file)
             cell_widget.setProperty("display_name", display_name)  # 设置 display_name 属性
             layout.addWidget(cell_widget, row, col)
+
+        # 添加系统类型状态显示（放在右下角 (2, 1) 位置）
+        system_status_widget = QWidget()
+        system_status_layout = QVBoxLayout(system_status_widget)
+        system_status_layout.setContentsMargins(10, 10, 10, 10)
+
+        # 使用标签显示当前系统（只读状态）
+        self.system_type_label = QLabel("当前数据系统: 伊起牛")  # 默认值
+        self.system_type_label.setStyleSheet("""
+            QLabel {
+                padding: 8px 12px;
+                font-size: 14px;
+                font-weight: bold;
+                color: #2980b9;
+                background-color: rgba(236, 240, 241, 0.9);
+                border: 1px solid #bdc3c7;
+                border-radius: 5px;
+            }
+        """)
+        self.system_type_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # 为了兼容性，保留 system_type_combo 作为隐藏的数据存储
+        self.system_type_combo = QComboBox()
+        self.system_type_combo.addItems(["伊起牛", "慧牧云", "优源-DC305"])
+        self.system_type_combo.setCurrentText("伊起牛")
+        self.system_type_combo.hide()  # 隐藏下拉框，只用于数据存储
+
+        system_status_layout.addStretch()
+        system_status_layout.addWidget(self.system_type_label)
+
+        layout.addWidget(system_status_widget, 2, 1)
 
         self.content_stack.addWidget(page)
     
@@ -1589,6 +1658,13 @@ class MainWindow(QMainWindow):
             print("[DEBUG-MAIN-ERROR] 未提供文件路径")
             return
 
+        # 存储当前上传的文件路径（用于错误处理时打开文件）
+        self._current_upload_file = file_paths[0] if file_paths else None
+
+        # 获取当前选择的数据来源系统
+        source_system = self.system_type_combo.currentText() if hasattr(self, 'system_type_combo') else "伊起牛"
+        print(f"[DEBUG-MAIN-1.5] 数据来源系统: {source_system}")
+
         # 根据 display_name 来选择不同的处理逻辑
         try:
             if display_name == "母牛数据":
@@ -1599,23 +1675,26 @@ class MainWindow(QMainWindow):
                 self.progress_dialog.show()
                 print("[DEBUG-MAIN-3] 创建进度对话框")
 
-                self.thread = QThread()
-                self.worker = CowDataWorker(file_paths, self.selected_project_path)
-                self.worker.moveToThread(self.thread)
+                # 清理之前的线程（如果存在）
+                self._cleanup_thread('cow_thread', 'worker')
+
+                self.cow_thread = QThread(self)  # 设置parent确保正确的生命周期管理
+                self.worker = CowDataWorker(file_paths, self.selected_project_path, source_system)
+                self.worker.moveToThread(self.cow_thread)
                 print("[DEBUG-MAIN-4] 创建worker和线程")
 
                 # 连接信号与槽
-                self.thread.started.connect(self.worker.run)
+                self.cow_thread.started.connect(self.worker.run)
                 self.worker.progress.connect(self.progress_dialog.update_progress)
                 self.worker.message.connect(self.progress_dialog.update_info)
                 self.worker.finished.connect(self.on_worker_finished)
-                self.worker.finished.connect(self.thread.quit)
+                self.worker.finished.connect(self.cow_thread.quit)
                 self.worker.finished.connect(self.worker.deleteLater)
-                self.thread.finished.connect(self.thread.deleteLater)
+                self.cow_thread.finished.connect(self.cow_thread.deleteLater)
                 self.worker.error.connect(self.on_worker_error)
                 print("[DEBUG-MAIN-5] 连接信号槽")
 
-                self.thread.start()
+                self.cow_thread.start()
                 print("[DEBUG-MAIN-6] 线程已启动")
             elif display_name == "配种记录":
                 print("[DEBUG-MAIN-7] 处理配种记录上传")
@@ -1630,10 +1709,13 @@ class MainWindow(QMainWindow):
                 self.progress_dialog = ProgressDialog(self)
                 self.progress_dialog.set_task_info("上传并处理配种记录")
                 self.progress_dialog.show()
-                
+
+                # 清理之前的线程（如果存在）
+                self._cleanup_thread('breeding_thread', 'breeding_worker')
+
                 # 创建线程处理配种记录
-                self.breeding_thread = QThread()
-                self.breeding_worker = BreedingDataWorker(file_paths, self.selected_project_path)
+                self.breeding_thread = QThread(self)  # 设置parent确保正确的生命周期管理
+                self.breeding_worker = BreedingDataWorker(file_paths, self.selected_project_path, source_system)
                 self.breeding_worker.moveToThread(self.breeding_thread)
                 
                 # 连接信号与槽
@@ -1654,7 +1736,10 @@ class MainWindow(QMainWindow):
                 self.progress_dialog.set_task_info("上传并处理基因组检测数据")
                 self.progress_dialog.show()
 
-                self.genomic_thread = QThread()
+                # 清理之前的线程（如果存在）
+                self._cleanup_thread('genomic_thread', 'genomic_worker')
+
+                self.genomic_thread = QThread(self)  # 设置parent确保正确的生命周期管理
                 self.genomic_worker = GenomicDataWorker(file_paths, self.selected_project_path)
                 self.genomic_worker.moveToThread(self.genomic_thread)
 
@@ -1722,33 +1807,101 @@ class MainWindow(QMainWindow):
         self.progress_dialog.close()
         QMessageBox.information(self, "成功", f"母牛数据已成功上传并标准化，标准化文件路径：{final_path}")
 
+    def _is_thread_valid_and_running(self, thread_attr: str) -> bool:
+        """安全检查线程是否有效且正在运行"""
+        if not hasattr(self, thread_attr):
+            return False
+        thread = getattr(self, thread_attr)
+        if thread is None:
+            return False
+        # 使用 sip.isdeleted 检查 C++ 对象是否已被删除
+        if sip.isdeleted(thread):
+            return False
+        try:
+            return thread.isRunning()
+        except RuntimeError:
+            return False
+
+    def _cleanup_thread(self, thread_attr: str, worker_attr: str = None):
+        """安全地清理线程和worker"""
+        # 清理线程
+        if self._is_thread_valid_and_running(thread_attr):
+            thread = getattr(self, thread_attr)
+            thread.quit()
+            thread.wait(500)  # 等待线程结束
+
+        # 将引用设为None，让GC回收
+        if hasattr(self, thread_attr):
+            setattr(self, thread_attr, None)
+        if worker_attr and hasattr(self, worker_attr):
+            setattr(self, worker_attr, None)
+
     def on_worker_error(self, error_message: str):
         """处理 Worker 发生错误的信号"""
         print(f"[DEBUG-MAIN-ERROR] Worker错误: {error_message}")
-        
-        # 使用try-except包装，避免因线程已删除导致的崩溃
-        try:
-            # 先停止所有可能正在运行的线程
-            if hasattr(self, 'thread') and self.thread and self.thread.isRunning():
-                self.thread.quit()
-                self.thread.wait(100)  # 最多等待100ms
-                
-            if hasattr(self, 'breeding_thread') and self.breeding_thread and self.breeding_thread.isRunning():
-                self.breeding_thread.quit()
-                self.breeding_thread.wait(100)  # 最多等待100ms
-                
-            if hasattr(self, 'genomic_thread') and self.genomic_thread and self.genomic_thread.isRunning():
-                self.genomic_thread.quit()
-                self.genomic_thread.wait(100)  # 最多等待100ms
-        except RuntimeError as e:
-            print(f"[DEBUG-MAIN-ERROR] 停止线程时出错: {e}")
-        
+
+        # 安全停止所有可能正在运行的线程
+        for thread_attr in ['cow_thread', 'breeding_thread', 'genomic_thread']:
+            if self._is_thread_valid_and_running(thread_attr):
+                try:
+                    thread = getattr(self, thread_attr)
+                    thread.quit()
+                    thread.wait(100)  # 最多等待100ms
+                except RuntimeError as e:
+                    print(f"[DEBUG-MAIN-ERROR] 停止 {thread_attr} 时出错: {e}")
+
         # 然后关闭进度对话框
         if hasattr(self, 'progress_dialog') and self.progress_dialog:
             self.progress_dialog.close()
-            
-        # 显示错误消息
-        QMessageBox.critical(self, "错误", f"上传或标准化数据时发生错误：\n{error_message}")
+
+        # 简化错误消息（去掉技术细节）
+        simple_message = self._simplify_error_message(error_message)
+
+        # 检查是否有可打开的文件
+        file_path = getattr(self, '_current_upload_file', None)
+
+        if file_path and file_path.exists():
+            # 询问用户是否打开文件修改
+            reply = QMessageBox.question(
+                self, "数据问题",
+                f"{simple_message}\n\n是否打开文件进行修改？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                # 用系统默认程序打开文件
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(file_path)))
+        else:
+            # 没有文件路径，直接显示错误消息
+            QMessageBox.warning(self, "数据问题", simple_message)
+
+    def _simplify_error_message(self, error_message: str) -> str:
+        """简化错误消息，去掉技术细节，让用户更容易理解"""
+        # 处理缺少列的错误
+        if "缺少" in error_message and "列" in error_message:
+            # 提取缺少的列名
+            import re
+            # 匹配 "缺少'xxx'列" 或 "缺少以下必需列: xxx"
+            if "'冻精类型'" in error_message or "冻精类型" in error_message:
+                return "配种记录缺少「冻精类型」列\n\n请打开文件添加该列，填写「普通冻精」或「性控冻精」"
+
+            # 通用缺少列消息
+            match = re.search(r'缺少.*?[:：]?\s*(.+?)(?:\n|$)', error_message)
+            if match:
+                missing = match.group(1).strip()
+                return f"数据文件缺少必需的列：{missing}\n\n请打开文件添加缺少的列"
+
+        # 其他错误，返回简化版本
+        # 如果消息太长，截取前100个字符
+        if len(error_message) > 150:
+            # 找到第一个换行符或句号
+            for sep in ['\n', '。', '.']:
+                idx = error_message.find(sep)
+                if 0 < idx < 150:
+                    return error_message[:idx]
+            return error_message[:150] + "..."
+
+        return error_message
 
     def create_upload_cell(self, display_name: str, template_file: str):
         frame = QFrame()

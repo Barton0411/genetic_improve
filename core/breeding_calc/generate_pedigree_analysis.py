@@ -31,6 +31,10 @@ def generate_pedigree_analysis_result(project_path: Path) -> bool:
 
         df = pd.read_excel(detail_file)
 
+        # 处理 sex 字段：空值默认为 '母'
+        if 'sex' in df.columns:
+            df['sex'] = df['sex'].fillna('母')
+
         # 只保留母牛（排除公牛）
         df = df[df['sex'] == '母'].copy()
 

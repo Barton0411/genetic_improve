@@ -44,6 +44,14 @@ class Part6TimelineBuilder(BaseSlideBuilder):
             logger.error("excel_path 未找到，跳过配种记录时间线")
             return False
 
+        # 查找"配种记录时间线"页面
+        logger.info(f"开始查找包含'配种记录时间线'的页面，模板共{len(self.prs.slides)}页")
+        target_slides = self.find_slides_by_text("配种记录时间线", start_index=0)
+
+        if len(target_slides) < 2:
+            logger.error(f"❌ 未找到足够的配种记录时间线页面（需要2页，实际{len(target_slides)}页），跳过")
+            return False
+
         # 优先查找预导出的时间线图片（在Excel生成阶段已导出到analysis_results）
         pregenerated_images = self._find_pregenerated_images(excel_path)
 
@@ -62,10 +70,13 @@ class Part6TimelineBuilder(BaseSlideBuilder):
                 logger.info(f"✓ 从Excel中提取到 {len(images)} 个图片")
             except Exception as e:
                 logger.error(f"提取Excel图片失败: {e}")
+                # 提取失败，标记页面待删除
+                self.mark_slides_for_deletion(target_slides)
                 return False
 
             if len(images) < 2:
-                logger.warning(f"Excel中图片数量不足（需要2个，实际{len(images)}个），跳过配种记录时间线")
+                logger.warning(f"Excel中图片数量不足（需要2个，实际{len(images)}个），标记页面待删除")
+                self.mark_slides_for_deletion(target_slides)
                 return False
 
             # 导出图片到临时文件
@@ -73,14 +84,6 @@ class Part6TimelineBuilder(BaseSlideBuilder):
             image_all_path = self._export_image_to_file(images[0], temp_dir / "timeline_all.png")
             image_recent_path = self._export_image_to_file(images[1], temp_dir / "timeline_recent.png") if len(images) > 1 else None
             used_pregenerated = False
-
-        # 查找"配种记录时间线"页面
-        logger.info(f"开始查找包含'配种记录时间线'的页面，模板共{len(self.prs.slides)}页")
-        target_slides = self.find_slides_by_text("配种记录时间线", start_index=0)
-
-        if len(target_slides) < 2:
-            logger.error(f"❌ 未找到足够的配种记录时间线页面（需要2页，实际{len(target_slides)}页），跳过")
-            return not used_pregenerated
 
         logger.info(f"✓ 找到 {len(target_slides)} 个配种记录时间线页面")
 

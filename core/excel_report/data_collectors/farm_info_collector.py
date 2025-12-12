@@ -119,6 +119,13 @@ def _collect_herd_structure(project_folder: Path) -> dict:
     try:
         df = pd.read_excel(cow_data_path)
 
+        # 确保sex列正确填充（处理全NaN的情况，母牛数据默认为'母'）
+        if 'sex' in df.columns:
+            if df['sex'].isna().all():
+                df['sex'] = '母'
+            else:
+                df['sex'] = df['sex'].fillna('母')
+
         # 筛选在场母牛（同时筛选性别和是否在场）
         if '是否在场' in df.columns and 'sex' in df.columns:
             df_active = df[(df['是否在场'] == '是') & (df['sex'] == '母')].copy()

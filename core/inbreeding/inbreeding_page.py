@@ -2372,30 +2372,34 @@ class InbreedingPage(QWidget):
             logging.error(f"数据库连接失败: {e}")
             return False
 
-    def collect_required_bulls(self, analysis_type: str, project_path: Path) -> Set[str]:
+    def collect_required_bulls(self, analysis_type: str, project_path: Path) -> Tuple[Set[str], Dict[str, str]]:
         """收集需要查询的公牛号并转换为标准REG格式
-        
+
         Args:
             analysis_type: 分析类型 ('mated' 或 'candidate')
             project_path: 项目路径
-            
+
         Returns:
-            需要查询的公牛号集合 (已转换为REG格式)
+            Tuple[Set[str], Dict[str, str]]:
+                - 需要查询的公牛号集合 (已转换为REG格式)
+                - 公牛来源字典 {公牛号: 来源}，来源为 'sire'(母牛系谱) / 'breeding'(配种记录) / 'candidate'(备选公牛)
         """
         required_bulls_original = set()
         required_bulls_standardized = set()
+        bull_sources = {}  # 记录每个公牛的来源
+
         try:
             # 获取系谱库实例用于ID转换
             from core.data.update_manager import get_pedigree_db
             pedigree_db = get_pedigree_db()
-            
+
             # 获取母牛父号
             cow_file = project_path / "standardized_data" / "processed_cow_data.xlsx"
             cow_df = pd.read_excel(cow_file)
             if analysis_type == 'candidate':
                 # 备选公牛分析只考虑在群的母牛
                 cow_df = cow_df[cow_df['是否在场'] == '是']
-                
+
             # 收集并标准化母牛父号
             sire_ids = cow_df['sire'].dropna().astype(str).unique()
             for sire_id in sire_ids:
@@ -2404,9 +2408,10 @@ class InbreedingPage(QWidget):
                     standardized_id = pedigree_db.standardize_animal_id(sire_id, 'bull')
                     if standardized_id:
                         required_bulls_standardized.add(standardized_id)
+                        bull_sources[standardized_id] = 'sire'  # 母牛系谱
                     if sire_id != standardized_id:
                         print(f"父号转换: {sire_id} -> {standardized_id}")
-            
+
             # 获取公牛号
             if analysis_type == 'mated':
                 # 从配种记录获取已配公牛
@@ -2419,6 +2424,7 @@ class InbreedingPage(QWidget):
                         standardized_id = pedigree_db.standardize_animal_id(bull_id, 'bull')
                         if standardized_id:
                             required_bulls_standardized.add(standardized_id)
+                            bull_sources[standardized_id] = 'breeding'  # 配种记录
                         if bull_id != standardized_id:
                             print(f"配种公牛号转换: {bull_id} -> {standardized_id}")
             else:
@@ -2432,23 +2438,24 @@ class InbreedingPage(QWidget):
                         standardized_id = pedigree_db.standardize_animal_id(bull_id, 'bull')
                         if standardized_id:
                             required_bulls_standardized.add(standardized_id)
+                            bull_sources[standardized_id] = 'candidate'  # 备选公牛
                         if bull_id != standardized_id:
                             print(f"备选公牛号转换: {bull_id} -> {standardized_id}")
-                
+
             # 打印标准化结果
             original_count = len(required_bulls_original)
             standardized_count = len(required_bulls_standardized)
             print(f"收集到{original_count}个原始公牛ID，标准化后得到{standardized_count}个REG格式ID")
             if original_count > standardized_count:
                 print(f"有{original_count - standardized_count}个ID转换为空或重复")
-                
+
             # 移除空字符串
             required_bulls_standardized = {bull for bull in required_bulls_standardized if bull and bull.strip()}
-            return required_bulls_standardized
-            
+            return required_bulls_standardized, bull_sources
+
         except Exception as e:
             logging.error(f"收集公牛号时发生错误: {e}")
-            return required_bulls_standardized
+            return required_bulls_standardized, bull_sources
 
     def query_bull_genes(self, bull_ids: Set[str]) -> Tuple[Dict, List[str]]:
         """查询公牛基因信息
@@ -2557,8 +2564,14 @@ class InbreedingPage(QWidget):
             logging.error(f"SQL语句: {query}")
             return {}, list(bull_ids)
 
-    def process_missing_bulls(self, missing_bulls: List[str], analysis_type: str) -> None:
-        """处理缺失公牛记录"""
+    def process_missing_bulls(self, missing_bulls: List[str], analysis_type: str, bull_sources: Dict[str, str] = None) -> None:
+        """处理缺失公牛记录
+
+        Args:
+            missing_bulls: 缺失的公牛ID列表
+            analysis_type: 分析类型 ('mated' 或 'candidate')
+            bull_sources: 公牛来源字典 {公牛号: 来源}，来源为 'sire'/'breeding'/'candidate'
+        """
         print("\n========== [检查点-近交] 缺失公牛上传流程开始 ==========")
 
         if not missing_bulls:
@@ -2606,20 +2619,98 @@ class InbreedingPage(QWidget):
             else:
                 print("[检查点-近交] ❌ 数据API客户端未安装，无法上传缺失公牛记录")
                 logging.error("无法上传缺失公牛记录：API客户端未安装")
-            
+
             # 提示用户
             print("[检查点-近交] 警告：在本地数据库中未找到公牛基因信息，涉及这些公牛的配对将显示为'缺少公牛信息'")
             print("[检查点-近交] 请确保本地数据库已更新，或者联系管理员添加这些公牛的基因信息")
             logging.warning(f"在本地数据库中未找到{len(missing_bulls)}个公牛的基因信息，涉及这些公牛的配对将显示为'缺少公牛信息'")
 
-            # 显示消息框提醒用户
-            QMessageBox.warning(
-                self,
-                "公牛基因信息缺失",
-                f"在本地数据库中未找到{len(missing_bulls)}个公牛的基因信息，\n"
-                f"涉及这些公牛的配对将在隐性基因分析中显示为'缺少公牛信息'。\n\n"
-                f"请确保本地数据库已更新，或者联系管理员添加这些公牛的基因信息。"
+            # 按来源分类缺失公牛
+            sire_bulls = []      # 母牛系谱中的父亲
+            breeding_bulls = []  # 配种记录中的公牛
+            candidate_bulls = [] # 备选公牛库中的公牛
+            unknown_bulls = []   # 未知来源
+
+            if bull_sources:
+                for bull_id in missing_bulls:
+                    source = bull_sources.get(bull_id, 'unknown')
+                    if source == 'sire':
+                        sire_bulls.append(bull_id)
+                    elif source == 'breeding':
+                        breeding_bulls.append(bull_id)
+                    elif source == 'candidate':
+                        candidate_bulls.append(bull_id)
+                    else:
+                        unknown_bulls.append(bull_id)
+            else:
+                # 如果没有来源信息，全部归为未知
+                unknown_bulls = list(missing_bulls)
+
+            # 使用可滚动的对话框显示完整公牛列表
+            from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QTextEdit, QPushButton
+            from PyQt6.QtCore import Qt
+
+            dialog = QDialog(self)
+            dialog.setWindowTitle("公牛基因信息缺失")
+            dialog.setMinimumWidth(550)
+            dialog.setMinimumHeight(400)
+
+            layout = QVBoxLayout(dialog)
+
+            # 标题信息
+            title_label = QLabel(
+                f"在本地数据库中未找到 {len(missing_bulls)} 个公牛的基因信息，\n"
+                f"涉及这些公牛的配对将在隐性基因分析中显示为'缺少公牛信息'。"
             )
+            title_label.setWordWrap(True)
+            layout.addWidget(title_label)
+
+            # 构建分类显示的文本
+            detail_text = ""
+
+            if analysis_type == 'mated':
+                # 已配公牛分析：显示配种记录和系谱
+                if breeding_bulls:
+                    detail_text += f"【配种记录中的缺失公牛】（{len(breeding_bulls)}个）\n"
+                    detail_text += '、'.join(breeding_bulls) + "\n\n"
+                if sire_bulls:
+                    detail_text += f"【母牛系谱中的缺失公牛（父亲）】（{len(sire_bulls)}个）\n"
+                    detail_text += '、'.join(sire_bulls) + "\n\n"
+            else:
+                # 备选公牛分析：显示备选公牛和系谱
+                if candidate_bulls:
+                    detail_text += f"【备选公牛库中的缺失公牛】（{len(candidate_bulls)}个）\n"
+                    detail_text += '、'.join(candidate_bulls) + "\n\n"
+                if sire_bulls:
+                    detail_text += f"【母牛系谱中的缺失公牛（父亲）】（{len(sire_bulls)}个）\n"
+                    detail_text += '、'.join(sire_bulls) + "\n\n"
+
+            if unknown_bulls:
+                detail_text += f"【其他缺失公牛】（{len(unknown_bulls)}个）\n"
+                detail_text += '、'.join(unknown_bulls) + "\n"
+
+            # 公牛列表（可滚动）
+            list_label = QLabel("缺失公牛明细：")
+            layout.addWidget(list_label)
+
+            text_edit = QTextEdit()
+            text_edit.setPlainText(detail_text.strip())
+            text_edit.setReadOnly(True)
+            text_edit.setMinimumHeight(180)
+            layout.addWidget(text_edit)
+
+            # 提示信息
+            hint_label = QLabel("请确保本地数据库已更新，或者联系管理员添加这些公牛的基因信息。")
+            hint_label.setWordWrap(True)
+            hint_label.setStyleSheet("color: #666; margin-top: 10px;")
+            layout.addWidget(hint_label)
+
+            # 确定按钮
+            ok_btn = QPushButton("确定")
+            ok_btn.clicked.connect(dialog.accept)
+            layout.addWidget(ok_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+            dialog.exec()
 
             print("========== [检查点-近交] 缺失公牛上传流程结束 ==========\n")
 
@@ -3294,7 +3385,7 @@ class InbreedingPage(QWidget):
                 
             # 收集所需的公牛号
             print("开始收集所需的公牛号...")
-            required_bulls = self.collect_required_bulls(analysis_type, project_path)
+            required_bulls, bull_sources = self.collect_required_bulls(analysis_type, project_path)
             print(f"收集到{len(required_bulls)}个公牛号")
             self.update_progress(30, "收集公牛号")
             QApplication.processEvents()
@@ -3317,7 +3408,7 @@ class InbreedingPage(QWidget):
             # 处理缺失的公牛记录
             if missing_bulls:
                 print(f"处理{len(missing_bulls)}个缺失的公牛记录...")
-                self.process_missing_bulls(missing_bulls, analysis_type)
+                self.process_missing_bulls(missing_bulls, analysis_type, bull_sources)
             
             # 根据分析类型执行不同的分析
             print(f"开始执行{analysis_type}类型的分析...")

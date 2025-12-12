@@ -43,14 +43,15 @@ class Part7MatingRecommendationBuilder(BaseSlideBuilder):
             logger.warning("未找到个体选配推荐结果页面（选配统计摘要），跳过")
             return
 
+        mating_data = data.get("mating_summary")
+        if not mating_data:
+            logger.warning("mating_summary 数据为空，标记页面待删除")
+            self.mark_slides_for_deletion(target_slides)
+            return
+
         slide_index = target_slides[0]
         slide = self.prs.slides[slide_index]
         logger.info(f"✓ 定位到第{slide_index + 1}页（选配统计摘要）")
-
-        mating_data = data.get("mating_summary")
-        if not mating_data:
-            logger.warning("mating_summary 数据为空，跳过个体选配推荐结果页")
-            return
 
         # 更新基础统计表格（左侧 4×2 表格）
         self._update_basic_stats_table(slide, mating_data.get("basic_stats", {}))

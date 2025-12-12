@@ -43,13 +43,6 @@ class Part5InbreedingBuilder(BaseSlideBuilder):
             return
 
         df_inbreeding = data_collector.get_raw_sheet("配种记录-近交系数分析", header=None)
-        if df_inbreeding is None:
-            logger.error("配种记录-近交系数分析Sheet读取失败")
-            return
-
-        if df_inbreeding.empty:
-            logger.warning("breeding_inbreeding 数据为空DataFrame，跳过近交分析")
-            return
 
         # 查找标题为"配种记录分析-近交分析"的页面，应该有2个
         logger.info(f"开始查找包含'配种记录分析-近交分析'的页面，模板共{len(self.prs.slides)}页")
@@ -57,6 +50,12 @@ class Part5InbreedingBuilder(BaseSlideBuilder):
 
         if len(target_slides) == 0:
             logger.error("❌ 未找到配种记录分析-近交分析页面，跳过近交分析")
+            return
+
+        # 检查数据是否为空，如果为空则标记页面待删除
+        if df_inbreeding is None or df_inbreeding.empty:
+            logger.warning("配种记录-近交系数分析数据为空，标记页面待删除")
+            self.mark_slides_for_deletion(target_slides)
             return
 
         if len(target_slides) < 2:

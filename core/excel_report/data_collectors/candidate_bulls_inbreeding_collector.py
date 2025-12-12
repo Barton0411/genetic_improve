@@ -90,6 +90,11 @@ def collect_candidate_bulls_inbreeding_data(analysis_folder: Path, project_folde
         # 提取需要的列（processed_cow_data使用cow_id作为列名）
         cow_info = cow_data[['cow_id', '是否在场', 'sex', 'lac']].copy()
         cow_info['cow_id'] = cow_info['cow_id'].astype(str)
+        # 确保sex列正确填充（处理全NaN的情况，母牛数据默认为'母'）
+        if cow_info['sex'].isna().all():
+            cow_info['sex'] = '母'
+        else:
+            cow_info['sex'] = cow_info['sex'].fillna('母')
 
         # 4. 合并数据（备选公牛文件使用母牛号，processed_cow_data使用cow_id）
         df['母牛号'] = df['母牛号'].astype(str)

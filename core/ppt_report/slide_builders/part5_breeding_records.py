@@ -42,18 +42,6 @@ class Part5BreedingRecordsBuilder(BaseSlideBuilder):
             return
 
         df_genes = data_collector.get_raw_sheet("配种记录-隐性基因分析", header=None)
-        if df_genes is None:
-            logger.error("配种记录-隐性基因分析Sheet读取失败")
-            return
-
-        if df_genes.empty:
-            logger.warning("breeding_genes 数据为空DataFrame，跳过 Part 5")
-            return
-
-        # 获取配种明细数据，用于统计总配次
-        df_detail = data.get("breeding_detail")
-        total_breeding_count = len(df_detail) if df_detail is not None else 0
-        logger.info(f"✓ 配种记录总数: {total_breeding_count} 配次")
 
         # 查找标题为"配种记录分析-隐性基因"的页面，应该有2个
         logger.info(f"开始查找包含'配种记录分析-隐性基因'的页面，模板共{len(self.prs.slides)}页")
@@ -63,6 +51,17 @@ class Part5BreedingRecordsBuilder(BaseSlideBuilder):
             logger.error("❌ 未找到配种记录分析-隐性基因页面，跳过 Part 5")
             logger.error("请检查PPT模板中是否存在标题为'配种记录分析-隐性基因'的页面")
             return
+
+        # 检查数据是否为空，如果为空则标记页面待删除
+        if df_genes is None or df_genes.empty:
+            logger.warning("配种记录-隐性基因分析数据为空，标记页面待删除")
+            self.mark_slides_for_deletion(target_slides)
+            return
+
+        # 获取配种明细数据，用于统计总配次
+        df_detail = data.get("breeding_detail")
+        total_breeding_count = len(df_detail) if df_detail is not None else 0
+        logger.info(f"✓ 配种记录总数: {total_breeding_count} 配次")
 
         if len(target_slides) < 2:
             logger.warning(f"⚠️ 只找到{len(target_slides)}个配种记录分析-隐性基因页面（索引: {target_slides}），预期2个")

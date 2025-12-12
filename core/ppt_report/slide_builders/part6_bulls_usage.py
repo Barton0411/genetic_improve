@@ -40,23 +40,26 @@ class Part6BullsUsageBuilder(BaseSlideBuilder):
             logger.error("excel_path 未找到，跳过使用公牛分析")
             return
 
-        try:
-            df_bulls = pd.read_excel(excel_path, sheet_name="已用公牛性状汇总", header=None)
-            logger.info(f"✓ 读取bulls_usage数据（无header）: {len(df_bulls)}行 x {len(df_bulls.columns)}列")
-        except Exception as e:
-            logger.error(f"读取已用公牛性状汇总Sheet失败: {e}")
-            return
-
-        if df_bulls.empty:
-            logger.warning("bulls_usage 数据为空DataFrame，跳过使用公牛分析")
-            return
-
         # 查找"配种记录分析-使用公牛分析"页面（只处理第一页：汇总表）
         logger.info(f"开始查找包含'配种记录分析-使用公牛分析'的页面，模板共{len(self.prs.slides)}页")
         target_slides = self.find_slides_by_text("配种记录分析-使用公牛分析", start_index=0, max_count=1)
 
         if len(target_slides) == 0:
             logger.error("❌ 未找到配种记录分析-使用公牛分析页面，跳过")
+            return
+
+        try:
+            df_bulls = pd.read_excel(excel_path, sheet_name="已用公牛性状汇总", header=None)
+            logger.info(f"✓ 读取bulls_usage数据（无header）: {len(df_bulls)}行 x {len(df_bulls.columns)}列")
+        except Exception as e:
+            logger.error(f"读取已用公牛性状汇总Sheet失败: {e}")
+            # 数据读取失败，标记页面待删除
+            self.mark_slides_for_deletion(target_slides)
+            return
+
+        if df_bulls.empty:
+            logger.warning("bulls_usage 数据为空DataFrame，标记页面待删除")
+            self.mark_slides_for_deletion(target_slides)
             return
 
         logger.info(f"✓ 找到目标页面: 第{target_slides[0]+1}页")

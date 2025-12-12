@@ -886,6 +886,27 @@ def format_naab_number(naab_number):
     errors = []
     naab_number = str(naab_number).strip()
 
+    # 0. 去除开头和结尾的特殊标记（不区分大小写，同时处理前后缀）
+    # 长的标记放前面优先匹配，避免 X 误匹配 XK
+    prefixes_to_remove = ['XK', 'SEX', '性控', 'P', 'X', 'S', '性', '普']
+    suffixes_to_remove = ['XK', 'SEX', '性控', 'P', 'X', 'S', '性', '普']
+
+    # 去除前缀
+    naab_upper = naab_number.upper()
+    for prefix in prefixes_to_remove:
+        if naab_upper.startswith(prefix.upper()):
+            naab_number = naab_number[len(prefix):]
+            break
+
+    # 去除后缀（前缀去除后继续检查后缀）
+    naab_upper = naab_number.upper()
+    for suffix in suffixes_to_remove:
+        if naab_upper.endswith(suffix.upper()):
+            naab_number = naab_number[:-len(suffix)]
+            break
+
+    naab_number = naab_number.strip()  # 再次去除可能的空格
+
     # 1. 检查NAAB号长度是否超过15位
     if len(naab_number) > 15:
         errors.append(f"NAAB号长度超过15位: {naab_number}")
@@ -943,35 +964,135 @@ def format_naab_number(naab_number):
 
     return formatted_naab if not errors else None, errors
 
-def preprocess_cow_data(cow_df, progress_callback=None):
+def preprocess_cow_data(cow_df, progress_callback=None, source_system: str = "伊起牛"):
     """
     预处理母牛数据
+
+    参数:
+        cow_df: 母牛数据DataFrame
+        progress_callback: 进度回调函数
+        source_system: 数据来源系统，可选值：伊起牛、慧牧云、优源-DC305
     """
-    print("[DEBUG-1] 开始预处理母牛数据，行数:", len(cow_df))
+    print(f"[DEBUG-1] 开始预处理母牛数据，行数: {len(cow_df)}, source_system={source_system}")
     try:
+        # 多系统列名映射（标准列名 -> 可能的原始列名列表）
+        column_aliases = {
+            "cow_id": ["耳号", "牛号"],  # 伊起牛+慧牧云用"耳号"，DC305用"牛号"
+            "breed": ["品种"],
+            "sex": ["性别"],
+            "sire": ["父亲号", "父号", "公牛号"],  # 伊起牛"父亲号"、慧牧云"父号"、DC305"公牛号"
+            "mgs": ["外祖父", "外祖父号"],  # 伊起牛+慧牧云"外祖父"、DC305"外祖父号"
+            "dam": ["母亲号", "母号", "母亲牛号"],  # 伊起牛"母亲号"、慧牧云"母号"、DC305"母亲牛号"
+            "mmgs": ["外曾外祖父"],
+            "lac": ["胎次"],
+            "calving_date": ["最近产犊日期", "产犊日期"],  # 伊起牛"最近产犊日期"、慧牧云+DC305"产犊日期"
+            "birth_date": ["牛只出生日期", "生日"],  # 伊起牛"牛只出生日期"、慧牧云+DC305"生日"
+            "age": ["月龄"],
+            "days_of_age": ["日龄"],  # DC305特有，用于计算月龄
+            "services_time": ["本胎次配次", "配次", "配种次数"],  # 伊起牛"本胎次配次"、慧牧云"配次"、DC305"配种次数"
+            "peak_milk": ["本胎次奶厅高峰产量"],
+            "milk_305": ["305奶量", "305ME"],  # 伊起牛+慧牧云"305奶量"、DC305"305ME"
+            "DIM": ["泌乳天数"],
+            "repro_status": ["繁育状态", "繁育代号"],  # 伊起牛+慧牧云"繁育状态"、DC305"繁育代号"
+        }
+
         # 替换表头中的中文列名为英文列名
         print("[DEBUG-2] 开始转换列名...")
-        column_mapping = {
-            "耳号": "cow_id",
-            "品种": "breed",
-            "性别": "sex",
-            "父亲号": "sire",
-            "外祖父": "mgs",
-            "母亲号": "dam",
-            "外曾外祖父": "mmgs",
-            "胎次": "lac",
-            "最近产犊日期": "calving_date",
-            "牛只出生日期": "birth_date",
-            "月龄": "age",
-            "本胎次配次": "services_time",
-            "本胎次奶厅高峰产量": "peak_milk",
-            "305奶量": "milk_305",
-            "泌乳天数": "DIM",
-            "繁育状态": "repro_status",
-        }
         print("[DEBUG-3] 原始列名:", cow_df.columns.tolist())
+
+        # 构建实际的列名映射（根据当前数据中存在的列名）
+        column_mapping = {}
+        for standard_name, aliases in column_aliases.items():
+            for alias in aliases:
+                if alias in cow_df.columns:
+                    column_mapping[alias] = standard_name
+                    break  # 找到第一个匹配的就停止
+
+        print(f"[DEBUG-3.1] 构建的列名映射: {column_mapping}")
         cow_df.rename(columns=column_mapping, inplace=True)
         print("[DEBUG-4] 转换后列名:", cow_df.columns.tolist())
+
+        # DC305 特殊数据清洗
+        if source_system == "优源-DC305":
+            print("[DEBUG-4.1] DC305特殊数据清洗...")
+            # 1. 所有字符串列去除尾部空格
+            for col in cow_df.columns:
+                if cow_df[col].dtype == 'object':
+                    cow_df[col] = cow_df[col].astype(str).str.strip()
+            # 2. '-' 视为空值
+            cow_df.replace('-', np.nan, inplace=True)
+            cow_df.replace('', np.nan, inplace=True)
+            # 3. 母亲牛号 0 视为空值（处理字符串和数值两种情况）
+            if 'dam' in cow_df.columns:
+                cow_df.loc[cow_df['dam'] == '0', 'dam'] = np.nan
+                cow_df.loc[cow_df['dam'] == '0.0', 'dam'] = np.nan
+                cow_df.loc[cow_df['dam'] == 0, 'dam'] = np.nan
+                cow_df.loc[cow_df['dam'] == 0.0, 'dam'] = np.nan
+            print("[DEBUG-4.1] DC305特殊数据清洗完成")
+
+        # 处理 sex 字段：空值默认为 '母'
+        if 'sex' in cow_df.columns:
+            empty_sex_count = cow_df['sex'].isna().sum()
+            if empty_sex_count > 0:
+                # 如果全是空值，直接赋值为'母'（避免float64类型fillna问题）
+                if empty_sex_count == len(cow_df):
+                    cow_df['sex'] = '母'
+                else:
+                    cow_df['sex'] = cow_df['sex'].fillna('母')
+                print(f"[DEBUG-4.2] sex字段有 {empty_sex_count} 个空值，已默认填充为 '母'")
+        else:
+            cow_df['sex'] = '母'
+            print("[DEBUG-4.2] sex字段不存在，已创建并填充为 '母'")
+
+        # 处理 breed 字段：空值默认为 '荷斯坦'
+        if 'breed' in cow_df.columns:
+            empty_breed_count = cow_df['breed'].isna().sum()
+            if empty_breed_count > 0:
+                cow_df['breed'] = cow_df['breed'].fillna('荷斯坦')
+                print(f"[DEBUG-4.3] breed字段有 {empty_breed_count} 个空值，已默认填充为 '荷斯坦'")
+        else:
+            cow_df['breed'] = '荷斯坦'
+            print("[DEBUG-4.3] breed字段不存在，已创建并填充为 '荷斯坦'")
+
+        # 处理 是否在场 字段：空值默认为 '是'
+        if '是否在场' in cow_df.columns:
+            empty_in_herd_count = cow_df['是否在场'].isna().sum()
+            empty_str_count = (cow_df['是否在场'] == '').sum()
+            total_empty = empty_in_herd_count + empty_str_count
+            if total_empty > 0:
+                cow_df['是否在场'] = cow_df['是否在场'].replace('', np.nan).fillna('是')
+                print(f"[DEBUG-4.4] 是否在场字段有 {total_empty} 个空值，已默认填充为 '是'")
+        else:
+            cow_df['是否在场'] = '是'
+            print("[DEBUG-4.4] 是否在场字段不存在，已创建并填充为 '是'")
+
+        # 处理 age（月龄）字段：从 days_of_age 或 birth_date 计算
+        if 'age' not in cow_df.columns:
+            cow_df['age'] = np.nan
+
+        # 优先使用 days_of_age（DC305特有）计算月龄
+        if 'days_of_age' in cow_df.columns:
+            print("[DEBUG-4.5] 使用日龄计算月龄...")
+            # 日龄转月龄: days_of_age / 30.44
+            cow_df['days_of_age'] = pd.to_numeric(cow_df['days_of_age'], errors='coerce')
+            mask = cow_df['age'].isna() & cow_df['days_of_age'].notna()
+            cow_df.loc[mask, 'age'] = (cow_df.loc[mask, 'days_of_age'] / 30.44).round(1)
+            calculated_count = mask.sum()
+            if calculated_count > 0:
+                print(f"[DEBUG-4.5] 从日龄计算了 {calculated_count} 条月龄数据")
+
+        # 其次使用 birth_date 计算月龄
+        if 'birth_date' in cow_df.columns:
+            print("[DEBUG-4.6] 检查是否需要从出生日期计算月龄...")
+            cow_df['birth_date'] = pd.to_datetime(cow_df['birth_date'], errors='coerce')
+            today = pd.Timestamp.now()
+            mask = cow_df['age'].isna() & cow_df['birth_date'].notna()
+            if mask.any():
+                cow_df.loc[mask, 'age'] = cow_df.loc[mask, 'birth_date'].apply(
+                    lambda bd: (today.year - bd.year) * 12 + (today.month - bd.month) if pd.notna(bd) else np.nan
+                )
+                calculated_count = mask.sum()
+                print(f"[DEBUG-4.6] 从出生日期计算了 {calculated_count} 条月龄数据")
 
         # 定义需要保留的列
         print("[DEBUG-5] 设置需要保留的列...")
@@ -1298,12 +1419,15 @@ def preprocess_cow_data(cow_df, progress_callback=None):
         raise ValueError(f"预处理母牛数据时出错: {e}")
 
 
-def process_cow_data_file(input_file: Path, project_path: Path, progress_callback=None) -> Path:
+def process_cow_data_file(input_file: Path, project_path: Path, progress_callback=None, source_system: str = "伊起牛") -> Path:
     """
     标准化母牛数据文件
+
+    参数:
+        source_system: 数据来源系统，可选值：伊起牛、慧牧云、优源-DC305
     """
     import logging
-    print("[DEBUG-FILE-1] 开始标准化母牛数据文件:", input_file)
+    print(f"[DEBUG-FILE-1] 开始标准化母牛数据文件: {input_file}, source_system={source_system}")
     # 将标准化后的文件存储到 standardized_data 文件夹
     standardized_path = project_path / "standardized_data"
     standardized_path.mkdir(parents=True, exist_ok=True)
@@ -1321,18 +1445,24 @@ def process_cow_data_file(input_file: Path, project_path: Path, progress_callbac
     # 读取文件
     try:
         # 在读取时指定数据类型，使用原始列名
-        print("[DEBUG-FILE-3] 开始读取母牛数据文件...")
-        logging.info("开始读取母牛数据文件...")
-        # 使用原始列名来指定dtype，确保前导零不会丢失
-        df = pd.read_excel(input_file, dtype={
-            '耳号': str,
-            '父亲号': str,
-            '母亲号': str,
-            '外祖父': str,
-            '外曾外祖父': str,
-            '祖父': str,
-            '与配冻精编号': str
-        })
+        print(f"[DEBUG-FILE-3] 开始读取母牛数据文件..., source_system={source_system}")
+        logging.info(f"开始读取母牛数据文件, source_system={source_system}")
+
+        # 根据数据来源系统选择dtype配置
+        if source_system == "慧牧云":
+            dtype_config = {
+                '耳号': str, '父号': str, '母号': str, '外祖父': str, '外曾外祖父': str
+            }
+        elif source_system == "优源-DC305":
+            dtype_config = {
+                '牛号': str, '公牛号': str, '母亲牛号': str, '外祖父号': str
+            }
+        else:  # 默认伊起牛
+            dtype_config = {
+                '耳号': str, '父亲号': str, '母亲号': str, '外祖父': str, '外曾外祖父': str, '祖父': str, '与配冻精编号': str
+            }
+
+        df = pd.read_excel(input_file, dtype=dtype_config)
         print(f"[DEBUG-FILE-4] 成功读取母牛数据文件，数据形状: {df.shape}")
         logging.info(f"成功读取母牛数据文件，数据形状: {df.shape}")
         logging.info(f"列名: {df.columns.tolist()}")
@@ -1347,7 +1477,7 @@ def process_cow_data_file(input_file: Path, project_path: Path, progress_callbac
     try:
         print("[DEBUG-FILE-5] 开始预处理母牛数据...")
         logging.info("开始预处理母牛数据...")
-        df_cleaned = preprocess_cow_data(df, progress_callback)
+        df_cleaned = preprocess_cow_data(df, progress_callback, source_system)
         print(f"[DEBUG-FILE-6] 成功预处理母牛数据，处理后数据形状: {df_cleaned.shape}")
         logging.info(f"成功预处理母牛数据，处理后数据形状: {df_cleaned.shape}")
     except Exception as e:
@@ -1410,6 +1540,9 @@ def preprocess_bull_data(bull_df, progress_callback=None):
     bull_df = bull_df[~bull_df['bull_id'].str.contains("nan", case=False)]  # 删除包含"nan"的行
 
     print(f"[DEBUG-BULL-PREPROCESS] 开始处理 {len(bull_df)} 条备选公牛记录")
+
+    # 保存原始公牛号（用于最终输出时还原）
+    bull_df['bull_id_original'] = bull_df['bull_id'].copy()
 
     all_errors = []
     formatted_ids = []
@@ -1644,7 +1777,7 @@ def process_body_conformation_file(input_file: Path, project_path: Path, progres
 
     return output_file
 
-def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=None, progress_callback=None) -> Path:
+def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=None, progress_callback=None, source_system: str = "伊起牛") -> Path:
     """
     标准化配种记录数据文件 - 完全重写版本
 
@@ -1655,6 +1788,7 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
         project_path (Path): 当前项目的路径
         cow_df (DataFrame, optional): 母牛数据的DataFrame，用于映射父号
         progress_callback (callable, optional): 进度回调函数
+        source_system (str): 数据来源系统，可选值：伊起牛、慧牧云、优源-DC305
 
     返回:
         Path: 标准化后的配种记录数据文件路径
@@ -1662,9 +1796,9 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
     import logging
 
     print("=" * 80)
-    print("🔵 使用全新重写的 process_breeding_record_file (v1.2.0.13)")
+    print(f"🔵 使用全新重写的 process_breeding_record_file (v1.2.0.14), source_system={source_system}")
     print("=" * 80)
-    logging.info("使用全新重写的 process_breeding_record_file")
+    logging.info(f"使用全新重写的 process_breeding_record_file, source_system={source_system}")
 
     # ========== 第1步: 读取原始数据 ==========
     print(f"\n【步骤1】读取原始文件: {input_file}")
@@ -1716,12 +1850,16 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
 
     # ========== 第2步: 列名映射 ==========
     print(f"\n【步骤2】列名标准化")
+    # 多系统列名映射（包含新增的慧牧云和DC305列名）
     column_mappings = {
         '耳号': ['耳号', '牛号', '母牛号', '母牛耳号', 'cow_id'],
-        '配种日期': ['配种日期', '配种时间', '授精日期', '授精时间'],
-        '冻精编号': ['冻精编号', '冻精号', '公牛号', '精液号'],
-        '冻精类型': ['冻精类型', '精液类型', '类型']
+        '配种日期': ['配种日期', '配种时间', '授精日期', '授精时间', '事件日期', '日期'],  # 慧牧云"事件日期"、DC305"日期"
+        '冻精编号': ['冻精编号', '冻精号', '公牛号', '精液号', '备注'],  # 慧牧云"冻精号"、DC305"备注"
+        '冻精类型': ['冻精类型', '精液类型', '类型', '是否性控']  # 慧牧云"是否性控"（需值转换）
     }
+
+    # 检测是否存在"是否性控"列（慧牧云特有）
+    has_sex_control_column = '是否性控' in df_raw.columns
 
     for target_col, possible_names in column_mappings.items():
         if target_col not in df_raw.columns:
@@ -1731,12 +1869,40 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
                     print(f"  ✓ 映射列名: {possible_name} → {target_col}")
                     break
 
+    # 慧牧云特殊处理：是否性控 → 冻精类型 值转换
+    if has_sex_control_column and '冻精类型' in df_raw.columns:
+        print("  🔧 慧牧云系统：转换'是否性控'为'冻精类型'...")
+        def convert_sex_control(val):
+            if pd.isna(val):
+                return '普通冻精'
+            if val == True or str(val).lower() in ['true', '是', '1']:
+                return '性控冻精'
+            return '普通冻精'
+        df_raw['冻精类型'] = df_raw['冻精类型'].apply(convert_sex_control)
+        print(f"  ✓ 是否性控值转换完成")
+
+    # DC305 特殊处理
+    if source_system == "优源-DC305":
+        print("  🔧 DC305系统：特殊数据清洗...")
+        # 所有字符串列去除尾部空格
+        for col in df_raw.columns:
+            if df_raw[col].dtype == 'object':
+                df_raw[col] = df_raw[col].astype(str).str.strip()
+        # '-' 视为空值
+        df_raw.replace('-', np.nan, inplace=True)
+        df_raw.replace('', np.nan, inplace=True)
+        print("  ✓ DC305特殊数据清洗完成")
+
     # ========== 第3步: 检查必需列 ==========
     print(f"\n【步骤3】检查必需列")
     required_columns = ['耳号', '配种日期', '冻精编号', '冻精类型']
     missing_columns = [col for col in required_columns if col not in df_raw.columns]
     if missing_columns:
-        error_msg = f"配种记录数据缺少以下必需列: {', '.join(missing_columns)}"
+        # 简化错误消息，适用于所有数据源
+        if '冻精类型' in missing_columns:
+            error_msg = "配种记录数据缺少'冻精类型'列"
+        else:
+            error_msg = f"配种记录数据缺少以下必需列: {', '.join(missing_columns)}"
         print(f"  ✗ {error_msg}")
         raise ValueError(error_msg)
     print(f"  ✓ 所有必需列都存在")

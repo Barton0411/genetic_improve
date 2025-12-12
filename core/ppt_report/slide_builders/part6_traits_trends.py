@@ -41,6 +41,14 @@ class Part6TraitsTrendsBuilder(BaseSlideBuilder):
             logger.error("excel_path 未找到，跳过性状进展折线图")
             return
 
+        # 查找"性状进展折线图"页面
+        logger.info(f"开始查找包含'性状进展折线图'的页面，模板共{len(self.prs.slides)}页")
+        target_slides = self.find_slides_by_text("性状进展折线图", start_index=0)
+
+        if len(target_slides) == 0:
+            logger.error("❌ 未找到性状进展折线图页面，跳过")
+            return
+
         try:
             # 优先使用缓存的workbook（避免重复加载，每次加载需要约21秒）
             cached_wb = data.get("_cached_workbook_data_only")
@@ -48,18 +56,13 @@ class Part6TraitsTrendsBuilder(BaseSlideBuilder):
             logger.info(f"✓ 从Excel中提取到 {len(charts_data)} 个图表")
         except Exception as e:
             logger.error(f"提取Excel图表失败: {e}")
+            # 数据提取失败，标记页面待删除
+            self.mark_slides_for_deletion(target_slides)
             return
 
         if not charts_data:
-            logger.warning("没有找到任何图表，跳过性状进展折线图")
-            return
-
-        # 查找"性状进展折线图"页面
-        logger.info(f"开始查找包含'性状进展折线图'的页面，模板共{len(self.prs.slides)}页")
-        target_slides = self.find_slides_by_text("性状进展折线图", start_index=0)
-
-        if len(target_slides) == 0:
-            logger.error("❌ 未找到性状进展折线图页面，跳过")
+            logger.warning("没有找到任何图表，标记页面待删除")
+            self.mark_slides_for_deletion(target_slides)
             return
 
         logger.info(f"✓ 找到 {len(target_slides)} 个性状进展折线图页面")

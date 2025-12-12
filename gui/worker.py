@@ -23,11 +23,12 @@ class CowDataWorker(QObject):
     finished = pyqtSignal(Path)     # 处理完成，返回文件路径
     error = pyqtSignal(str)         # 发生错误
 
-    def __init__(self, input_files, project_path):
+    def __init__(self, input_files, project_path, source_system="伊起牛"):
         super().__init__()
         self.input_files = input_files
         self.project_path = project_path
-        print(f"[DEBUG-WORKER-INIT] CowDataWorker初始化: input_files={input_files}, project_path={project_path}")
+        self.source_system = source_system
+        print(f"[DEBUG-WORKER-INIT] CowDataWorker初始化: input_files={input_files}, project_path={project_path}, source_system={source_system}")
 
     def progress_callback(self, progress_value, message=None):
         """统一的进度回调函数，同时处理进度值和消息"""
@@ -86,12 +87,13 @@ class CowDataWorker(QObject):
             print("[DEBUG-WORKER-6] 导入upload_and_standardize_cow_data函数")
             from core.data.uploader import upload_and_standardize_cow_data
             
-            # 上传并标准化数据，传递进度回调
-            print("[DEBUG-WORKER-7] 调用upload_and_standardize_cow_data函数")
+            # 上传并标准化数据，传递进度回调和数据来源系统
+            print(f"[DEBUG-WORKER-7] 调用upload_and_standardize_cow_data函数, source_system={self.source_system}")
             standardized_path = upload_and_standardize_cow_data(
-                self.input_files, 
-                self.project_path, 
-                progress_callback=self.progress_callback  # 使用新的回调函数
+                self.input_files,
+                self.project_path,
+                progress_callback=self.progress_callback,  # 使用新的回调函数
+                source_system=self.source_system  # 传递数据来源系统
             )
             
             print(f"[DEBUG-WORKER-8] 处理完成，标准化文件路径: {standardized_path}")
@@ -261,11 +263,12 @@ class BreedingDataWorker(QObject):
     finished = pyqtSignal(Path)     # 处理完成，返回文件路径
     error = pyqtSignal(str)         # 发生错误
 
-    def __init__(self, input_files, project_path):
+    def __init__(self, input_files, project_path, source_system="伊起牛"):
         super().__init__()
         self.input_files = input_files
         self.project_path = project_path
-        print(f"[DEBUG-BREEDING-WORKER-INIT] BreedingDataWorker初始化: input_files={input_files}, project_path={project_path}")
+        self.source_system = source_system
+        print(f"[DEBUG-BREEDING-WORKER-INIT] BreedingDataWorker初始化: input_files={input_files}, project_path={project_path}, source_system={source_system}")
 
     def progress_callback(self, progress_value, message=None):
         """统一的进度回调函数，同时处理进度值和消息"""
@@ -335,12 +338,13 @@ class BreedingDataWorker(QObject):
             print("[DEBUG-BREEDING-WORKER-6] 导入upload_and_standardize_breeding_data函数")
             from core.data.uploader import upload_and_standardize_breeding_data
             
-            # 上传并标准化数据，传递进度回调
-            print("[DEBUG-BREEDING-WORKER-7] 调用upload_and_standardize_breeding_data函数")
+            # 上传并标准化数据，传递进度回调和数据来源系统
+            print(f"[DEBUG-BREEDING-WORKER-7] 调用upload_and_standardize_breeding_data函数, source_system={self.source_system}")
             standardized_path = upload_and_standardize_breeding_data(
-                self.input_files, 
-                self.project_path, 
-                progress_callback=self.progress_callback  # 使用回调函数
+                self.input_files,
+                self.project_path,
+                progress_callback=self.progress_callback,  # 使用回调函数
+                source_system=self.source_system  # 传递数据来源系统
             )
             
             print(f"[DEBUG-BREEDING-WORKER-8] 处理完成，标准化文件路径: {standardized_path}")
