@@ -1,28 +1,16 @@
 {
-  "version": "1.2.2.4",
+  "version": "1.2.2.5",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.4/伊利奶牛选配_v1.2.2.4_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.4/伊利奶牛选配_v1.2.2.4_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.5/伊利奶牛选配_v1.2.2.5_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.5/伊利奶牛选配_v1.2.2.5_win.exe",
   "changes": [
-    "1. <b>功能</b>：新增伊起牛账号登录支持",
-    "   - 登录界面新增Tab切换，支持两种登录方式",
-    "   - 支持从伊起牛API获取牧场数据",
+    "1. <b>功能</b>：慧牧云系统'是否在场'智能推断",
+    "   - 根据'离场日期'字段自动推断牛只是否在场",
+    "   - 离场日期为空→在场，有值→离场",
     "",
-    "2. <b>功能</b>：多数据源系统支持",
-    "   - 新增慧牧云、优源-DC305数据格式的列名映射",
-    "   - DC305特殊数据清洗（去空格、自动计算月龄）",
-    "",
-    "3. <b>优化</b>：NAAB号格式化增强",
-    "   - 自动去除XK、SEX、性控等前后缀标记",
-    "",
-    "4. <b>优化</b>：缺失公牛提示分类显示",
-    "   - 按来源分类（配种记录/母牛系谱/备选公牛）",
-    "",
-    "5. <b>修复</b>：个体选配近交系数阈值硬编码问题",
-    "   - 现在正确使用用户设置的近交系数阈值",
-    "",
-    "6. <b>修复</b>：选配备注中的阈值显示问题",
-    "",
-    "7. <b>优化</b>：完善选配'其他约束'的具体说明"
+    "2. <b>文档</b>：新增数据标准化规则说明文档",
+    "   - 详细说明多数据源系统支持（伊起牛、慧牧云、优源-DC305）",
+    "   - 完整的NAAB号格式化规则和示例",
+    "   - 各系统列名映射对照表"
   ]
 }

@@ -1054,8 +1054,18 @@ def preprocess_cow_data(cow_df, progress_callback=None, source_system: str = "�
             cow_df['breed'] = '荷斯坦'
             print("[DEBUG-4.3] breed字段不存在，已创建并填充为 '荷斯坦'")
 
-        # 处理 是否在场 字段：空值默认为 '是'
-        if '是否在场' in cow_df.columns:
+        # 处理 是否在场 字段
+        # 慧牧云特殊处理：根据"离场日期"推断是否在场
+        if '离场日期' in cow_df.columns and '是否在场' not in cow_df.columns:
+            print("[DEBUG-4.4] 慧牧云系统：根据'离场日期'推断'是否在场'...")
+            # 离场日期为空 → 在场；离场日期不为空 → 离场
+            cow_df['是否在场'] = cow_df['离场日期'].apply(
+                lambda x: '否' if pd.notna(x) and str(x).strip() not in ['', 'nan', 'NaT'] else '是'
+            )
+            in_herd_count = (cow_df['是否在场'] == '是').sum()
+            left_count = (cow_df['是否在场'] == '否').sum()
+            print(f"[DEBUG-4.4] 根据离场日期推断：在场 {in_herd_count} 头，离场 {left_count} 头")
+        elif '是否在场' in cow_df.columns:
             empty_in_herd_count = cow_df['是否在场'].isna().sum()
             empty_str_count = (cow_df['是否在场'] == '').sum()
             total_empty = empty_in_herd_count + empty_str_count
