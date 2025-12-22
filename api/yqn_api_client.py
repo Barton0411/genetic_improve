@@ -28,6 +28,15 @@ class YQNApiClient:
         }
         self.logger = logging.getLogger(__name__)
 
+        # 创建独立的session
+        # 禁用代理，直接连接（测试证明直连即可访问伊起牛API）
+        self.session = requests.Session()
+        self.session.trust_env = False  # 不使用环境变量中的代理
+        self.session.proxies = {
+            'http': None,
+            'https': None,
+        }
+
     def _request(self, method: str, endpoint: str, **kwargs) -> dict:
         """
         统一请求方法，包含错误处理和重试逻辑
@@ -53,10 +62,29 @@ class YQNApiClient:
         for attempt in range(max_retries):
             try:
                 self.logger.info(f"API请求: {method} {url}")
-                response = requests.request(method, url, **kwargs)
+                # 使用self.session而不是直接使用requests，以便使用代理
+                response = self.session.request(method, url, **kwargs)
                 response.raise_for_status()
 
+                # 先保存响应文本，再解析JSON
+                response_text = response.text
+                self.logger.info(f"响应状态码: {response.status_code}")
+                self.logger.info(f"响应大小: {len(response_text)} 字符")
+
                 result = response.json()
+                self.logger.info(f"result keys: {list(result.keys()) if isinstance(result, dict) else 'not dict'}")
+
+                # 如果是get_user_info，打印data内容
+                if endpoint == "/system/user/getInfo":
+                    import json
+                    self.logger.info(f"=== get_user_info 响应前500字符 ===")
+                    self.logger.info(response_text[:500])
+                    data = result.get("data", {})
+                    self.logger.info(f"data类型: {type(data)}")
+                    if isinstance(data, dict):
+                        self.logger.info(f"data keys: {list(data.keys())}")
+                        farms = data.get("farms", [])
+                        self.logger.info(f"farms: {type(farms)}, 长度={len(farms) if farms else 0}")
 
                 # 检查API返回的业务状态码
                 if result.get("code") != 200:
@@ -68,13 +96,31 @@ class YQNApiClient:
             except requests.exceptions.Timeout:
                 if attempt == max_retries - 1:
                     self.logger.error("连接超时")
-                    raise TimeoutError("连接伊起牛服务器超时，请检查网络连接")
+                    raise TimeoutError(
+                        "连接伊起牛服务器超时。\n\n"
+                        "可能原因：\n"
+                        "1. 网络连接不稳定\n"
+                        "2. 当前IP未加入伊起牛API白名单\n\n"
+                        "解决方案：\n"
+                        "- 检查网络连接\n"
+                        "- 尝试连接VPN\n"
+                        "- 联系伊起牛技术支持添加您的IP到白名单"
+                    )
                 self.logger.warning(f"请求超时，重试 {attempt + 1}/{max_retries}")
 
             except requests.exceptions.ConnectionError:
                 if attempt == max_retries - 1:
                     self.logger.error("网络连接错误")
-                    raise ConnectionError("无法连接到伊起牛服务器，请检查网络连接")
+                    raise ConnectionError(
+                        "无法连接到伊起牛服务器。\n\n"
+                        "可能原因：\n"
+                        "1. 网络连接问题\n"
+                        "2. 当前IP未加入伊起牛API白名单（最常见）\n\n"
+                        "解决方案：\n"
+                        "- 检查网络连接\n"
+                        "- 尝试连接VPN\n"
+                        "- 联系伊起牛技术支持，提供您的公网IP申请加入白名单"
+                    )
                 self.logger.warning(f"连接失败，重试 {attempt + 1}/{max_retries}")
 
             except requests.exceptions.HTTPError as e:
@@ -158,15 +204,23 @@ class YQNApiClient:
         # 判断是否为纯数字（站号精确查询）
         if keyword.isdigit():
             self.logger.info("纯数字，作为站号精确查询")
-            matched = [f for f in user_farms if f.get("farmCode", "") == keyword]
+            matched = []
+            for f in user_farms:
+                farm_code = f.get("farmCode", "")
+                # 转为字符串进行比较，处理可能的数字类型
+                if str(farm_code).strip() == keyword:
+                    matched.append(f)
+                    self.logger.debug(f"匹配到牧场: {f.get('farmName', '')} (站号: {farm_code})")
         else:
             # 名称模糊搜索（不区分大小写）
             self.logger.info("文字，作为名称模糊搜索")
             keyword_lower = keyword.lower()
-            matched = [
-                f for f in user_farms
-                if keyword_lower in f.get("farmName", "").lower()
-            ]
+            matched = []
+            for f in user_farms:
+                farm_name = str(f.get("farmName", ""))
+                if keyword_lower in farm_name.lower():
+                    matched.append(f)
+                    self.logger.debug(f"匹配到牧场: {farm_name}")
 
         self.logger.info(f"找到 {len(matched)} 个匹配的牧场")
         return matched

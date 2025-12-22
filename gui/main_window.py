@@ -344,7 +344,7 @@ class DragDropArea(QFrame):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, username=None, login_type=None):
+    def __init__(self, username=None, login_type=None, yqn_token=None):
         try:
             logging.info(f"MainWindow.__init__ started with username: {username}, login_type: {login_type}")
             super().__init__()
@@ -358,6 +358,7 @@ class MainWindow(QMainWindow):
             self.settings = Settings()
             self.username = username
             self.login_type = login_type  # 'yili' 或 'yqn'
+            self.yqn_token = yqn_token  # 伊起牛API令牌
             self.content_stack = QStackedWidget()
             self.selected_project_path = None
             self.templates_path = Path(__file__).parent.parent / "templates"
@@ -828,7 +829,8 @@ class MainWindow(QMainWindow):
         self.content_stack = QStackedWidget(container)
 
         # 按顺序添加页面，每个页面只添加一次
-        self.content_stack.addWidget(FarmSelectionPage())  # 第0页：伊起牛牧场数据选择
+        farm_page = FarmSelectionPage(yqn_token=self.yqn_token)
+        self.content_stack.addWidget(farm_page)  # 第0页：伊起牛牧场数据选择
         self.create_project_page()         # 第1页：项目管理
         self.create_upload_page()          # 第2页：数据上传
         genetic_analysis_page = self.create_genetic_analysis_page()  # 第3页：关键育种性状分析

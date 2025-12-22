@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QMessageBox, QWidget, QTabWidget
+    QPushButton, QMessageBox, QWidget, QTabWidget, QCheckBox
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QIcon
@@ -78,7 +78,16 @@ class LoginDialog(QDialog):
         self.yqn_password_input = QLineEdit()
         self.yqn_password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.yqn_layout.addWidget(self.yqn_password_label)
-        self.yqn_layout.addWidget(self.yqn_password_input)
+
+        # 密码输入框和显示密码复选框的水平布局
+        self.yqn_password_layout = QHBoxLayout()
+        self.yqn_password_layout.addWidget(self.yqn_password_input)
+
+        self.yqn_show_password_checkbox = QCheckBox("显示密码")
+        self.yqn_show_password_checkbox.stateChanged.connect(self.toggle_yqn_password_visibility)
+        self.yqn_password_layout.addWidget(self.yqn_show_password_checkbox)
+
+        self.yqn_layout.addLayout(self.yqn_password_layout)
 
         self.yqn_button_layout = QHBoxLayout()
         self.yqn_login_button = QPushButton("登录")
@@ -156,6 +165,15 @@ class LoginDialog(QDialog):
         self.waiting_widget.hide()
         self.tab_widget.show()
 
+    def toggle_yqn_password_visibility(self, state):
+        """切换伊起牛密码的显示/隐藏状态"""
+        if state == Qt.CheckState.Checked.value:
+            # 显示密码
+            self.yqn_password_input.setEchoMode(QLineEdit.EchoMode.Normal)
+        else:
+            # 隐藏密码
+            self.yqn_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+
     def login(self):
         """处理伊利账号登录点击事件"""
         username = self.username_input.text()
@@ -170,12 +188,21 @@ class LoginDialog(QDialog):
 
     def yqn_login(self):
         """处理伊起牛账号登录点击事件"""
-        username = self.yqn_username_input.text()
-        password = self.yqn_password_input.text()
+        username = self.yqn_username_input.text().strip()  # 去除首尾空格
+        password = self.yqn_password_input.text().strip()  # 去除首尾空格
 
         if not username or not password:
             QMessageBox.warning(self, "提示", "账号和密码不能为空")
             return
+
+        # 调试信息（不显示完整密码）
+        logging.info(f"伊起牛登录尝试 - 用户名: {username}, 密码长度: {len(password)}")
+
+        # 检查密码是否包含不可见字符
+        if any(ord(c) < 32 or ord(c) > 126 for c in password):
+            logging.warning(f"密码包含特殊字符或不可见字符")
+            # 显示密码的ASCII码以便调试
+            logging.debug(f"密码字符ASCII: {[ord(c) for c in password]}")
 
         self.show_waiting()
         QTimer.singleShot(100, lambda: self.process_yqn_login(username, password))
@@ -186,7 +213,16 @@ class LoginDialog(QDialog):
             # 使用生产环境API
             api_url = f"{self.YQN_API_PROD}/auth/login"
 
-            response = requests.post(
+            # 创建独立的session
+            # 禁用代理，直接连接（测试证明直连即可访问伊起牛API）
+            session = requests.Session()
+            session.trust_env = False  # 不使用环境变量中的代理
+            session.proxies = {
+                'http': None,
+                'https': None,
+            }
+
+            response = session.post(
                 api_url,
                 json={"username": username, "password": password},
                 headers={"Content-Type": "application/json"},
@@ -195,25 +231,52 @@ class LoginDialog(QDialog):
 
             result = response.json()
 
+            # 记录API响应（调试用）
+            logging.info(f"伊起牛API响应 - code: {result.get('code')}, msg: {result.get('msg')}")
+
             if result.get("code") == 200 and result.get("data"):
                 # 登录成功
                 self.yqn_token = result["data"].get("access_token")
                 self.username = username
                 self.login_type = "yqn"
+                logging.info("伊起牛登录成功")
                 self.accept()
             else:
                 self.show_login_form()
                 error_msg = result.get("msg") or "账号或密码错误，请重试。"
+                logging.warning(f"伊起牛登录失败: {error_msg}")
                 QMessageBox.warning(self, "登录失败", error_msg)
                 self.yqn_password_input.clear()
                 self.yqn_password_input.setFocus()
 
         except requests.exceptions.Timeout:
             self.show_login_form()
-            QMessageBox.critical(self, "连接超时", "连接伊起牛服务器超时，请检查网络后重试。")
+            QMessageBox.critical(
+                self,
+                "连接超时",
+                "连接伊起牛服务器超时。\n\n"
+                "可能原因：\n"
+                "1. 网络连接不稳定\n"
+                "2. 当前IP未加入伊起牛API白名单\n\n"
+                "解决方案：\n"
+                "• 检查网络连接\n"
+                "• 尝试连接VPN\n"
+                "• 联系伊起牛技术支持添加您的IP到白名单"
+            )
         except requests.exceptions.ConnectionError:
             self.show_login_form()
-            QMessageBox.critical(self, "网络错误", "无法连接到伊起牛服务器，请检查网络连接。")
+            QMessageBox.critical(
+                self,
+                "网络错误",
+                "无法连接到伊起牛服务器。\n\n"
+                "可能原因：\n"
+                "1. 网络连接问题\n"
+                "2. 当前IP未加入伊起牛API白名单（最常见）\n\n"
+                "解决方案：\n"
+                "• 检查网络连接\n"
+                "• 尝试连接VPN后重试\n"
+                "• 联系伊起牛技术支持，提供您的公网IP申请加入白名单"
+            )
         except Exception as e:
             logging.error(f"伊起牛登录错误: {str(e)}")
             self.show_login_form()
