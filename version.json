@@ -1,16 +1,11 @@
 {
-  "version": "1.2.2.5",
+  "version": "1.2.2.6",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.5/伊利奶牛选配_v1.2.2.5_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.5/伊利奶牛选配_v1.2.2.5_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.6/伊利奶牛选配_v1.2.2.6_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.2.6/伊利奶牛选配_v1.2.2.6_win.exe",
   "changes": [
-    "1. <b>功能</b>：慧牧云系统'是否在场'智能推断",
-    "   - 根据'离场日期'字段自动推断牛只是否在场",
-    "   - 离场日期为空→在场，有值→离场",
-    "",
-    "2. <b>文档</b>：新增数据标准化规则说明文档",
-    "   - 详细说明多数据源系统支持（伊起牛、慧牧云、优源-DC305）",
-    "   - 完整的NAAB号格式化规则和示例",
-    "   - 各系统列名映射对照表"
+    "1. <b>修复</b>：伊起牛登录环境配置",
+    "   - 登录API从测试环境切换到生产环境",
+    "   - 确保使用正确的生产数据"
   ]
 }

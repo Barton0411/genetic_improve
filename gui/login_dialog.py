@@ -183,8 +183,8 @@ class LoginDialog(QDialog):
     def process_yqn_login(self, username, password):
         """处理伊起牛账号登录验证"""
         try:
-            # 使用测试环境API
-            api_url = f"{self.YQN_API_TEST}/auth/login"
+            # 使用生产环境API
+            api_url = f"{self.YQN_API_PROD}/auth/login"
 
             response = requests.post(
                 api_url,
