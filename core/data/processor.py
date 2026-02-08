@@ -986,7 +986,7 @@ def preprocess_cow_data(cow_df, progress_callback=None, source_system: str = "�
             "mmgs": ["外曾外祖父"],
             "lac": ["胎次"],
             "calving_date": ["最近产犊日期", "产犊日期"],  # 伊起牛"最近产犊日期"、慧牧云+DC305"产犊日期"
-            "birth_date": ["牛只出生日期", "生日"],  # 伊起牛"牛只出生日期"、慧牧云+DC305"生日"
+            "birth_date": ["出生日期", "牛只出生日期", "生日"],  # 伊起牛"出生日期"、慧牧云+DC305"生日"
             "age": ["月龄"],
             "days_of_age": ["日龄"],  # DC305特有，用于计算月龄
             "services_time": ["本胎次配次", "配次", "配种次数"],  # 伊起牛"本胎次配次"、慧牧云"配次"、DC305"配种次数"
@@ -1030,8 +1030,16 @@ def preprocess_cow_data(cow_df, progress_callback=None, source_system: str = "�
                 cow_df.loc[cow_df['dam'] == 0.0, 'dam'] = np.nan
             print("[DEBUG-4.1] DC305特殊数据清洗完成")
 
-        # 处理 sex 字段：空值默认为 '母'
+        # 处理 sex 字段：数字编码转换 + 空值默认为 '母'
         if 'sex' in cow_df.columns:
+            # 伊起牛等数据源可能使用数字编码: 0=母, 1=公
+            sex_map = {0: '母', 1: '公', 0.0: '母', 1.0: '公', '0': '母', '1': '公'}
+            original_dtype = cow_df['sex'].dtype
+            mapped_count = cow_df['sex'].isin(sex_map.keys()).sum()
+            if mapped_count > 0:
+                cow_df['sex'] = cow_df['sex'].map(sex_map).fillna(cow_df['sex'])
+                print(f"[DEBUG-4.2] sex字段数字编码转换: {mapped_count} 条记录 (原dtype={original_dtype})")
+
             empty_sex_count = cow_df['sex'].isna().sum()
             if empty_sex_count > 0:
                 # 如果全是空值，直接赋值为'母'（避免float64类型fillna问题）
@@ -1599,6 +1607,65 @@ def preprocess_bull_data(bull_df, progress_callback=None):
     # 返回处理后的DataFrame，包含格式错误的记录
     return bull_df
 
+def _infer_semen_type(bull_id_raw):
+    """
+    根据原始公牛号推断冻精类型
+
+    规则:
+      - 前/后缀含 XK/SEX/性控 → 性控
+      - 前/后缀含 S/X（单字母标记） → 性控
+      - 其他情况（含P前缀或无标记）→ 常规
+    """
+    s = str(bull_id_raw).strip().upper()
+
+    # 性控标记（长标记优先）
+    sexed_markers = ['XK', 'SEX', '性控']
+    for marker in sexed_markers:
+        if s.startswith(marker) or s.endswith(marker):
+            return '性控'
+
+    short_sexed_markers = ['S', 'X']
+    for marker in short_sexed_markers:
+        if s.startswith(marker) or s.endswith(marker):
+            return '性控'
+
+    # 其他情况（含P前缀或无标记）均为常规
+    return '常规'
+
+
+def detect_and_convert_inventory_template(df):
+    """
+    检测并转换冻精库存模板格式
+
+    冻精库存模板特征列: 物资编号, 库存数量
+    转换规则:
+      - 物资编号 → bull_id
+      - 库存数量 → 支数
+      - 根据公牛号前后缀推断 semen_type (常规/性控)
+      - 仅保留库存数量 > 0 的记录
+
+    返回: (转换后的DataFrame, 是否进行了转换)
+    """
+    if '物资编号' not in df.columns or '库存数量' not in df.columns:
+        return df, False
+
+    result = pd.DataFrame()
+    result['bull_id'] = df['物资编号'].astype(str).str.strip()
+    result['支数'] = pd.to_numeric(df['库存数量'], errors='coerce').fillna(0)
+
+    # 过滤: 仅保留库存 > 0 的记录
+    result = result[result['支数'] > 0].copy()
+
+    # 过滤: 去除空的 bull_id
+    result = result[result['bull_id'].notna() & (result['bull_id'] != '') & (result['bull_id'].str.lower() != 'nan')]
+
+    # 推断 semen_type
+    result['semen_type'] = result['bull_id'].apply(_infer_semen_type)
+
+    result = result.reset_index(drop=True)
+    return result, True
+
+
 def process_bull_data_file(input_file: Path, project_path: Path, progress_callback=None) -> Path:
     """
     标准化备选公牛数据文件
@@ -1608,9 +1675,15 @@ def process_bull_data_file(input_file: Path, project_path: Path, progress_callba
     standardized_path.mkdir(parents=True, exist_ok=True)
     # 读取文件
     try:
-        df = pd.read_excel(input_file, dtype={'bull_id': str, '公牛号': str, '冻精编号': str})
+        df = pd.read_excel(input_file, dtype={'bull_id': str, '公牛号': str, '冻精编号': str, '物资编号': str})
     except Exception as e:
         raise ValueError(f"读取备选公牛数据文件失败: {e}")
+
+    # 检测冻精库存模板并转换
+    df, is_inventory = detect_and_convert_inventory_template(df)
+    if is_inventory:
+        print(f"[DEBUG-BULL] 检测到冻精库存模板，转换后 {len(df)} 条有效记录")
+
     # 对数据进行标准化处理，如：
     try:
         df_cleaned = preprocess_bull_data(df, progress_callback)
@@ -1692,28 +1765,11 @@ def process_bull_data_file(input_file: Path, project_path: Path, progress_callba
             api_client = get_api_client()
             success = api_client.upload_missing_bulls(bulls_data)
 
-            # 弹窗通知用户缺失公牛（合并提示，不管上传成功与否都显示）
-            try:
-                from PyQt6.QtWidgets import QMessageBox
-
-                # 构建缺失公牛列表（最多显示20个）
-                bull_list = "\n".join([f"• {bull}" for bull in missing_bulls[:20]])
-                if len(missing_bulls) > 20:
-                    bull_list += f"\n... 还有 {len(missing_bulls) - 20} 个"
-
-                msg = QMessageBox()
-                msg.setIcon(QMessageBox.Icon.Information)
-                msg.setWindowTitle("在本地数据库中未找到部分公牛")
-                msg.setText(f"在本地数据库中未找到 {len(missing_bulls)} 个公牛")
-                msg.setInformativeText(
-                    "建议您稍后更新本地数据库，或联系管理员添加这些公牛的完整信息。"
-                )
-                msg.setDetailedText(f"缺失公牛列表：\n\n{bull_list}")
-                msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-                msg.exec()
-
-            except Exception as e:
-                print(f"[检查点-上传] 无法显示通知对话框: {e}")
+            # 记录缺失公牛信息（不弹窗，避免在后台线程创建GUI组件导致崩溃）
+            bull_list = ", ".join(missing_bulls[:20])
+            if len(missing_bulls) > 20:
+                bull_list += f" ... 还有 {len(missing_bulls) - 20} 个"
+            print(f"[检查点-上传] 在本地数据库中未找到 {len(missing_bulls)} 个公牛: {bull_list}")
 
             # 上传结果日志
             if success:

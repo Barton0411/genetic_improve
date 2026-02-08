@@ -363,6 +363,10 @@ class MainWindow(QMainWindow):
             self.selected_project_path = None
             self.templates_path = Path(__file__).parent.parent / "templates"
 
+            # 合并项目状态
+            self.is_merged_project = False
+            self.merged_farms = []
+
             # PPT后台生成状态
             self.ppt_thread = None
             self.ppt_worker = None
@@ -830,6 +834,7 @@ class MainWindow(QMainWindow):
 
         # 按顺序添加页面，每个页面只添加一次
         farm_page = FarmSelectionPage(yqn_token=self.yqn_token)
+        farm_page.project_created.connect(self.select_project_by_path)
         self.content_stack.addWidget(farm_page)  # 第0页：伊起牛牧场数据选择
         self.create_project_page()         # 第1页：项目管理
         self.create_upload_page()          # 第2页：数据上传
@@ -1141,12 +1146,27 @@ class MainWindow(QMainWindow):
         index = self.file_system_model.index(str(project_path))
         if index.isValid():
             self.file_tree.setCurrentIndex(index)
-            self.file_tree.scrollTo(index, QAbstractItemView.ScrollHint.EnsureVisible)  # 确保视图滚动到选中的项目
+            self.file_tree.scrollTo(index, QAbstractItemView.ScrollHint.EnsureVisible)
             self.select_project()
-            # 强制刷新模型（通过重新设置根路径）
             self.file_system_model.setRootPath(str(project_path.parent))
+        elif project_path.is_dir():
+            # 文件系统模型尚未索引到新目录（刚创建），直接设置项目路径
+            logging.info(f"文件系统模型未索引到新目录，直接设置项目: {project_path}")
+            self.selected_project_path = project_path
+            self._load_project_metadata()
+            # 延迟重试树视图定位
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(1500, lambda p=project_path: self._retry_tree_selection(p))
         else:
             QMessageBox.warning(self, "警告", f"无法找到项目路径: {project_path}")
+
+    def _retry_tree_selection(self, project_path: Path):
+        """延迟重试在文件树中定位项目"""
+        index = self.file_system_model.index(str(project_path))
+        if index.isValid():
+            self.file_tree.setCurrentIndex(index)
+            self.file_tree.scrollTo(index, QAbstractItemView.ScrollHint.EnsureVisible)
+            self.file_system_model.setRootPath(str(project_path.parent))
 
     def select_project(self):
         """选择项目，并检查项目结构"""
@@ -1167,7 +1187,8 @@ class MainWindow(QMainWindow):
 
             self.selected_project_path = project_path
 
-            # TODO: 在这里添加选择项目后的逻辑
+            # 加载项目元数据，检查是否为合并项目
+            self._load_project_metadata()
         else:
             QMessageBox.warning(self, "警告", "所选文件夹不是有效的项目文件夹")
 
@@ -1221,6 +1242,135 @@ class MainWindow(QMainWindow):
         required_dirs = {'raw_data', 'standardized_data', 'analysis_results', 'reports'}
         existing_dirs = {item.name for item in project_path.iterdir() if item.is_dir()}
         return required_dirs.issubset(existing_dirs)
+
+    def _load_project_metadata(self):
+        """加载项目元数据，检查是否为合并项目"""
+        self.is_merged_project = False
+        self.merged_farms = []
+
+        if not self.selected_project_path:
+            return
+
+        metadata = FileManager.load_project_metadata(self.selected_project_path)
+        self.is_merged_project = metadata.get("is_merged", False)
+        self.merged_farms = metadata.get("farms", [])
+
+        # 兜底：通过文件夹名称判断（防止元数据缺失）
+        if not self.is_merged_project:
+            folder_name = self.selected_project_path.name
+            if folder_name.startswith("合并牧场_"):
+                self.is_merged_project = True
+                logging.warning(f"通过文件夹名称识别为合并项目: {folder_name}")
+
+        if self.is_merged_project:
+            logging.info(f"已加载合并项目，包含 {len(self.merged_farms)} 个牧场")
+
+    def _check_merged_project_restriction(self, feature_name: str) -> bool:
+        """
+        检查合并项目功能限制
+
+        参数:
+            feature_name: 功能名称
+
+        返回:
+            True 表示允许使用，False 表示被禁用
+        """
+        if not self.is_merged_project:
+            return True
+
+        restricted_features = ["基因组检测数据", "体型外貌数据", "个体选配"]
+
+        if feature_name in restricted_features:
+            QMessageBox.warning(
+                self,
+                "功能受限",
+                f"当前项目为合并牧场项目，{feature_name}功能已被禁用。\n\n"
+                f"合并项目包含 {len(self.merged_farms)} 个牧场的数据，"
+                f"牛号已添加牧场前缀。\n\n"
+                f"如需使用此功能，请创建单个牧场项目。"
+            )
+            return False
+
+        return True
+
+    def _update_upload_restrictions(self):
+        """根据合并项目状态更新上传页面中受限功能的可用性"""
+        upload_page = self.content_stack.widget(2)  # 数据上传是第2页
+        if not upload_page:
+            return
+
+        restricted = ["体型外貌数据", "基因组检测数据"]
+        layout = upload_page.layout()
+        if not layout:
+            return
+
+        disabled_btn_style = """
+        QPushButton {
+            background-color: #95a5a6;
+            color: #dcdcdc;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 14px;
+            min-width: 150px;
+        }
+        """
+        disabled_small_btn_style = """
+        QPushButton {
+            background-color: #b0b8bf;
+            color: #dcdcdc;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            min-width: 100px;
+        }
+        """
+        normal_btn_style = """
+        QPushButton {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 14px;
+            min-width: 150px;
+        }
+        QPushButton:hover {
+            background-color: #2980b9;
+        }
+        """
+        normal_small_btn_style = """
+        QPushButton {
+            background-color: #6f7f91;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            min-width: 100px;
+        }
+        QPushButton:hover {
+            background-color: #2980b9;
+        }
+        """
+
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if not item or not item.widget():
+                continue
+            widget = item.widget()
+            display_name = widget.property("display_name")
+            if display_name in restricted:
+                is_disabled = self.is_merged_project
+                widget.setEnabled(not is_disabled)
+                # 给子按钮应用灰色/正常样式
+                for btn in widget.findChildren(QPushButton):
+                    text = btn.text()
+                    if text.startswith("上传"):
+                        btn.setStyleSheet(disabled_btn_style if is_disabled else normal_btn_style)
+                    elif text.startswith("下载"):
+                        btn.setStyleSheet(disabled_small_btn_style if is_disabled else normal_small_btn_style)
 
     def delete_project(self):
         """删除选中的项目"""
@@ -1299,6 +1449,7 @@ class MainWindow(QMainWindow):
                 if hasattr(self, 'system_type_label'):
                     self.system_type_label.setText(f"当前数据系统: {source}")
                 self.content_stack.setCurrentIndex(2)  # 数据上传
+                self._update_upload_restrictions()
             elif text == "关键育种性状分析":
                 self.content_stack.setCurrentIndex(3)  # 性状分析
             elif text == "牛只指数计算排名":
@@ -1306,6 +1457,16 @@ class MainWindow(QMainWindow):
             elif text == "近交系数及隐性基因分析":
                 self.content_stack.setCurrentIndex(5)  # 近交分析
             elif text == "个体选配":
+                if not self._check_merged_project_restriction("个体选配"):
+                    # 恢复之前的导航项
+                    self.nav_list.blockSignals(True)
+                    for i in range(self.nav_list.count()):
+                        item = self.nav_list.item(i)
+                        if item and item.text().strip() != "个体选配":
+                            self.nav_list.setCurrentItem(item)
+                            break
+                    self.nav_list.blockSignals(False)
+                    return
                 self.content_stack.setCurrentIndex(6)  # 个体选配
             elif text == "自动化生成":
                 self.content_stack.setCurrentIndex(7)  # 自动化生成
@@ -1658,6 +1819,11 @@ class MainWindow(QMainWindow):
 
         if not file_paths:
             print("[DEBUG-MAIN-ERROR] 未提供文件路径")
+            return
+
+        # 检查合并项目功能限制
+        if not self._check_merged_project_restriction(display_name):
+            print(f"[DEBUG-MAIN] 合并项目限制: {display_name} 功能已禁用")
             return
 
         # 存储当前上传的文件路径（用于错误处理时打开文件）
@@ -2720,9 +2886,12 @@ class MainWindow(QMainWindow):
             engine = create_engine(f'sqlite:///{LOCAL_DB_PATH}')
 
             main_categories = ["常规", "性控"]
-            # 直接使用semen_type筛选数据（不再使用classification）
+            # 直接使用semen_type筛选数据，同时取 bull_id_original 用于显示
+            cols = ['bull_id', 'semen_type']
+            if 'bull_id_original' in df.columns:
+                cols.append('bull_id_original')
             bull_data_by_category = {
-                cat: df[df['semen_type'] == cat][['bull_id', 'semen_type']].values.tolist()
+                cat: df[df['semen_type'] == cat][cols].values.tolist()
                 for cat in main_categories
             }
 
@@ -2745,9 +2914,14 @@ class MainWindow(QMainWindow):
                     print(f"[SemenPreview] 类别 '{category}' 找到 {len(bull_data_in_category)} 条数据")
                     semen_table.setRowCount(len(bull_data_in_category))
 
-                    for i, (bull_id, semen_type) in enumerate(bull_data_in_category):
-                        # 设置冻精编号
-                        id_item = QTableWidgetItem(bull_id)
+                    for i, row_data in enumerate(bull_data_in_category):
+                        bull_id = row_data[0]       # 标准化号（用于数据库查询）
+                        semen_type = row_data[1]
+                        display_id = row_data[2] if len(row_data) > 2 else bull_id  # 原始号
+
+                        # 设置冻精编号：显示原始号，UserRole存标准化号
+                        id_item = QTableWidgetItem(str(display_id))
+                        id_item.setData(Qt.ItemDataRole.UserRole, str(bull_id))
                         id_item.setFlags(id_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                         id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                         semen_table.setItem(i, 0, id_item)
@@ -3056,7 +3230,8 @@ class MainWindow(QMainWindow):
                     count_item = table.item(row, 13)
 
                     if bull_id_item and count_item:
-                        bull_id = bull_id_item.text()
+                        # 优先从 UserRole 读取标准化号
+                        bull_id = bull_id_item.data(Qt.ItemDataRole.UserRole) or bull_id_item.text()
                         count_text = count_item.text()
 
                         if count_text.isdigit():
@@ -3129,7 +3304,8 @@ class MainWindow(QMainWindow):
                 count_item = table.item(row, 13)   # 支数
 
                 if bull_id_item and count_item:
-                    bull_id = bull_id_item.text()
+                    # 优先从 UserRole 读取标准化号
+                    bull_id = bull_id_item.data(Qt.ItemDataRole.UserRole) or bull_id_item.text()
                     count_text = count_item.text()
 
                     if count_text.isdigit():
@@ -3542,6 +3718,10 @@ class MainWindow(QMainWindow):
         """执行完整的个体选配流程（一键完成）"""
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
+            return
+
+        # 检查合并项目功能限制
+        if not self._check_merged_project_restriction("个体选配"):
             return
 
         # 获取选中的分组

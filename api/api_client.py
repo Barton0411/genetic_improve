@@ -50,13 +50,12 @@ class APIClient:
             'User-Agent': 'GeneticImprove-Client/2.0'
         })
 
-        # 禁用代理，确保直接连接服务器
-        if platform.system() != 'Darwin':  # 非Mac平台
-            self.session.trust_env = False  # 不使用系统代理设置
-            self.session.proxies = {
-                'http': None,
-                'https': None
-            }
+        # 禁用代理，确保直接连接服务器（所有平台）
+        self.session.trust_env = False  # 不使用系统代理设置
+        self.session.proxies = {
+            'http': None,
+            'https': None
+        }
 
     def _load_config(self, config_file: Optional[str] = None):
         """加载配置文件"""
@@ -228,7 +227,7 @@ class APIClient:
         Returns:
             (成功标志, 状态信息)
         """
-        success, response = self._make_request('GET', '/auth/health')
+        success, response = self._make_request('GET', '/api/auth/health')
 
         if success and response.get('success'):
             return True, response.get('message', 'API服务正常')

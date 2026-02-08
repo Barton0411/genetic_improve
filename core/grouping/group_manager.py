@@ -460,21 +460,29 @@ class GroupManager:
             progress_callback.set_task_info("正在计算日龄和DIM...")
             progress_callback.update_progress(15)
 
+        # 强制转换关键数值列，防止 Excel 格式导致 datetime64 误读
+        for col in ['lac', 'services_time']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        df['lac'] = df['lac'].fillna(0)
+
         # 计算日龄和DIM
         today = datetime.now()
         df['birth_date'] = pd.to_datetime(df['birth_date'], errors='coerce')
         df['calving_date'] = pd.to_datetime(df['calving_date'], errors='coerce')
-        
+
         # 计算日龄 - 正确处理NaN值
         df['日龄'] = df['birth_date'].apply(
             lambda x: (today - x).days if pd.notna(x) else None
         )
-        
+        df['日龄'] = pd.to_numeric(df['日龄'], errors='coerce')
+
         # 计算DIM - 正确处理NaN值
         df['DIM'] = df['calving_date'].apply(
             lambda x: (today - x).days if pd.notna(x) else None
         )
-        
+        df['DIM'] = pd.to_numeric(df['DIM'], errors='coerce')
+
         # 检查日龄计算是否有异常值
         invalid_age_mask = df['日龄'].notna() & ((df['日龄'] < 0) | (df['日龄'] > 3650))  # 超过10年的日龄视为异常
         if invalid_age_mask.any():

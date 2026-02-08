@@ -12,6 +12,27 @@ import logging
 class YQNDataConverter:
     """伊起牛数据转换器 - 将API数据转换为标准Excel格式"""
 
+    # 需要添加牧场前缀的API字段（多选模式下）
+    FIELDS_NEED_PREFIX = ['earNum', 'motherNum']
+
+    # 配种记录字段映射
+    BREEDING_FIELD_MAPPING = {
+        'earNum': '耳号',
+        'insemDate': '配种日期',
+        'frozenSpermNum': '冻精编号',
+        'frozenSpermType': '冻精类型',
+    }
+
+    # 冻精类型值转换
+    FROZEN_SPERM_TYPE_MAP = {
+        'FST001': '性控冻精',
+        'FST002': '普通冻精',
+        'FST003': '超级性控',
+    }
+
+    # 配种记录输出列顺序
+    BREEDING_OUTPUT_COLUMNS = ['耳号', '配种日期', '冻精编号', '冻精类型']
+
     # 字段映射: API字段名 → 标准字段名
     # 支持多个别名应对API字段变化
     FIELD_MAPPING = {
@@ -82,13 +103,20 @@ class YQNDataConverter:
     }
 
     @staticmethod
-    def convert_herd_to_excel(api_data: dict, output_path: Path) -> Path:
+    def convert_herd_to_excel(
+        api_data: dict,
+        output_path: Path,
+        farm_code: str = None,
+        add_prefix: bool = False
+    ) -> Path:
         """
         将API牛群数据转换为Excel文件
 
         参数:
             api_data: API返回的原始数据
             output_path: 输出Excel文件路径
+            farm_code: 牧场站号（多选模式下用于添加前缀）
+            add_prefix: 是否添加牧场前缀到牛号字段
 
         返回:
             Excel文件路径
@@ -102,6 +130,11 @@ class YQNDataConverter:
         records = api_data.get("data", [])
         if not records:
             raise ValueError("API返回的牛群数据为空")
+
+        # 多选模式：添加牧场前缀
+        if add_prefix and farm_code:
+            records = YQNDataConverter._add_farm_prefix(records, farm_code)
+            logger.info(f"已为 {len(records)} 条记录添加牧场前缀: {farm_code}")
 
         logger.info(f"开始转换 {len(records)} 条牛只数据")
 
@@ -290,3 +323,210 @@ class YQNDataConverter:
         df_cleaned = YQNDataConverter._clean_data(df_renamed)
 
         return df_cleaned
+
+    @staticmethod
+    def _add_farm_prefix(records: list, farm_code: str) -> list:
+        """
+        为牛号字段添加牧场前缀
+
+        参数:
+            records: 原始数据记录列表
+            farm_code: 牧场站号
+
+        返回:
+            处理后的记录列表
+        """
+        logger = logging.getLogger(__name__)
+
+        for record in records:
+            for field in YQNDataConverter.FIELDS_NEED_PREFIX:
+                if field in record and record[field]:
+                    original_value = str(record[field]).strip()
+                    if original_value and original_value.lower() not in ['nan', 'none', 'null', '']:
+                        # 格式：站号 + 原牛号（直接拼接，无分隔符）
+                        record[field] = f"{farm_code}{original_value}"
+
+        logger.info(f"已处理 {len(records)} 条记录的牛号前缀")
+        return records
+
+    @staticmethod
+    def merge_herd_data(all_api_data: list) -> dict:
+        """
+        合并多个牧场的牛群数据
+
+        参数:
+            all_api_data: 包含 (farm_code, api_data) 元组的列表
+
+        返回:
+            合并后的API数据格式
+        """
+        logger = logging.getLogger(__name__)
+
+        merged_records = []
+        for farm_code, api_data in all_api_data:
+            records = api_data.get("data", [])
+            # 添加牧场前缀
+            prefixed_records = YQNDataConverter._add_farm_prefix(records.copy(), farm_code)
+            merged_records.extend(prefixed_records)
+            logger.info(f"合并牧场 {farm_code}：{len(records)} 条记录")
+
+        logger.info(f"合并完成，总计 {len(merged_records)} 条记录")
+
+        return {
+            "code": 200,
+            "data": merged_records
+        }
+
+    @staticmethod
+    def convert_breeding_records_to_excel(api_data: dict, output_path: Path) -> Path:
+        """
+        将配种记录API数据转换为Excel文件
+
+        参数:
+            api_data: API返回的原始数据 {"code": 0, "data": {"rows": [...]}}
+            output_path: 输出Excel文件路径
+
+        返回:
+            Excel文件路径
+
+        异常:
+            ValueError: 数据为空或格式错误
+        """
+        logger = logging.getLogger(__name__)
+
+        # 提取数据记录 - 配种记录在 data.rows 中
+        data = api_data.get("data", {})
+        if isinstance(data, dict):
+            records = data.get("rows", [])
+        else:
+            records = []
+
+        if not records:
+            raise ValueError("API返回的配种记录数据为空")
+
+        logger.info(f"开始转换 {len(records)} 条配种记录")
+
+        df = pd.DataFrame(records)
+
+        # 字段映射
+        rename_map = {}
+        for api_field, std_field in YQNDataConverter.BREEDING_FIELD_MAPPING.items():
+            if api_field in df.columns:
+                rename_map[api_field] = std_field
+        df = df.rename(columns=rename_map)
+
+        # 冻精类型值转换
+        if '冻精类型' in df.columns:
+            df['冻精类型'] = df['冻精类型'].map(
+                YQNDataConverter.FROZEN_SPERM_TYPE_MAP
+            ).fillna(df['冻精类型'])
+
+        # ID字段转字符串并清洗
+        for col in ['耳号', '冻精编号']:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.strip()
+                df[col] = df[col].replace(['nan', 'None', 'null'], '')
+
+        # 只保留需要的列（存在的列）
+        output_cols = [c for c in YQNDataConverter.BREEDING_OUTPUT_COLUMNS if c in df.columns]
+        df = df[output_cols]
+
+        # 保存
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_excel(output_path, index=False)
+
+        logger.info(f"配种记录已保存到: {output_path}, 共 {len(df)} 条")
+        return output_path
+
+    @staticmethod
+    def convert_stock_to_semen_inventory(api_data: dict, output_path: Path) -> Path:
+        """
+        将冻精库存API数据转换为冻精库存Excel文件
+
+        API字段映射:
+            materialNum → 物资编号
+            stockSum → 库存数量
+
+        生成的Excel文件使用冻精库存模板格式（物资编号/库存数量），
+        后续由 processor.py 的 detect_and_convert_inventory_template 自动识别处理。
+
+        参数:
+            api_data: API返回的原始数据 {"code": 200, "data": [...]}
+            output_path: 输出Excel文件路径
+
+        返回:
+            Excel文件路径
+
+        异常:
+            ValueError: 数据为空
+        """
+        logger = logging.getLogger(__name__)
+
+        records = api_data.get("data", [])
+        if not records:
+            raise ValueError("API返回的冻精库存数据为空")
+
+        logger.info(f"开始转换 {len(records)} 条冻精库存记录")
+
+        df = pd.DataFrame(records)
+
+        # 只保留需要的列并重命名
+        result = pd.DataFrame()
+        result['物资编号'] = df['materialNum'].astype(str).str.strip()
+        result['库存数量'] = pd.to_numeric(df['stockSum'], errors='coerce').fillna(0)
+
+        # 清洗：去除空编号
+        result = result[
+            result['物资编号'].notna() &
+            (result['物资编号'] != '') &
+            (result['物资编号'].str.lower() != 'nan')
+        ]
+
+        result = result.reset_index(drop=True)
+
+        # 保存
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        result.to_excel(output_path, index=False)
+
+        # 统计有库存的记录数
+        in_stock = (result['库存数量'] > 0).sum()
+        logger.info(f"冻精库存已保存到: {output_path}, 共 {len(result)} 条 (有库存: {in_stock} 条)")
+
+        return output_path
+
+    @staticmethod
+    def merge_breeding_records(all_records: List[tuple]) -> List[dict]:
+        """
+        合并多个牧场的配种记录，多牧场时给耳号加站号前缀
+
+        参数:
+            all_records: [(farm_code, api_data), ...] 元组列表
+
+        返回:
+            合并后的记录列表
+        """
+        logger = logging.getLogger(__name__)
+
+        merged = []
+        add_prefix = len(all_records) > 1
+
+        for farm_code, api_data in all_records:
+            data = api_data.get("data", {})
+            if isinstance(data, dict):
+                records = data.get("rows", [])
+            else:
+                records = []
+
+            if add_prefix and farm_code:
+                for record in records:
+                    ear_num = record.get('earNum')
+                    if ear_num:
+                        val = str(ear_num).strip()
+                        if val and val.lower() not in ['nan', 'none', 'null', '']:
+                            record['earNum'] = f"{farm_code}{val}"
+
+            merged.extend(records)
+            logger.info(f"合并牧场 {farm_code} 配种记录: {len(records)} 条")
+
+        logger.info(f"配种记录合并完成，总计 {len(merged)} 条")
+        return merged

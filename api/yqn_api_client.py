@@ -86,8 +86,8 @@ class YQNApiClient:
                         farms = data.get("farms", [])
                         self.logger.info(f"farms: {type(farms)}, 长度={len(farms) if farms else 0}")
 
-                # 检查API返回的业务状态码
-                if result.get("code") != 200:
+                # 检查API返回的业务状态码（200=通用成功，0=部分接口成功码）
+                if result.get("code") not in (0, 200):
                     raise ValueError(f"API错误: {result.get('msg', '未知错误')}")
 
                 self.logger.info(f"API请求成功")
@@ -158,7 +158,7 @@ class YQNApiClient:
 
     def get_farm_herd(self, farm_code: str) -> dict:
         """
-        获取牧场牛群数据
+        获取牧场牛群数据（含不在场牛）
 
         参数:
             farm_code: 牧场站号
@@ -171,18 +171,107 @@ class YQNApiClient:
                     {
                         "earNum": "牛号",
                         "fatherNum": "父号",
+                        "living": True/False,  # 是否在场
                         ...
                     },
                     ...
                 ]
             }
         """
-        self.logger.info(f"获取牧场 {farm_code} 的牛群数据")
+        self.logger.info(f"获取牧场 {farm_code} 的牛群数据（含不在场牛）")
+        params = {
+            "farmCode": farm_code
+        }
+        return self._request("GET", "/cattle/farmcow/getNewHerd", params=params)
+
+    def get_farm_list(self) -> dict:
+        """
+        获取牧场列表（大区/区域/牧场结构）
+
+        返回:
+            {
+                "code": 200,
+                "msg": "操作成功",
+                "data": [
+                    {
+                        "farmCode": "10042",
+                        "name": "XX牧场",
+                        "region": "龙江区域",
+                        "area": "东部奶源大区",
+                        "isAvailable": 1,  # 1=可用, 0=关停
+                        ...
+                    },
+                    ...
+                ]
+            }
+        """
+        self.logger.info("获取牧场列表（带大区/区域信息）")
+        return self._request("GET", "/system/farm/getFarmList")
+
+    def get_breeding_records(self, farm_code: str) -> dict:
+        """
+        获取配种记录
+
+        参数:
+            farm_code: 牧场站号（必传）
+
+        返回:
+            {
+                "code": 0,
+                "msg": "",
+                "data": {
+                    "total": 123,
+                    "rows": [
+                        {
+                            "earNum": "牛号",
+                            "insemDate": "配种时间",
+                            "frozenSpermNum": "冻精号",
+                            "frozenSpermType": "冻精类型（FST001=性控, FST002=常规）",
+                            "eventInseminationTimes": "本胎次配次",
+                            "cowLactation": "胎次",
+                            "cowMonthAge": "月龄",
+                            "cowBirthday": "出生日期",
+                            ...
+                        }
+                    ]
+                }
+            }
+        """
+        self.logger.info(f"获取牧场 {farm_code} 的配种记录")
         params = {
             "farmCode": farm_code,
-            "equipment": "afilmilk"
+            "insemType": "IT001"  # 必传，固定值
         }
-        return self._request("GET", "/cattle/farmcow/getHerd", params=params)
+        return self._request("GET", "/breed/insem/getInsemList", params=params)
+
+    def get_stock_detail(self, farm_code: str) -> dict:
+        """
+        获取牧场冻精库存详情
+
+        参数:
+            farm_code: 牧场站号
+
+        返回:
+            {
+                "code": 200,
+                "msg": null,
+                "data": [
+                    {
+                        "materialNum": "291HO22028",
+                        "stockSum": 135.0,
+                        "materialClassify": "DJ",
+                        ...
+                    },
+                    ...
+                ]
+            }
+        """
+        self.logger.info(f"获取牧场 {farm_code} 的冻精库存")
+        params = {
+            "farmCode": farm_code,
+            "materialClassify": "DJ"
+        }
+        return self._request("GET", "/stock/stock/getStockDetail", params=params)
 
     def search_farms(self, keyword: str, user_farms: List[dict]) -> List[dict]:
         """
