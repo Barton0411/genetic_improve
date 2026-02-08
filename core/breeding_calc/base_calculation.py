@@ -84,22 +84,44 @@ class BaseCowCalculation:
         Returns:
             bool: 是否保存成功
         """
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QThread
+
+        def _is_main_thread():
+            app = QApplication.instance()
+            return app is not None and QThread.currentThread() == app.thread()
+
         while True:
             try:
                 df.to_excel(output_path, index=False)
                 return True
             except PermissionError:
-                reply = QMessageBox.question(
-                    None,
-                    "文件被占用",
-                    f"文件 {output_path.name} 正在被其他程序使用。\n"
-                    "请关闭该文件后点击'重试'继续，或点击'取消'停止操作。",
-                    QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Cancel
-                )
-                if reply == QMessageBox.StandardButton.Cancel:
+                if _is_main_thread():
+                    reply = QMessageBox.question(
+                        None,
+                        "文件被占用",
+                        f"文件 {output_path.name} 正在被其他程序使用。\n"
+                        "请关闭该文件后点击'重试'继续，或点击'取消'停止操作。",
+                        QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Cancel
+                    )
+                    if reply == QMessageBox.StandardButton.Cancel:
+                        return False
+                else:
+                    import time
+                    for attempt in range(3):
+                        time.sleep(1)
+                        try:
+                            df.to_excel(output_path, index=False)
+                            return True
+                        except PermissionError:
+                            continue
+                    print(f"[警告] 文件 {output_path.name} 被占用，保存失败")
                     return False
             except Exception as e:
-                QMessageBox.critical(None, "错误", f"保存文件时发生错误：{str(e)}")
+                if _is_main_thread():
+                    QMessageBox.critical(None, "错误", f"保存文件时发生错误：{str(e)}")
+                else:
+                    print(f"[错误] 保存文件失败: {e}")
                 return False
 
     def process_missing_bulls(self, missing_bulls: list, source: str, username: str) -> bool:
@@ -165,6 +187,59 @@ class BaseCowCalculation:
             print(f"[检查点] 异常详情:\n{traceback.format_exc()}")
             print("========== [检查点] 缺失公牛上传流程结束 ==========\n")
             return False
+
+    def query_bull_traits_batch(self, bull_ids: list, selected_traits: list) -> dict:
+        """
+        批量从数据库查询多个公牛的性状数据
+
+        Args:
+            bull_ids: 公牛ID列表
+            selected_traits: 选中的性状列表
+
+        Returns:
+            dict: {bull_id_str: (trait_data_dict, True), ...}，未找到的不包含在结果中
+        """
+        results_map = {}
+        if not bull_ids:
+            return results_map
+
+        try:
+            with self.db_engine.connect() as conn:
+                batch_size = 500
+                all_ids = [str(bid) for bid in bull_ids]
+
+                # 先用 BULL NAAB 批量查询
+                for batch_start in range(0, len(all_ids), batch_size):
+                    batch = all_ids[batch_start:batch_start + batch_size]
+                    placeholders = ','.join([f':id_{i}' for i in range(len(batch))])
+                    params = {f'id_{i}': bid for i, bid in enumerate(batch)}
+                    sql = text(f"SELECT * FROM bull_library WHERE `BULL NAAB` IN ({placeholders})")
+                    rows = conn.execute(sql, params).fetchall()
+                    for row in rows:
+                        row_dict = dict(row._mapping)
+                        bull_id_key = str(row_dict.get('BULL NAAB', ''))
+                        trait_data = {trait: row_dict.get(trait) for trait in selected_traits}
+                        results_map[bull_id_key] = (trait_data, True)
+
+                # 对未找到的ID，再用 BULL REG 查询
+                missing_ids = [bid for bid in all_ids if bid not in results_map]
+                if missing_ids:
+                    for batch_start in range(0, len(missing_ids), batch_size):
+                        batch = missing_ids[batch_start:batch_start + batch_size]
+                        placeholders = ','.join([f':id_{i}' for i in range(len(batch))])
+                        params = {f'id_{i}': bid for i, bid in enumerate(batch)}
+                        sql = text(f"SELECT * FROM bull_library WHERE `BULL REG` IN ({placeholders})")
+                        rows = conn.execute(sql, params).fetchall()
+                        for row in rows:
+                            row_dict = dict(row._mapping)
+                            bull_id_key = str(row_dict.get('BULL REG', ''))
+                            trait_data = {trait: row_dict.get(trait) for trait in selected_traits}
+                            results_map[bull_id_key] = (trait_data, True)
+
+        except Exception as e:
+            print(f"批量查询公牛性状数据失败: {e}")
+
+        return results_map
 
     def query_bull_traits(self, bull_id: str, selected_traits: list) -> Tuple[dict, bool]:
         """

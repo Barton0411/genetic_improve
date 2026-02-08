@@ -90,67 +90,56 @@ class ExcelBasedPPTGenerator:
             logger.info("开始生成PPT报告 v2.0（基于Excel）")
             logger.info("=" * 60)
 
-            # 1. 初始化组件 (0-5%)
-            self._report_progress(progress_callback, "正在初始化...", 0)
-            self._initialize_components()
-            self._report_progress(progress_callback, "✓ 初始化完成", 5)
-
-            # 2. 收集数据 (5-15%)
-            self._report_progress(progress_callback, "正在读取Excel报告数据...", 5)
-            data = self.data_collector.collect_all_data()
-            self.farm_info = data.get('farm_info_dict', {}) or {}
-            self._report_progress(progress_callback, "✓ 数据读取完成", 15)
-
-            # 3. 创建PPT演示文稿 (15-20%)
-            self._report_progress(progress_callback, "正在创建PPT...", 15)
-            self._create_presentation()
-            self._report_progress(progress_callback, "✓ PPT创建完成", 20)
+            # 1-3. 并行初始化：workbook加载 + 数据收集 + PPT创建
+            self._report_progress(progress_callback, "正在初始化（并行加载）...", 0)
+            self._initialize_and_load_parallel(progress_callback)
+            self._report_progress(progress_callback, "✓ 初始化完成", 20)
 
             # 4. 生成各部分幻灯片 (20-90%)
-            total_parts = 7
-            current_progress = 20
-            progress_per_part = 70 / total_parts
+            data = self._collected_data
+            # 按实际耗时分配权重：Part4(遗传评估~12页)和Part6(公牛分析)最耗时
+            part_weights = [3, 5, 5, 35, 5, 25, 5]  # 总共83 → 归一化到70%
+            total_weight = sum(part_weights)
 
-            # Part 1: 封面与目录 (20-30%)
-            self._report_progress(progress_callback, "[1/7] 生成封面与目录...", current_progress)
+            # Part 1: 封面与目录
+            self._report_progress(progress_callback, "[1/7] 生成封面与目录...", 20)
             self._build_part1_cover_and_toc()
-            current_progress += progress_per_part
-            self._report_progress(progress_callback, "✓ Part 1 完成", int(current_progress))
+            p1_end = 20 + int(70 * part_weights[0] / total_weight)
+            self._report_progress(progress_callback, "✓ Part 1 完成", p1_end)
 
-            # Part 2: 牧场概况 (30-40%)
-            self._report_progress(progress_callback, "[2/7] 生成牧场概况...", int(current_progress))
+            # Part 2: 牧场概况
+            self._report_progress(progress_callback, "[2/7] 生成牧场概况...", p1_end)
             self._build_part2_farm_overview(data)
-            current_progress += progress_per_part
-            self._report_progress(progress_callback, "✓ Part 2 完成", int(current_progress))
+            p2_end = 20 + int(70 * sum(part_weights[:2]) / total_weight)
+            self._report_progress(progress_callback, "✓ Part 2 完成", p2_end)
 
-            # Part 3: 系谱分析 (40-50%)
-            self._report_progress(progress_callback, "[3/7] 生成系谱分析...", int(current_progress))
+            # Part 3: 系谱分析
+            self._report_progress(progress_callback, "[3/7] 生成系谱分析...", p2_end)
             self._build_part3_pedigree(data)
-            current_progress += progress_per_part
-            self._report_progress(progress_callback, "✓ Part 3 完成", int(current_progress))
+            p3_end = 20 + int(70 * sum(part_weights[:3]) / total_weight)
+            self._report_progress(progress_callback, "✓ Part 3 完成", p3_end)
 
-            # Part 4: 遗传评估 (50-65%)
-            self._report_progress(progress_callback, "[4/7] 生成遗传评估...", int(current_progress))
+            # Part 4: 遗传评估（最耗时：~12页正态分布+表格+图表）
+            self._report_progress(progress_callback, "[4/7] 生成遗传评估（共~12页，请耐心等待）...", p3_end)
             self._build_part4_genetics(data)
-            current_progress += progress_per_part
-            self._report_progress(progress_callback, "✓ Part 4 完成", int(current_progress))
+            p4_end = 20 + int(70 * sum(part_weights[:4]) / total_weight)
+            self._report_progress(progress_callback, "✓ Part 4 完成", p4_end)
 
-            # Part 5: 配种记录 (65-75%)
-            self._report_progress(progress_callback, "[5/7] 生成配种分析...", int(current_progress))
+            # Part 5: 配种记录
+            self._report_progress(progress_callback, "[5/7] 生成配种分析...", p4_end)
             self._build_part5_breeding(data)
-            current_progress += progress_per_part
-            self._report_progress(progress_callback, "✓ Part 5 完成", int(current_progress))
+            p5_end = 20 + int(70 * sum(part_weights[:5]) / total_weight)
+            self._report_progress(progress_callback, "✓ Part 5 完成", p5_end)
 
-            # Part 6: 公牛使用 (75-85%)
-            self._report_progress(progress_callback, "[6/7] 生成公牛分析...", int(current_progress))
+            # Part 6: 公牛使用（较耗时：折线图数据提取+更新）
+            self._report_progress(progress_callback, "[6/7] 生成公牛分析...", p5_end)
             self._build_part6_bulls(data)
-            current_progress += progress_per_part
-            self._report_progress(progress_callback, "✓ Part 6 完成", int(current_progress))
+            p6_end = 20 + int(70 * sum(part_weights[:6]) / total_weight)
+            self._report_progress(progress_callback, "✓ Part 6 完成", p6_end)
 
-            # Part 7: 选配推荐 (85-90%)
-            self._report_progress(progress_callback, "[7/7] 生成选配推荐...", int(current_progress))
+            # Part 7: 选配推荐
+            self._report_progress(progress_callback, "[7/7] 生成选配推荐...", p6_end)
             self._build_part7_mating(data)
-            current_progress += progress_per_part
             self._report_progress(progress_callback, "✓ Part 7 完成", 90)
 
             # 4.5 清理空数据页面
@@ -187,7 +176,7 @@ class ExcelBasedPPTGenerator:
             return False
 
     def _initialize_components(self):
-        """初始化各组件"""
+        """初始化各组件（不含workbook预加载）"""
         # 查找Excel报告（如果还没找到）
         if self.excel_report_path is None:
             self.excel_report_path = find_excel_report(self.reports_folder)
@@ -204,21 +193,74 @@ class ExcelBasedPPTGenerator:
         # 跟踪所有 builder 实例（用于收集待删除的空数据页面）
         self._builders = []
 
-        # 预加载openpyxl workbook (data_only=True)
-        # 这是耗时操作，约21秒，但只需加载一次
-        logger.info("预加载Excel workbook (openpyxl data_only=True)...")
-        t0 = time.perf_counter()
-        self._cached_workbook_data_only = load_workbook(
-            str(self.excel_report_path), data_only=True
-        )
-        t1 = time.perf_counter()
-        logger.info(f"✓ Excel workbook预加载完成，耗时: {t1-t0:.2f}秒")
-
-        # data_only=False 的workbook延迟加载（只有Part6 Timeline需要，用于提取图片）
-        # 设为None，在需要时才加载
+        # data_only=True/False 的workbook缓存（由并行加载填充）
+        self._cached_workbook_data_only = None
         self._cached_workbook = None
 
         logger.info("组件初始化完成")
+
+    def _initialize_and_load_parallel(self, progress_callback=None):
+        """
+        并行初始化：两个workbook加载 与 数据收集+PPT创建 同时进行
+
+        三个任务并行：
+        - 线程1: load_workbook(data_only=True)  ~15s（图表/表格数据读取用）
+        - 线程2: load_workbook(data_only=False) ~20s（时间线图片提取用）
+        - 主线程: 数据收集 ~8s + PPT创建 ~1s
+
+        总耗时 ≈ max(20s, 9s) ≈ 20s，避免Part 6延迟加载20秒
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        # 基础初始化（快速，不含workbook加载）
+        self._initialize_components()
+
+        excel_path_str = str(self.excel_report_path)
+        wb_data_only_result = [None]
+        wb_full_result = [None]
+
+        def _load_wb_data_only():
+            """后台线程1：加载data_only workbook（图表数据读取）"""
+            logger.info("预加载Excel workbook (data_only=True)...")
+            t0 = time.perf_counter()
+            wb = load_workbook(excel_path_str, data_only=True)
+            logger.info(f"✓ data_only workbook加载完成，耗时: {time.perf_counter()-t0:.2f}秒")
+            wb_data_only_result[0] = wb
+
+        def _load_wb_full():
+            """后台线程2：加载完整workbook（时间线图片提取）"""
+            logger.info("预加载Excel workbook (data_only=False)...")
+            t0 = time.perf_counter()
+            wb = load_workbook(excel_path_str, data_only=False)
+            logger.info(f"✓ 完整workbook加载完成，耗时: {time.perf_counter()-t0:.2f}秒")
+            wb_full_result[0] = wb
+
+        # 三路并行：2个workbook加载 + 主线程数据收集
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            wb_future1 = executor.submit(_load_wb_data_only)
+            wb_future2 = executor.submit(_load_wb_full)
+
+            # 主线程同时执行：数据收集 + PPT创建
+            self._report_progress(progress_callback, "正在读取Excel报告数据...", 3)
+            data = self.data_collector.collect_all_data()
+            self.farm_info = data.get('farm_info_dict', {}) or {}
+            self._report_progress(progress_callback, "✓ 数据读取完成", 12)
+
+            self._report_progress(progress_callback, "正在创建PPT...", 12)
+            self._create_presentation()
+            self._report_progress(progress_callback, "✓ PPT创建完成", 15)
+
+            # 等待两个workbook加载完成
+            self._report_progress(progress_callback, "等待workbook加载完成...", 15)
+            wb_future1.result()
+            wb_future2.result()
+
+        self._cached_workbook_data_only = wb_data_only_result[0]
+        self._cached_workbook = wb_full_result[0]
+        self._report_progress(progress_callback, "✓ 全部初始化完成", 18)
+
+        # 确保data被存储以供后续使用
+        self._collected_data = data
 
     def _create_presentation(self):
         """创建PPT演示文稿"""

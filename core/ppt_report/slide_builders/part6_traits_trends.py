@@ -87,6 +87,9 @@ class Part6TraitsTrendsBuilder(BaseSlideBuilder):
         Returns:
             List[Dict]: [{'index': 1, 'title': '经济指数', 'data': {...}}, ...]
         """
+        # 保存路径，供系列名称回退读取使用
+        self._current_excel_path = excel_path
+
         # 优先使用缓存的workbook
         if cached_wb is not None:
             wb = cached_wb
@@ -203,7 +206,12 @@ class Part6TraitsTrendsBuilder(BaseSlideBuilder):
             # 提取系列名称
             series_name = ""
             if hasattr(series, 'tx') and series.tx:
-                if hasattr(series.tx, 'strRef') and series.tx.strRef:
+                # 1) 直接值
+                if hasattr(series.tx, 'v') and series.tx.v:
+                    series_name = str(series.tx.v)
+
+                # 2) 从strRef读取
+                if not series_name and hasattr(series.tx, 'strRef') and series.tx.strRef:
                     if hasattr(series.tx.strRef, 'strCache') and series.tx.strRef.strCache:
                         if hasattr(series.tx.strRef.strCache, 'pt') and series.tx.strRef.strCache.pt:
                             for pt in series.tx.strRef.strCache.pt:
@@ -377,6 +385,29 @@ class Part6TraitsTrendsBuilder(BaseSlideBuilder):
             logger.warning(f"更新图表数据失败: {e}")
             logger.debug(f"错误详情: {e}", exc_info=True)
 
+    def _read_single_cell_from_formula(self, wb, formula: str) -> str:
+        """
+        从Excel公式引用读取单个单元格的值（用于系列名称）
+
+        Args:
+            wb: workbook对象
+            formula: 如 "'已用公牛性状汇总'!$B$1" 或 "Sheet1!$A$1"
+
+        Returns:
+            单元格的字符串值
+        """
+        import re
+        # 匹配单个单元格: 'Sheet Name'!$A$1 或 Sheet1!$A$1
+        pattern = r"(?:'([^']+)'|([^!]+))!\$?([A-Z]+)\$?(\d+)"
+        match = re.match(pattern, formula.strip())
+        if match:
+            sheet_name = match.group(1) or match.group(2)
+            col, row = match.group(3), int(match.group(4))
+            ws = wb[sheet_name]
+            val = ws[f"{col}{row}"].value
+            return str(val) if val is not None else ""
+        return ""
+
     def _parse_cell_reference(self, formula: str):
         """
         解析Excel公式引用，提取sheet名称和单元格范围
@@ -455,16 +486,29 @@ class Part6TraitsTrendsBuilder(BaseSlideBuilder):
 
             for idx, series in enumerate(excel_chart.series):
                 logger.debug(f"          处理系列{idx + 1}: val={hasattr(series, 'val')}, cat={hasattr(series, 'cat')}")
-                # 提取系列名称
+                # 提取系列名称 - 优先从tx.v直接值，然后formula，最后strCache
                 series_name = ""
                 if hasattr(series, 'tx') and series.tx:
-                    if hasattr(series.tx, 'strRef') and series.tx.strRef:
-                        if hasattr(series.tx.strRef, 'strCache') and series.tx.strRef.strCache:
-                            if hasattr(series.tx.strRef.strCache, 'pt') and series.tx.strRef.strCache.pt:
-                                for pt in series.tx.strRef.strCache.pt:
-                                    if hasattr(pt, 'v'):
-                                        series_name = pt.v
-                                        break
+                    # 1) 直接值（openpyxl生成的图表用Series(title=...)设置）
+                    if hasattr(series.tx, 'v') and series.tx.v:
+                        series_name = str(series.tx.v)
+
+                    # 2) 从strRef读取
+                    if not series_name and hasattr(series.tx, 'strRef') and series.tx.strRef:
+                        # 优先从源数据formula读取系列名
+                        if wb and hasattr(series.tx.strRef, 'f') and series.tx.strRef.f:
+                            try:
+                                series_name = self._read_single_cell_from_formula(wb, series.tx.strRef.f)
+                            except Exception:
+                                pass
+                        # 回退到strCache
+                        if not series_name:
+                            if hasattr(series.tx.strRef, 'strCache') and series.tx.strRef.strCache:
+                                if hasattr(series.tx.strRef.strCache, 'pt') and series.tx.strRef.strCache.pt:
+                                    for pt in series.tx.strRef.strCache.pt:
+                                        if hasattr(pt, 'v'):
+                                            series_name = pt.v
+                                            break
 
                 # 提取Y轴数据 - 优先从源数据读取
                 y_values = []
@@ -568,15 +612,90 @@ class Part6TraitsTrendsBuilder(BaseSlideBuilder):
             # 替换图表数据
             ppt_chart.replace_data(chart_data_obj)
 
-            # 设置数据标签格式为2位小数
+            # 设置数据标签格式为2位小数（通过XML确保生效）
             try:
+                from lxml import etree
+                c_ns = '{http://schemas.openxmlformats.org/drawingml/2006/chart}'
+
+                # 1) 设置plot级别的dLbls（lineChart/barChart节点下），确保所有系列默认继承
+                plot_element = ppt_chart.plots[0]._element if ppt_chart.plots else None
+                if plot_element is not None:
+                    plot_dLbls = plot_element.find(f'{c_ns}dLbls')
+                    if plot_dLbls is None:
+                        # 插入到第一个ser元素之前
+                        first_ser = plot_element.find(f'{c_ns}ser')
+                        plot_dLbls = etree.Element(f'{c_ns}dLbls')
+                        if first_ser is not None:
+                            first_ser.addprevious(plot_dLbls)
+                        else:
+                            plot_element.append(plot_dLbls)
+                    # 设置plot级别的numFmt
+                    p_numFmt = plot_dLbls.find(f'{c_ns}numFmt')
+                    if p_numFmt is None:
+                        p_numFmt = etree.SubElement(plot_dLbls, f'{c_ns}numFmt')
+                    p_numFmt.set('formatCode', '0.00')
+                    p_numFmt.set('sourceLinked', '0')
+                    # 设置plot级别的showVal
+                    p_showVal = plot_dLbls.find(f'{c_ns}showVal')
+                    if p_showVal is None:
+                        p_showVal = etree.SubElement(plot_dLbls, f'{c_ns}showVal')
+                    p_showVal.set('val', '1')
+                    logger.debug("  设置plot级别dLbls: numFmt=0.00, showVal=1")
+
+                # 2) 同时设置每个series级别的dLbls（确保覆盖）
                 for series in ppt_chart.series:
+                    # 使用python-pptx API设置
                     if hasattr(series, 'data_labels'):
-                        # 确保数据标签可见
                         series.data_labels.show_value = True
-                        # 设置数字格式为2位小数
+                        series.data_labels.number_format_is_linked = False
                         series.data_labels.number_format = '0.00'
-                        logger.debug(f"  设置系列'{series.name}'的数据标签格式为2位小数")
+
+                    # 同时通过XML确保numFmt生效
+                    ser_element = series._element
+                    dLbls = ser_element.find(f'{c_ns}dLbls')
+                    if dLbls is None:
+                        # 插入dLbls到ser的合适位置（在idx之后）
+                        idx_el = ser_element.find(f'{c_ns}idx')
+                        dLbls = etree.Element(f'{c_ns}dLbls')
+                        if idx_el is not None:
+                            idx_el.addnext(dLbls)
+                        else:
+                            ser_element.insert(0, dLbls)
+                    # showVal
+                    showVal = dLbls.find(f'{c_ns}showVal')
+                    if showVal is None:
+                        showVal = etree.SubElement(dLbls, f'{c_ns}showVal')
+                    showVal.set('val', '1')
+                    # numFmt
+                    numFmt = dLbls.find(f'{c_ns}numFmt')
+                    if numFmt is None:
+                        numFmt = etree.SubElement(dLbls, f'{c_ns}numFmt')
+                    numFmt.set('formatCode', '0.00')
+                    numFmt.set('sourceLinked', '0')
+
+                    # 3) 处理个别数据点的dLbl覆盖（优先级高于dLbls）
+                    for dLbl in dLbls.findall(f'{c_ns}dLbl'):
+                        lbl_numFmt = dLbl.find(f'{c_ns}numFmt')
+                        if lbl_numFmt is not None:
+                            lbl_numFmt.set('formatCode', '0.00')
+                            lbl_numFmt.set('sourceLinked', '0')
+                        else:
+                            lbl_numFmt = etree.SubElement(dLbl, f'{c_ns}numFmt')
+                            lbl_numFmt.set('formatCode', '0.00')
+                            lbl_numFmt.set('sourceLinked', '0')
+
+                    # 4) 设置numCache的formatCode（replace_data默认设为General）
+                    for numRef in ser_element.iter(f'{c_ns}numRef'):
+                        numCache = numRef.find(f'{c_ns}numCache')
+                        if numCache is not None:
+                            cache_fmt = numCache.find(f'{c_ns}formatCode')
+                            if cache_fmt is not None:
+                                cache_fmt.text = '0.00'
+                            else:
+                                cache_fmt = etree.SubElement(numCache, f'{c_ns}formatCode')
+                                cache_fmt.text = '0.00'
+
+                    logger.debug(f"  设置系列数据标签格式为2位小数(XML)")
             except Exception as e:
                 logger.debug(f"设置数据标签格式时出错: {e}")
 

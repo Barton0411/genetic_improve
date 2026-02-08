@@ -422,27 +422,27 @@ class IndexCalculation(BaseCowCalculation):
             except Exception as e:
                 return False, f"读取备选公牛数据失败: {str(e)}"
 
-            # 5. 为每个公牛查询性状数据
+            # 5. 批量查询公牛性状数据
             if task_info_callback:
-                task_info_callback("查询公牛性状...")
-            total_bulls = len(bull_df)
-            missing_bulls = []
-            for idx, row in bull_df.iterrows():
-                # 更新进度
-                if progress_callback and idx % 10 == 0:
-                    progress = 20 + int((idx / total_bulls) * 50)
-                    progress_callback(progress, f"查询公牛性状 ({idx+1}/{total_bulls})...")
+                task_info_callback("批量查询公牛性状...")
+            if progress_callback:
+                progress_callback(30, "批量查询公牛性状数据...")
 
-                bull_id = str(row['bull_id'])
-                trait_data, found = self.query_bull_traits(bull_id, selected_traits)
-                if found:
-                    for trait, value in trait_data.items():
-                        bull_df.at[idx, trait] = value
-                else:
-                    missing_bulls.append(bull_id)
-                    # 如果找不到公牛数据，所有性状值设为None
-                    for trait in selected_traits:
-                        bull_df.at[idx, trait] = None
+            all_bull_ids = bull_df['bull_id'].astype(str).tolist()
+            batch_results = self.query_bull_traits_batch(all_bull_ids, selected_traits)
+
+            # 向量化填充公牛性状（替代iterrows逐行赋值）
+            bull_ids_str = bull_df['bull_id'].astype(str)
+            found_ids = set(batch_results.keys())
+
+            for trait in selected_traits:
+                trait_map = {
+                    bull_id: trait_data.get(trait)
+                    for bull_id, (trait_data, _) in batch_results.items()
+                }
+                bull_df[trait] = bull_ids_str.map(trait_map)
+
+            missing_bulls = [bid for bid in bull_ids_str if bid not in found_ids]
 
             # 6. 处理缺失的公牛信息
             if missing_bulls:
@@ -626,21 +626,23 @@ class IndexCalculation(BaseCowCalculation):
 
                         # 优先使用原始source数据（从detail文件）
                         if original_sources and cow_id_map:
-                            # 对于每个 cow_id，计算最大的 source 值
-                            max_sources = pd.Series(index=df.index, dtype=float)
-                            for idx, row in df.iterrows():
-                                cow_id = row['cow_id'] if 'cow_id' in df.columns else None
-                                if cow_id and cow_id in cow_id_map:
-                                    detail_idx = cow_id_map[cow_id]
-                                    source_vals = []
-                                    for prefix in ['sire_', 'mgs_', 'mmgs_']:
-                                        source_col = f'{prefix}{trait}_source'
-                                        if source_col in original_sources:
-                                            val = original_sources[source_col].iloc[detail_idx]
-                                            if pd.notna(val):
-                                                source_vals.append(val)
-                                    if source_vals:
-                                        max_sources.at[idx] = max(source_vals)
+                            # 向量化计算最大source值（替代iterrows）
+                            cow_max_source = {}
+                            for cid, didx in cow_id_map.items():
+                                source_vals = []
+                                for prefix in ['sire_', 'mgs_', 'mmgs_']:
+                                    sc = f'{prefix}{trait}_source'
+                                    if sc in original_sources:
+                                        val = original_sources[sc].iloc[didx]
+                                        if pd.notna(val):
+                                            source_vals.append(val)
+                                if source_vals:
+                                    cow_max_source[cid] = max(source_vals)
+
+                            if 'cow_id' in df.columns:
+                                max_sources = df['cow_id'].map(cow_max_source)
+                            else:
+                                max_sources = pd.Series(index=df.index, dtype=float)
 
                             # 使用向量化掩码
                             mask_red = max_sources == 2
@@ -669,16 +671,17 @@ class IndexCalculation(BaseCowCalculation):
                             red_cells.extend([(r + 2, col_idx) for r in df.index[mask_red]])
                             yellow_cells.extend([(r + 2, col_idx) for r in df.index[mask_yellow]])
                         elif original_sources and cow_id_map and source_col in original_sources:
-                            # 从 original_sources 获取
-                            for idx, row in df.iterrows():
-                                cow_id = row['cow_id'] if 'cow_id' in df.columns else None
-                                if cow_id and cow_id in cow_id_map:
-                                    detail_idx = cow_id_map[cow_id]
-                                    source_value = original_sources[source_col].iloc[detail_idx]
-                                    if source_value == 2:
-                                        red_cells.append((idx + 2, col_idx))
-                                    elif source_value == 3:
-                                        yellow_cells.append((idx + 2, col_idx))
+                            # 向量化从original_sources获取（替代iterrows）
+                            cow_source_map = {
+                                cid: original_sources[source_col].iloc[didx]
+                                for cid, didx in cow_id_map.items()
+                            }
+                            if 'cow_id' in df.columns:
+                                mapped_sources = df['cow_id'].map(cow_source_map)
+                                mask_red = mapped_sources == 2
+                                mask_yellow = mapped_sources == 3
+                                red_cells.extend([(r + 2, col_idx) for r in df.index[mask_red]])
+                                yellow_cells.extend([(r + 2, col_idx) for r in df.index[mask_yellow]])
 
                 # 批量应用格式
                 for row, col in red_cells:
@@ -707,7 +710,12 @@ class IndexCalculation(BaseCowCalculation):
         Returns:
             bool: 是否保存成功
         """
-        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QThread
+
+        def _is_main_thread():
+            app = QApplication.instance()
+            return app is not None and QThread.currentThread() == app.thread()
 
         while True:
             try:
@@ -723,18 +731,33 @@ class IndexCalculation(BaseCowCalculation):
                     df.to_excel(output_path, index=False)
                     return True
             except PermissionError:
-                reply = QMessageBox.question(
-                    None,
-                    "文件被占用",
-                    f"文件 {output_path.name} 正在被其他程序使用。\n"
-                    "请关闭该文件后点击'重试'继续，或点击'取消'停止操作。",
-                    QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Cancel,
-                    QMessageBox.StandardButton.Retry
-                )
-
-                if reply == QMessageBox.StandardButton.Cancel:
-                    print(f"用户取消了保存操作: {output_path}")
+                if _is_main_thread():
+                    from PyQt6.QtWidgets import QMessageBox
+                    reply = QMessageBox.question(
+                        None,
+                        "文件被占用",
+                        f"文件 {output_path.name} 正在被其他程序使用。\n"
+                        "请关闭该文件后点击'重试'继续，或点击'取消'停止操作。",
+                        QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Cancel,
+                        QMessageBox.StandardButton.Retry
+                    )
+                    if reply == QMessageBox.StandardButton.Cancel:
+                        print(f"用户取消了保存操作: {output_path}")
+                        return False
+                else:
+                    import time
+                    for attempt in range(3):
+                        time.sleep(1)
+                        try:
+                            if 'cow_id' in df.columns:
+                                df = df.copy()
+                                df['cow_id'] = df['cow_id'].astype(str)
+                            df.to_excel(output_path, index=False)
+                            return True
+                        except PermissionError:
+                            continue
+                    print(f"[警告] 文件 {output_path.name} 被占用，保存失败")
                     return False
             except Exception as e:
                 print(f"保存文件失败: {e}")
-                return False    
+                return False

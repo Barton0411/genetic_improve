@@ -55,10 +55,38 @@ class DataCollector:
         logger.info("开始收集PPT所需数据...")
 
         total_sheets = len(EXCEL_SHEET_MAPPING)
+
+        # 批量读取PPT需要的Sheet（跳过detail_only大表，节省I/O）
+        all_sheets = {}
+        try:
+            import time as _time
+            t0 = _time.perf_counter()
+            # 只读取非detail_only且header=0的Sheet
+            needed_sheets = [
+                meta['sheet_name'] for meta in EXCEL_SHEET_MAPPING.values()
+                if not meta.get('detail_only', False) and meta.get('header', 0) == 0
+            ]
+            all_sheets = pd.read_excel(self.excel_path, sheet_name=needed_sheets, header=0)
+            t1 = _time.perf_counter()
+            logger.info(f"✓ 批量读取Excel完成，读取 {len(all_sheets)}/{len(EXCEL_SHEET_MAPPING)} 个Sheet（跳过明细表），耗时: {t1-t0:.2f}秒")
+        except Exception as e:
+            logger.error(f"批量读取Excel失败，回退到逐个读取: {e}")
+
         for key, meta in EXCEL_SHEET_MAPPING.items():
             sheet_name = meta['sheet_name']
             header = meta.get('header', 0)
-            df = self._read_sheet(sheet_name, header=header)
+
+            if header is None:
+                # 需要特殊header参数的Sheet（如farm_info），单独读取
+                df = self._read_sheet(sheet_name, header=header)
+            elif sheet_name in all_sheets:
+                # 从批量读取结果中获取
+                df = all_sheets[sheet_name]
+                logger.debug("✓ 读取Sheet: %s (%s行, 含表头)", sheet_name, len(df))
+            else:
+                # 批量读取中未找到，尝试单独读取
+                df = self._read_sheet(sheet_name, header=header)
+
             if df is not None:
                 self.data_cache[key] = df
                 logger.debug(

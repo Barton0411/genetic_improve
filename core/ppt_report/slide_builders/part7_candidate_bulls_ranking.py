@@ -30,6 +30,7 @@ class Part7CandidateBullsRankingBuilder(BaseSlideBuilder):
     def __init__(self, prs, farm_name: str):
         super().__init__(prs, None)
         self.farm_name = farm_name
+        self._cached_wb = None
 
     def build(self, data: Dict[str, Any]):
         """
@@ -53,6 +54,12 @@ class Part7CandidateBullsRankingBuilder(BaseSlideBuilder):
 
         # 确保excel_path是字符串
         excel_path = str(excel_path)
+
+        # 使用缓存的workbook
+        cached_wb = data.get("_cached_workbook_data_only")
+        if cached_wb is not None:
+            self._cached_wb = cached_wb
+            logger.debug("使用缓存的workbook (data_only)")
 
         try:
             # 动态查找包含"备选公牛排名分析"的页面
@@ -169,8 +176,13 @@ class Part7CandidateBullsRankingBuilder(BaseSlideBuilder):
         """
         logger.info("  使用Excel数据生成高质量图片...")
 
-        # 使用openpyxl读取表格数据和格式
-        wb_openpyxl = load_workbook(excel_path, data_only=True)
+        # 使用缓存的workbook或加载新的
+        _own_wb = False
+        if self._cached_wb is not None and '备选公牛排名' in self._cached_wb.sheetnames:
+            wb_openpyxl = self._cached_wb
+        else:
+            wb_openpyxl = load_workbook(excel_path, data_only=True)
+            _own_wb = True
         ws_openpyxl = wb_openpyxl['备选公牛排名']
 
         # 查找表格起始行
@@ -182,7 +194,8 @@ class Part7CandidateBullsRankingBuilder(BaseSlideBuilder):
                 break
 
         if not ranking_start_row:
-            wb_openpyxl.close()
+            if _own_wb:
+                wb_openpyxl.close()
             raise ValueError("未找到备选公牛排名表")
 
         # 查找最后一行
@@ -243,7 +256,8 @@ class Part7CandidateBullsRankingBuilder(BaseSlideBuilder):
             if ws_openpyxl.row_dimensions[row_idx].height:
                 temp_ws.row_dimensions[target_row_idx].height = ws_openpyxl.row_dimensions[row_idx].height
 
-        wb_openpyxl.close()
+        if _own_wb:
+            wb_openpyxl.close()
 
         # 保存临时Excel文件
         temp_wb.save(str(temp_excel_path))
@@ -308,8 +322,13 @@ class Part7CandidateBullsRankingBuilder(BaseSlideBuilder):
         """
         logger.info("  使用openpyxl和PIL渲染表格...")
 
-        # 使用openpyxl读取表格数据和格式
-        wb = load_workbook(excel_path, data_only=True)
+        # 使用缓存的workbook或加载新的
+        _own_wb = False
+        if self._cached_wb is not None and '备选公牛排名' in self._cached_wb.sheetnames:
+            wb = self._cached_wb
+        else:
+            wb = load_workbook(excel_path, data_only=True)
+            _own_wb = True
         ws = wb['备选公牛排名']
 
         # 查找表格起始行
@@ -321,7 +340,8 @@ class Part7CandidateBullsRankingBuilder(BaseSlideBuilder):
                 break
 
         if not ranking_start_row:
-            wb.close()
+            if _own_wb:
+                wb.close()
             raise ValueError("未找到备选公牛排名表")
 
         # 查找最后一行
@@ -346,7 +366,8 @@ class Part7CandidateBullsRankingBuilder(BaseSlideBuilder):
         # 使用PIL绘制表格
         image_path = self._draw_table_image(ws, ranking_start_row, last_row, 1, last_col)
 
-        wb.close()
+        if _own_wb:
+            wb.close()
         return image_path
 
     def _draw_table_image(self, ws, start_row: int, end_row: int, start_col: int, end_col: int) -> Path:
@@ -566,8 +587,13 @@ class Part7CandidateBullsRankingBuilder(BaseSlideBuilder):
             Tuple[pd.DataFrame, pd.DataFrame, Dict]: (标准表数据, 排名表数据, 排名表格式)
         """
         try:
-            # 使用openpyxl读取工作簿（保留格式）
-            wb = load_workbook(excel_path, data_only=True)
+            # 使用缓存的workbook或加载新的
+            _own_wb = False
+            if self._cached_wb is not None and '备选公牛排名' in self._cached_wb.sheetnames:
+                wb = self._cached_wb
+            else:
+                wb = load_workbook(excel_path, data_only=True)
+                _own_wb = True
             ws = wb['备选公牛排名']
 
             # 读取所有数据到列表
@@ -594,7 +620,8 @@ class Part7CandidateBullsRankingBuilder(BaseSlideBuilder):
 
             if ranking_start_row is None:
                 logger.error("❌ 未找到备选公牛排名表")
-                wb.close()
+                if _own_wb:
+                    wb.close()
                 return None, None, None
 
             # 排名表数据：从标题行到最后
@@ -607,7 +634,8 @@ class Part7CandidateBullsRankingBuilder(BaseSlideBuilder):
             ranking_formats = self._extract_cell_formats(ws, ranking_start_row, len(ranking_df), df.shape[1])
             logger.info(f"  提取到 {len(ranking_formats)} 个单元格格式")
 
-            wb.close()
+            if _own_wb:
+                wb.close()
             return standards_df, ranking_df, ranking_formats
 
         except Exception as e:

@@ -705,7 +705,7 @@ class Sheet3TPIDistributionBuilder(BaseSheetBuilder):
 
             # 保存为临时文件
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-            plt.savefig(temp_file.name, dpi=150, bbox_inches='tight',
+            plt.savefig(temp_file.name, dpi=100, bbox_inches='tight',
                        facecolor='white', edgecolor='none')
             plt.close(fig)
 
@@ -748,7 +748,7 @@ class Sheet3TPIDistributionBuilder(BaseSheetBuilder):
             matplotlib.rcParams['axes.unicode_minus'] = False
 
             # 创建图表
-            fig, ax = plt.subplots(figsize=(8, 6), dpi=150)
+            fig, ax = plt.subplots(figsize=(8, 6), dpi=100)
 
             # 计算数据范围
             data_min = valid_data.min()
@@ -813,7 +813,7 @@ class Sheet3TPIDistributionBuilder(BaseSheetBuilder):
 
             # 保存为临时文件
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-            plt.savefig(temp_file.name, dpi=150, bbox_inches='tight',
+            plt.savefig(temp_file.name, dpi=100, bbox_inches='tight',
                        facecolor='white', edgecolor='none')
             plt.close(fig)
 

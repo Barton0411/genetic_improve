@@ -92,14 +92,18 @@ class AuthService:
 
     def get_user_name(self) -> Optional[str]:
         """获取当前用户的姓名"""
-        if not self.username:
-            return None
-
         try:
-            # 使用API获取用户信息
-            success, user_info, message = self.api_client.get_profile()
-            if success and user_info:
-                return user_info.get('name')
+            # 优先从API客户端缓存获取（登录时已保存）
+            if self.api_client.user_info:
+                name = self.api_client.user_info.get('name')
+                if name:
+                    return name
+
+            # 回退：调用API获取
+            if self.username or self.api_client.token:
+                success, user_info, message = self.api_client.get_profile()
+                if success and user_info:
+                    return user_info.get('name')
             return None
 
         except Exception as e:

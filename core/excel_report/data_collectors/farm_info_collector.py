@@ -82,14 +82,11 @@ def _collect_basic_info(project_folder: Path, service_staff: str = None) -> dict
     # 报告生成时间
     report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # 牧场服务人员
-    if not service_staff:
-        service_staff = "未指定"
-
+    # 牧场服务人员（保留原始值，显示层决定默认文本）
     return {
         'farm_name': farm_name,
         'report_time': report_time,
-        'service_staff': service_staff
+        'service_staff': service_staff or ''
     }
 
 

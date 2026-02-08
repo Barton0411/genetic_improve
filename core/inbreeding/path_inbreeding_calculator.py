@@ -21,6 +21,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
+logger = logging.getLogger(__name__)
 
 class PathInbreedingCalculator:
     """使用通径法(Path Method)计算近交系数的计算器"""
@@ -36,6 +37,7 @@ class PathInbreedingCalculator:
         self.max_generations = max_generations
         self._inbreeding_cache = {}  # 缓存计算结果
         self._path_cache = {}  # 缓存路径结果
+        self._ancestors_cache = {}  # 祖先路径缓存: (animal_id, max_gen) -> {ancestor_id: [paths]}
 
     def clear_cache(self):
         """
@@ -46,11 +48,11 @@ class PathInbreedingCalculator:
         2. 计算逻辑修改后
         3. 需要重新计算时
         """
-        cache_count = len(self._inbreeding_cache) + len(self._path_cache)
+        cache_count = len(self._inbreeding_cache) + len(self._path_cache) + len(self._ancestors_cache)
         self._inbreeding_cache.clear()
         self._path_cache.clear()
-        print(f"已清除 {cache_count} 个缓存条目")
-        logging.info(f"清除了 {cache_count} 个缓存条目")
+        self._ancestors_cache.clear()
+        logger.info(f"清除了 {cache_count} 个缓存条目")
 
     def calculate_inbreeding_coefficient(self, animal_id: str) -> Tuple[float, Dict, Dict]:
         """
@@ -68,18 +70,17 @@ class PathInbreedingCalculator:
         # 标准化ID（可能是NAAB格式）
         animal_id = self.pedigree_db.standardize_animal_id(animal_id, 'bull')
         
-        print(f"\n========== 开始计算动物 {animal_id} 的近交系数 ==========")
-        
+        logger.debug(f"开始计算动物 {animal_id} 的近交系数")
+
         # 如果已经计算过，直接返回缓存结果
         if animal_id in self._inbreeding_cache:
             inbreeding_coef, contributions, paths = self._inbreeding_cache[animal_id]
-            print(f"发现缓存结果: 近交系数 = {inbreeding_coef:.6f} ({inbreeding_coef*100:.4f}%)")
+            logger.debug(f"发现缓存结果: 近交系数 = {inbreeding_coef:.6f} ({inbreeding_coef*100:.4f}%)")
             return self._inbreeding_cache[animal_id]
-        
+
         # 检查动物是否在系谱中
         if animal_id not in self.pedigree_db.pedigree:
-            print(f"警告: 动物 {animal_id} 不在系谱中")
-            logging.warning(f"动物 {animal_id} 不在系谱中")
+            logger.warning(f"动物 {animal_id} 不在系谱中")
             return 0.0, {}, {}
         
         # 检查是否有GIB值
@@ -88,43 +89,33 @@ class PathInbreedingCalculator:
             gib_value = animal_info['gib']
             # 确保GIB值是小数（有些系统可能存储为百分比）
             if gib_value > 1.0:
-                print(f"GIB值为百分比格式，转换为小数: {gib_value} -> {gib_value/100.0}")
+                logger.debug(f"GIB值为百分比格式，转换为小数: {gib_value} -> {gib_value/100.0}")
                 gib_value = gib_value / 100.0
-            print(f"动物 {animal_id} 有GIB值: {gib_value:.6f} ({gib_value*100:.4f}%), 直接使用")
-            logging.info(f"动物 {animal_id} 有GIB值: {gib_value:.4f}, 直接使用")
+            logger.debug(f"动物 {animal_id} 有GIB值: {gib_value:.6f} ({gib_value*100:.4f}%), 直接使用")
             # 因为没有路径信息，返回空字典
             self._inbreeding_cache[animal_id] = (gib_value, {"GIB值": gib_value}, {})
             return gib_value, {"GIB值": gib_value}, {}
         
         start_time = time.time()
-        print(f"动物 {animal_id} 无GIB值，使用通径法(Wright's Formula)计算近交系数")
-        logging.info(f"开始计算动物 {animal_id} 的近交系数 (通径法)")
+        logger.debug(f"动物 {animal_id} 无GIB值，使用通径法(Wright's Formula)计算近交系数")
         
         # 获取动物的父母
         info = self.pedigree_db.pedigree[animal_id]
         sire_id = info.get('sire', '')
         dam_id = info.get('dam', '')
         
-        print(f"动物 {animal_id} 的父亲: {sire_id}, 母亲: {dam_id}")
-        
+        logger.debug(f"动物 {animal_id} 的父亲: {sire_id}, 母亲: {dam_id}")
+
         # 如果父母信息不全，无法计算近交系数
         if not sire_id or not dam_id:
-            print(f"警告: 动物 {animal_id} 的父母信息不全，无法使用通径法计算近交系数")
-            logging.warning(f"动物 {animal_id} 的父母信息不全，无法使用通径法计算近交系数")
+            logger.debug(f"动物 {animal_id} 的父母信息不全，无法使用通径法计算近交系数")
             return 0.0, {"父母信息不全": 0.0}, {}
         
         # 使用通径法计算近交系数
         inbreeding_coef, contributions, paths = self._calculate_using_path_method(sire_id, dam_id)
         
         elapsed_time = time.time() - start_time
-        print(f"动物 {animal_id} 的近交系数计算完成: {inbreeding_coef:.6f} ({inbreeding_coef*100:.4f}%), 耗时: {elapsed_time:.2f}秒")
-        print(f"找到 {len(contributions)} 个共同祖先")
-        if contributions:
-            max_contributor = max(contributions.items(), key=lambda x: x[1])
-            print(f"贡献最大的祖先: {max_contributor[0]}, 贡献值: {max_contributor[1]:.6f} ({max_contributor[1]*100:.4f}%)")
-        print(f"========== 计算结束 ==========\n")
-        
-        logging.info(f"动物 {animal_id} 的近交系数计算完成: {inbreeding_coef:.4f}, 耗时: {elapsed_time:.2f}秒")
+        logger.debug(f"动物 {animal_id} 的近交系数计算完成: {inbreeding_coef:.6f} ({inbreeding_coef*100:.4f}%), 耗时: {elapsed_time:.2f}秒")
         
         # 缓存结果
         self._inbreeding_cache[animal_id] = (inbreeding_coef, contributions, paths)
@@ -151,8 +142,7 @@ class PathInbreedingCalculator:
         if not common_ancestors:
             return common_ancestors
 
-        print(f"\n=== 开始过滤冗余共同祖先 ===")
-        print(f"初始共同祖先数量: {len(common_ancestors)}")
+        logger.debug(f"开始过滤冗余共同祖先，初始数量: {len(common_ancestors)}")
 
         filtered_ancestors = set()
         redundant_details = []
@@ -173,18 +163,7 @@ class PathInbreedingCalculator:
 
         # 输出过滤结果
         removed_count = len(common_ancestors) - len(filtered_ancestors)
-        print(f"过滤结果: {len(common_ancestors)} → {len(filtered_ancestors)} 个有效共同祖先")
-
-        if removed_count > 0:
-            print(f"\n移除了 {removed_count} 个冗余祖先:")
-            for ancestor_id, reason in redundant_details[:10]:  # 只显示前10个
-                print(f"  - {ancestor_id}: {reason}")
-            if len(redundant_details) > 10:
-                print(f"  ... 还有 {len(redundant_details) - 10} 个")
-        else:
-            print("没有发现冗余祖先")
-
-        print(f"=== 过滤完成 ===\n")
+        logger.debug(f"过滤结果: {len(common_ancestors)} → {len(filtered_ancestors)} 个有效共同祖先")
 
         return filtered_ancestors
 
@@ -206,23 +185,23 @@ class PathInbreedingCalculator:
         sire_id = self.pedigree_db.standardize_animal_id(sire_id, 'bull')
         dam_id = self.pedigree_db.standardize_animal_id(dam_id, 'cow')
         
-        print(f"计算 {sire_id} 和 {dam_id} 的共同祖先")
-        
+        logger.debug(f"计算 {sire_id} 和 {dam_id} 的共同祖先")
+
         # 检查是否有缓存
         cache_key = (sire_id, dam_id)
         if cache_key in self._path_cache:
             inbreeding_coef, contributions, paths = self._path_cache[cache_key]
-            print(f"发现缓存结果: 总共 {len(contributions)} 个共同祖先, 近交系数 = {inbreeding_coef:.6f}")
+            logger.debug(f"发现缓存结果: 总共 {len(contributions)} 个共同祖先, 近交系数 = {inbreeding_coef:.6f}")
             return self._path_cache[cache_key]
         
         # 获取父系和母系祖先
-        print(f"收集 {sire_id} 的祖先...")
+        logger.debug(f"收集 {sire_id} 的祖先...")
         sire_ancestors = self._get_ancestors_with_paths(sire_id, self.max_generations)
-        print(f"找到 {len(sire_ancestors)} 个父系祖先")
-        
-        print(f"收集 {dam_id} 的祖先...")
+        logger.debug(f"找到 {len(sire_ancestors)} 个父系祖先")
+
+        logger.debug(f"收集 {dam_id} 的祖先...")
         dam_ancestors = self._get_ancestors_with_paths(dam_id, self.max_generations)
-        print(f"找到 {len(dam_ancestors)} 个母系祖先")
+        logger.debug(f"找到 {len(dam_ancestors)} 个母系祖先")
         
         # 找出共同祖先
         common_ancestors = set(sire_ancestors.keys()) & set(dam_ancestors.keys())
@@ -232,23 +211,23 @@ class PathInbreedingCalculator:
             common_ancestors.add(sire_id)
             if sire_id not in sire_ancestors:
                 sire_ancestors[sire_id] = [[]]  # 空路径，父亲到父亲自己，路径长度=0
-            print(f"[INFO] 父亲 {sire_id} 是母亲的祖先，计入共同祖先")
+            logger.debug(f"父亲 {sire_id} 是母亲的祖先，计入共同祖先")
 
         # 如果母亲本身是父亲的祖先，也应该计入共同祖先
         if dam_id in sire_ancestors:
             common_ancestors.add(dam_id)
             if dam_id not in dam_ancestors:
                 dam_ancestors[dam_id] = [[]]  # 空路径，母亲到母亲自己，路径长度=0
-            print(f"[INFO] 母亲 {dam_id} 是父亲的祖先，计入共同祖先")
+            logger.debug(f"母亲 {dam_id} 是父亲的祖先，计入共同祖先")
 
-        print(f"找到 {len(common_ancestors)} 个初始共同祖先: {', '.join(list(common_ancestors)[:5])}{'...' if len(common_ancestors) > 5 else ''}")
+        logger.debug(f"找到 {len(common_ancestors)} 个初始共同祖先: {', '.join(list(common_ancestors)[:5])}{'...' if len(common_ancestors) > 5 else ''}")
 
         # 过滤冗余的共同祖先（即那些是其他共同祖先的祖先的个体）
         common_ancestors = self._filter_redundant_common_ancestors(
             common_ancestors, sire_ancestors, dam_ancestors
         )
 
-        print(f"过滤后剩余 {len(common_ancestors)} 个有效共同祖先")
+        logger.debug(f"过滤后剩余 {len(common_ancestors)} 个有效共同祖先")
 
         # 计算各个共同祖先的贡献
         inbreeding_coef = 0.0
@@ -264,9 +243,7 @@ class PathInbreedingCalculator:
             # 获取所有从母亲到祖先的路径
             dam_paths = dam_ancestors[ancestor_id]
             
-            print(f"\n-- 计算祖先 {ancestor_id} 的贡献 --")
-            print(f"  从父亲到祖先的路径数: {len(sire_paths)}")
-            print(f"  从母亲到祖先的路径数: {len(dam_paths)}")
+            logger.debug(f"计算祖先 {ancestor_id} 的贡献: 父系路径={len(sire_paths)}, 母系路径={len(dam_paths)}")
             
             # 计算该祖先的贡献
             ancestor_contribution = 0.0
@@ -334,17 +311,10 @@ class PathInbreedingCalculator:
                     path_contribution *= (1 + ancestor_f)
                     
                     # 打印路径详情
-                    if valid_path_count <= 5:  # 只打印前5条路径
+                    if valid_path_count <= 5:
                         sire_path_str = " -> ".join([str(x) for x in sire_path])
                         dam_path_str = " -> ".join([str(x) for x in dam_path])
-                        print(f"  路径 {valid_path_count}: {sire_id} -> {sire_path_str} <- {dam_path_str} <- {dam_id}")
-                        print(f"    路径长度: 父系={sire_length}, 母系={dam_length}, 总长度={sire_length+dam_length}")
-                        print(f"    基础贡献: 0.5^{sire_length+dam_length} = {0.5**(sire_length+dam_length):.8f}")
-                        if ancestor_f > 0:
-                            print(f"    祖先 {ancestor_id} 自身的近交系数: {ancestor_f:.6f}")
-                            print(f"    调整后贡献: {0.5**(sire_length+dam_length):.8f} * (1 + {ancestor_f:.6f}) = {path_contribution:.8f}")
-                        else:
-                            print(f"    最终贡献: {path_contribution:.8f}")
+                        logger.debug(f"  路径 {valid_path_count}: {sire_id} -> {sire_path_str} <- {dam_path_str} <- {dam_id}, 贡献={path_contribution:.8f}")
                     
                     # 记录路径和贡献（包含路径长度和祖先近交系数，用于显示）
                     sire_path_str = " -> ".join([str(x) for x in sire_path])
@@ -363,12 +333,11 @@ class PathInbreedingCalculator:
                 
                 # 累加到总近交系数
                 inbreeding_coef += ancestor_contribution
-                print(f"  祖先 {ancestor_id} 共有 {valid_path_count} 条有效路径, 总贡献值: {ancestor_contribution:.8f}")
-                print(f"  当前累计近交系数: {inbreeding_coef:.8f}")
+                logger.debug(f"  祖先 {ancestor_id}: {valid_path_count} 条有效路径, 贡献={ancestor_contribution:.8f}, 累计={inbreeding_coef:.8f}")
             else:
-                print(f"  祖先 {ancestor_id} 没有有效路径或贡献为零")
-        
-        print(f"\n最终近交系数: {inbreeding_coef:.8f} ({inbreeding_coef*100:.6f}%)")
+                logger.debug(f"  祖先 {ancestor_id} 没有有效路径或贡献为零")
+
+        logger.debug(f"最终近交系数: {inbreeding_coef:.8f} ({inbreeding_coef*100:.6f}%)")
         
         # 缓存结果
         self._path_cache[cache_key] = (inbreeding_coef, contributions, paths)
@@ -386,17 +355,22 @@ class PathInbreedingCalculator:
         Returns:
             Dict[str, List[List[str]]]: 祖先ID -> 路径列表的映射
         """
+        # 缓存检查
+        cache_key = (animal_id, max_generations)
+        if cache_key in self._ancestors_cache:
+            return self._ancestors_cache[cache_key]
+
         result = {}  # 祖先ID -> 路径列表
-        
+
         # 若animal_id不在系谱中，直接返回
         if animal_id not in self.pedigree_db.pedigree:
-            print(f"动物 {animal_id} 不在系谱中，无法获取祖先")
+            logger.debug(f"动物 {animal_id} 不在系谱中，无法获取祖先")
             return result
-            
+
         # 初始化队列，每个元素是(当前ID, 当前路径, 当前代数)
         queue = [(animal_id, [], 0)]
 
-        print(f"开始搜索 {animal_id} 的祖先，最大追溯 {max_generations} 代")
+        logger.debug(f"开始搜索 {animal_id} 的祖先，最大追溯 {max_generations} 代")
 
         parent_count = 0
         while queue:
@@ -430,22 +404,23 @@ class PathInbreedingCalculator:
                 sire_id = info.get('sire', '')
                 dam_id = info.get('dam', '')
 
-                # 打印进度（每100个父母打印一次）
                 parent_count += 1
                 if parent_count <= 10 or parent_count % 100 == 0:
                     gen_str = '代数' + str(current_gen)
-                    print(f"  {gen_str:<6} 处理 {current_id:<15} 父: {sire_id:<15} 母: {dam_id:<15}")
+                    logger.debug(f"  {gen_str:<6} 处理 {current_id:<15} 父: {sire_id:<15} 母: {dam_id:<15}")
 
                 # 只要父母不在当前路径中（无环路），就添加到队列
                 if sire_id and sire_id not in new_path:
                     queue.append((sire_id, new_path, current_gen + 1))
                 if dam_id and dam_id not in new_path:
                     queue.append((dam_id, new_path, current_gen + 1))
-        
-        # 打印结果统计
+
+        # 结果统计
         total_paths = sum(len(paths) for paths in result.values())
-        print(f"完成搜索，找到 {len(result)} 个祖先，共 {total_paths} 条路径")
-        
+        logger.debug(f"完成搜索，找到 {len(result)} 个祖先，共 {total_paths} 条路径")
+
+        # 缓存结果
+        self._ancestors_cache[cache_key] = result
         return result
     
     def print_inbreeding_details(self, animal_id: str, min_contribution: float = 0.001):
@@ -638,11 +613,11 @@ class PathInbreedingCalculator:
                 - 每个共同祖先的所有路径 {祖先ID: [(路径字符串, 贡献值), ...]}
         """
         # 记录输入参数
-        print(f"计算后代近交系数: bull_id={bull_id}, cow_id={cow_id}")
-        
+        logger.debug(f"计算后代近交系数: bull_id={bull_id}, cow_id={cow_id}")
+
         # 检查输入
         if not bull_id or not cow_id:
-            print(f"[DEBUG] 无效输入: bull_id={bull_id}, cow_id={cow_id}")
+            logger.debug(f"无效输入: bull_id={bull_id}, cow_id={cow_id}")
             return 0.0, {}, {}
             
         # 对ID进行标准化处理
@@ -652,8 +627,8 @@ class PathInbreedingCalculator:
         # 特殊情况1: 如果公牛是母牛的父亲 - 优先单独处理
         cow_father = self._get_direct_father(cow_id)
         if cow_father and cow_father == bull_id:
-            print(f"[INFO] 直系血亲关系: 公牛 {bull_id} 是母牛 {cow_id} 的父亲")
-            print(f"[INFO] 使用直接公式计算直系血亲关系的近交系数")
+            logger.debug(f"直系血亲关系: 公牛 {bull_id} 是母牛 {cow_id} 的父亲")
+            logger.debug(f"使用直接公式计算直系血亲关系的近交系数")
 
             # 计算公牛(父亲)自身的近交系数
             bull_inbreeding, _, _ = self.calculate_inbreeding_coefficient(bull_id)
@@ -665,17 +640,17 @@ class PathInbreedingCalculator:
             common_ancestors = {bull_id: inbreeding_coef}
             paths = {bull_id: [(f"子代 <- {cow_id} <- {bull_id} -> {bull_id} -> 子代", inbreeding_coef)]}
 
-            print(f"[RESULT] 直系血亲关系后代近交系数: {inbreeding_coef:.6f} ({inbreeding_coef*100:.2f}%)")
+            logger.debug(f"直系血亲关系后代近交系数: {inbreeding_coef:.6f} ({inbreeding_coef*100:.2f}%)")
             return inbreeding_coef, common_ancestors, paths
 
         # 构建牛只系谱 - 使用_get_ancestors_with_paths方法而不是不存在的_build_animal_pedigree
-        print(f"构建公牛 {bull_id} 系谱...")
+        logger.debug(f"构建公牛 {bull_id} 系谱...")
         bull_pedigree = {}
         bull_ancestors = self._get_ancestors_with_paths(bull_id, self.max_generations)
         for ancestor_id, paths in bull_ancestors.items():
             bull_pedigree[ancestor_id] = ancestor_id
             
-        print(f"构建母牛 {cow_id} 系谱...")
+        logger.debug(f"构建母牛 {cow_id} 系谱...")
         cow_pedigree = {}
         cow_ancestors = self._get_ancestors_with_paths(cow_id, self.max_generations)
         for ancestor_id, paths in cow_ancestors.items():
@@ -684,10 +659,10 @@ class PathInbreedingCalculator:
         # 记录系谱构建结果
         bull_pedigree_size = len(bull_pedigree) if bull_pedigree else 0
         cow_pedigree_size = len(cow_pedigree) if cow_pedigree else 0
-        print(f"系谱构建结果: bull_pedigree_size={bull_pedigree_size}, cow_pedigree_size={cow_pedigree_size}")
+        logger.debug(f"系谱构建结果: bull_pedigree_size={bull_pedigree_size}, cow_pedigree_size={cow_pedigree_size}")
         
         if not bull_pedigree or not cow_pedigree:
-            print(f"[ERROR] 系谱构建失败: bull_pedigree={bool(bull_pedigree)}, cow_pedigree={bool(cow_pedigree)}")
+            logger.debug(f"系谱构建失败: bull_pedigree={bool(bull_pedigree)}, cow_pedigree={bool(cow_pedigree)}")
             # 即使系谱不完整，也返回0而不是nan
             return 0.0, {}, {}
         
@@ -715,12 +690,12 @@ class PathInbreedingCalculator:
             # 为公牛添加空路径（公牛到公牛自己，路径长度=0）
             if bull_id not in bull_ancestors:
                 bull_ancestors[bull_id] = [[]]
-            print(f"[INFO] 公牛 {bull_id} 是母牛的祖先，计入共同祖先")
+            logger.debug(f"公牛 {bull_id} 是母牛的祖先，计入共同祖先")
 
-        print(f"找到共同祖先: {len(common_ancestors)}个")
+        logger.debug(f"找到共同祖先: {len(common_ancestors)}个")
 
         if not common_ancestors:
-            print("[INFO] 没有找到共同祖先，后代近交系数为0")
+            logger.debug("没有找到共同祖先，后代近交系数为0")
             return 0.0, {}, {}
             
         # 计算每个共同祖先的贡献
@@ -734,7 +709,7 @@ class PathInbreedingCalculator:
             
             # 如果任一方没有路径，跳过该祖先
             if not bull_paths or not cow_paths:
-                print(f"[WARNING] 祖先 {ancestor} 缺少路径: bull_paths={bool(bull_paths)}, cow_paths={bool(cow_paths)}")
+                logger.debug(f"祖先 {ancestor} 缺少路径: bull_paths={bool(bull_paths)}, cow_paths={bool(cow_paths)}")
                 continue
                 
             # 计算该祖先的所有可能路径
@@ -753,11 +728,8 @@ class PathInbreedingCalculator:
                     # 检查1：除了共同祖先外，路径不应有其他交叉点
                     if len(common_nodes) > 1 or (len(common_nodes) == 1 and ancestor not in common_nodes):
                         invalid_path_count += 1
-                        if invalid_path_count <= 3:  # 只打印前3条无效路径
-                            print(f"[DEBUG] 跳过无效通径（两条路径有交叉）:")
-                            print(f"  父系路径: {' → '.join(bull_path)}")
-                            print(f"  母系路径: {' → '.join(cow_path)}")
-                            print(f"  交叉节点: {common_nodes}")
+                        if invalid_path_count <= 3:
+                            logger.debug(f"跳过无效通径（两条路径有交叉）: 父系={' → '.join(bull_path)}, 母系={' → '.join(cow_path)}, 交叉={common_nodes}")
                         continue
 
                     # 检查2：父系路径（除了终点祖先）不应包含母系起点（cow_id）
@@ -766,9 +738,7 @@ class PathInbreedingCalculator:
                     if cow_id in bull_path_without_ancestor:
                         invalid_path_count += 1
                         if invalid_path_count <= 3:
-                            print(f"[DEBUG] 跳过无效通径（父系路径中间包含母系起点）:")
-                            print(f"  父系路径: {bull_id} ← {' ← '.join(bull_path)}")
-                            print(f"  母系起点: {cow_id}")
+                            logger.debug(f"跳过无效通径（父系路径中间包含母系起点）: {bull_id} ← {' ← '.join(bull_path)}")
                         continue
 
                     # 检查3：母系路径（除了终点祖先）不应包含父系起点（bull_id）
@@ -777,24 +747,20 @@ class PathInbreedingCalculator:
                     if bull_id in cow_path_without_ancestor:
                         invalid_path_count += 1
                         if invalid_path_count <= 3:
-                            print(f"[DEBUG] 跳过无效通径（母系路径中间包含父系起点）:")
-                            print(f"  母系路径: {cow_id} ← {' ← '.join(cow_path)}")
-                            print(f"  父系起点: {bull_id}")
+                            logger.debug(f"跳过无效通径（母系路径中间包含父系起点）: {cow_id} ← {' ← '.join(cow_path)}")
                         continue
 
                     # 检查4：单条路径内部不应有重复节点
                     if len(bull_path) != len(bull_nodes):
                         invalid_path_count += 1
                         if invalid_path_count <= 3:
-                            print(f"[DEBUG] 跳过无效通径（父系路径内部有重复）:")
-                            print(f"  父系路径: {' ← '.join(bull_path)}")
+                            logger.debug(f"跳过无效通径（父系路径内部有重复）: {' ← '.join(bull_path)}")
                         continue
 
                     if len(cow_path) != len(cow_nodes):
                         invalid_path_count += 1
                         if invalid_path_count <= 3:
-                            print(f"[DEBUG] 跳过无效通径（母系路径内部有重复）:")
-                            print(f"  母系路径: {' ← '.join(cow_path)}")
+                            logger.debug(f"跳过无效通径（母系路径内部有重复）: {' ← '.join(cow_path)}")
                         continue
 
                     valid_path_count += 1
@@ -827,32 +793,31 @@ class PathInbreedingCalculator:
 
                     path_str += f" → {cow_id}"
 
-                    if valid_path_count <= 5:  # 打印前5条有效路径
-                        print(f"[DEBUG] 有效通径 {valid_path_count}: {path_str}")
-                        print(f"  路径长度: n1={sire_length}, n2={dam_length}, 贡献={(path_coef*100):.4f}%")
+                    if valid_path_count <= 5:
+                        logger.debug(f"有效通径 {valid_path_count}: {path_str}, n1={sire_length}, n2={dam_length}, 贡献={(path_coef*100):.4f}%")
 
                     ancestor_contribution += path_coef
                     # 保存为元组: (路径字符串, 贡献值, n1, n2, F_CA)
                     all_path_details.append((path_str, path_coef, sire_length, dam_length, ancestor_inbreeding))
 
             if invalid_path_count > 0:
-                print(f"[INFO] 祖先 {ancestor}: 过滤掉 {invalid_path_count} 条无效通径，保留 {valid_path_count} 条有效通径")
+                logger.debug(f"祖先 {ancestor}: 过滤掉 {invalid_path_count} 条无效通径，保留 {valid_path_count} 条有效通径")
             
             # 保存这个祖先的总贡献和所有路径(如果贡献大于0)
             if ancestor_contribution > 0:
                 inbreeding_contributions[ancestor] = ancestor_contribution
                 ancestor_paths[ancestor] = all_path_details
-                print(f"[INFO] 祖先 {ancestor} 对近交系数的贡献: {ancestor_contribution:.6f}")
+                logger.debug(f"祖先 {ancestor} 对近交系数的贡献: {ancestor_contribution:.6f}")
             else:
-                print(f"[WARNING] 祖先 {ancestor} 贡献为零")
+                logger.debug(f"祖先 {ancestor} 贡献为零")
         
         # 计算总的近交系数
         total_inbreeding = sum(inbreeding_contributions.values())
-        print(f"[RESULT] 后代近交系数计算结果: {total_inbreeding:.6f}, 共同祖先数量: {len(inbreeding_contributions)}")
-        
+        logger.debug(f"后代近交系数计算结果: {total_inbreeding:.6f}, 共同祖先数量: {len(inbreeding_contributions)}")
+
         # 确保返回值有效
         if math.isnan(total_inbreeding):
-            print(f"[ERROR] 计算结果为NaN，返回0.0代替")
+            logger.warning(f"计算结果为NaN，返回0.0代替")
             return 0.0, {}, {}
             
         return total_inbreeding, inbreeding_contributions, ancestor_paths
@@ -873,7 +838,8 @@ class PathInbreedingCalculator:
         """清除计算缓存"""
         self._inbreeding_cache.clear()
         self._path_cache.clear()
-        logging.info("计算缓存已清除")
+        self._ancestors_cache.clear()
+        logger.info("计算缓存已清除")
     
     def calculate_relationship_coefficient(self, animal1_id: str, animal2_id: str) -> float:
         """

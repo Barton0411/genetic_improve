@@ -92,7 +92,7 @@ class Sheet1Builder(BaseSheetBuilder):
         info_items = [
             ("牧场名称", basic_info.get('farm_name', '')),
             ("报告生成时间", basic_info.get('report_time', '')),
-            ("牧场服务人员", basic_info.get('service_staff', '未指定')),
+            ("牧场服务人员", basic_info.get('service_staff') or '未指定'),
         ]
 
         for label, value in info_items:

@@ -30,7 +30,8 @@ class Part1CoverBuilder(BaseSlideBuilder):
         super().__init__(prs, chart_creator)
         self._farm_info = farm_info or {}
         self.farm_name = self._farm_info.get('farm_name') or fallback_farm_name
-        self.reporter_name = self._farm_info.get('service_staff') or fallback_reporter
+        excel_staff = self._farm_info.get('service_staff', '')
+        self.reporter_name = (excel_staff if excel_staff and excel_staff != '未指定' else '') or fallback_reporter
         self.report_date = self._farm_info.get('report_date')
         self.report_time_text = self._farm_info.get('report_time')
 

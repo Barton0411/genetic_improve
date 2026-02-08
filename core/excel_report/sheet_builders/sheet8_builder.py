@@ -744,7 +744,7 @@ class Sheet8Builder(BaseSheetBuilder):
                 fig_width = min(20, max(10, total_width * 0.3))
                 fig_height = 6
 
-                fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=150)  # 提高DPI到150
+                fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=100)  # 提高DPI到150
 
                 # 冻精类型颜色映射
                 type_colors = {
@@ -903,7 +903,7 @@ class Sheet8Builder(BaseSheetBuilder):
 
                 # 保存到内存
                 img_buffer = BytesIO()
-                plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')  # 提高DPI到150
+                plt.savefig(img_buffer, format='png', dpi=100, bbox_inches='tight')  # 提高DPI到150
                 plt.close(fig)
                 img_buffer.seek(0)
 

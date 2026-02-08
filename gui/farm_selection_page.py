@@ -256,6 +256,10 @@ class FarmListItem(QWidget):
         farm_code = self.farm_data.get('farmCode', '')
         self.checked_changed.emit(farm_code, is_checked)
 
+    def mousePressEvent(self, event):
+        """点击整行任意位置切换勾选"""
+        self.checkbox.setChecked(not self.checkbox.isChecked())
+
     def is_checked(self):
         return self.checkbox.isChecked()
 
@@ -267,10 +271,12 @@ class FarmSelectionPage(QWidget):
     """伊起牛牧场数据对接页面 - 支持多选"""
 
     project_created = pyqtSignal(Path)  # 项目创建完成信号，携带项目路径
+    user_name_fetched = pyqtSignal(str)  # 获取到用户真实姓名
 
-    def __init__(self, yqn_token=None, parent=None):
+    def __init__(self, yqn_token=None, username=None, parent=None):
         super().__init__(parent)
         self.yqn_token = yqn_token
+        self.username = username  # 登录账号，作为姓名获取失败时的 fallback
         self.api_client = None
         self.all_farms = []  # 所有牧场数据
         self.selected_farms = {}  # 已选牧场 {farm_code: farm_data}
@@ -624,6 +630,28 @@ class FarmSelectionPage(QWidget):
         """)
         bottom_layout.addWidget(self.create_btn)
 
+        self.auto_report_btn = QPushButton("创建项目并自动生成报告")
+        self.auto_report_btn.clicked.connect(self.on_auto_report_clicked)
+        self.auto_report_btn.setEnabled(False)
+        self.auto_report_btn.setStyleSheet("""
+            QPushButton {
+                padding: 10px 25px;
+                background-color: #e6a23c;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #ebb563;
+            }
+            QPushButton:disabled {
+                background-color: #c0c4cc;
+            }
+        """)
+        bottom_layout.addWidget(self.auto_report_btn)
+
         layout.addLayout(bottom_layout)
 
         # 如果没有token，显示提示信息
@@ -643,6 +671,25 @@ class FarmSelectionPage(QWidget):
         try:
             self.api_client = YQNApiClient(self.yqn_token)
             self.logger.info("API客户端对象已创建")
+
+            # 获取用户信息（含姓名）
+            try:
+                user_info_result = self.api_client.get_user_info()
+                # user 可能在顶层或 data 下
+                user_data = user_info_result.get("data") or user_info_result
+                user_obj = user_data.get("user") or {}
+                self.login_user_name = (
+                    user_obj.get("nickName")
+                    or user_obj.get("realName")
+                    or user_obj.get("userName")
+                    or ""
+                )
+                self.logger.info(f"✓ 获取用户姓名: {self.login_user_name}")
+                if self.login_user_name:
+                    self.user_name_fetched.emit(self.login_user_name)
+            except Exception as e:
+                self.logger.warning(f"获取用户信息失败: {e}")
+                self.login_user_name = ""
 
             # 获取牧场列表（带大区/区域信息）
             self.logger.info("正在调用 get_farm_list() API...")
@@ -867,6 +914,7 @@ class FarmSelectionPage(QWidget):
         # 按钮状态
         self.preview_btn.setEnabled(count > 0)
         self.create_btn.setEnabled(count > 0)
+        self.auto_report_btn.setEnabled(count > 0)
 
     def on_search_changed(self, text: str):
         """搜索文本变化"""
@@ -1100,3 +1148,299 @@ class FarmSelectionPage(QWidget):
             f"项目创建过程中发生错误:\n\n{error_message}\n\n"
             f"请检查网络连接或稍后重试"
         )
+
+    # ============ 自动报告功能 ============
+
+    def on_auto_report_clicked(self):
+        """创建项目并自动生成报告按钮点击"""
+        if not self.selected_farms:
+            QMessageBox.warning(self, "提示", "请先选择牧场")
+            return
+
+        farm_list = list(self.selected_farms.values())
+        is_merged = len(farm_list) > 1
+
+        confirm_msg = (
+            "即将创建项目并自动生成报告\n\n"
+            "系统将自动执行以下步骤:\n"
+            "1. 下载并标准化牛群数据\n"
+            "2. 在群母牛关键育种数据分析\n"
+            "3. 备选公牛关键育种数据分析\n"
+            "4. 已配公牛关键育种数据分析\n"
+            "5. 母牛群指数排名 (NM$权重)\n"
+            "6. 备选公牛指数排名 (NM$权重)\n"
+            "7. 近交系数及隐性基因分析\n"
+            "8. 生成Excel综合报告\n"
+            "9. 生成PPT汇报材料\n\n"
+            "注意：不会自动进行个体选配\n\n"
+            "整个过程可能需要几分钟，是否继续?"
+        )
+
+        reply = QMessageBox.question(
+            self,
+            "确认创建",
+            confirm_msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self._start_auto_report()
+
+    def _start_auto_report(self):
+        """启动自动报告生成流程"""
+        farm_list = list(self.selected_farms.values())
+        is_merged = len(farm_list) > 1
+
+        try:
+            # 创建项目文件夹
+            from config.settings import Settings
+            settings = Settings()
+            base_path = Path(settings.get_default_storage())
+
+            farms_info = [
+                {
+                    "code": f.get('farmCode', ''),
+                    "name": f.get('name', ''),
+                    "cow_count": 0
+                }
+                for f in farm_list
+            ]
+
+            if is_merged:
+                project_path = FileManager.create_merged_project(base_path, farms_info)
+            else:
+                project_path = FileManager.create_project(base_path, farms_info[0]['name'])
+                FileManager.save_project_metadata(project_path, farms_info)
+
+            self.logger.info(f"项目文件夹已创建: {project_path}")
+
+            # 创建进度对话框
+            from gui.progress import ProgressDialog
+            progress_dialog = ProgressDialog(self)
+            progress_dialog.setWindowTitle("创建项目并自动生成报告")
+            progress_dialog.set_task_info("正在准备...")
+            progress_dialog.show()
+
+            # 创建 AutoReportWorker
+            from gui.auto_report_worker import AutoReportWorker
+            self.auto_worker = AutoReportWorker(
+                self.api_client,
+                farms_info,
+                project_path,
+                is_merged,
+                service_staff=getattr(self, 'login_user_name', None) or ''
+            )
+
+            # 连接信号
+            self.auto_worker.progress.connect(
+                lambda pct, msg: self._on_auto_report_progress(progress_dialog, pct, msg)
+            )
+            self.auto_worker.finished.connect(
+                lambda results: self._on_auto_report_finished(progress_dialog, project_path, results)
+            )
+            self.auto_worker.error.connect(
+                lambda err: self.on_worker_error(progress_dialog, project_path, err)
+            )
+
+            # 连接并行子任务进度信号
+            self.auto_worker.parallel_start.connect(
+                lambda tasks: progress_dialog.show_sub_tasks(tasks)
+            )
+            self.auto_worker.sub_task_progress.connect(
+                lambda task_id, pct: progress_dialog.update_sub_task(task_id, pct)
+            )
+            self.auto_worker.sub_task_done.connect(
+                lambda task_id, ok: progress_dialog.complete_sub_task(task_id, ok)
+            )
+            self.auto_worker.parallel_end.connect(
+                lambda: progress_dialog.hide_sub_tasks()
+            )
+
+            # 启动线程
+            self.auto_worker.start()
+
+        except Exception as e:
+            self.logger.exception("创建自动报告项目失败")
+            QMessageBox.critical(
+                self,
+                "创建失败",
+                f"无法创建项目文件夹:\n{str(e)}"
+            )
+
+    def _on_auto_report_progress(self, dialog, percentage, message):
+        """自动报告进度更新"""
+        dialog.update_progress(percentage)
+        dialog.set_task_info(message)
+
+    def _on_auto_report_finished(self, dialog, project_path, results):
+        """自动报告生成完成 - 显示汇总对话框"""
+        # 计算总用时（从进度对话框的开始时间）
+        import time as _time
+        elapsed_seconds = _time.time() - dialog._start_time
+        elapsed_min, elapsed_sec = divmod(int(elapsed_seconds), 60)
+        elapsed_text = f"{elapsed_min}分{elapsed_sec:02d}秒"
+
+        dialog.close()
+
+        success_items = results.get('success_items', [])
+        failed_items = results.get('failed_items', [])
+        excel_path = results.get('excel_path')
+        ppt_path = results.get('ppt_path')
+
+        # 构建汇总对话框
+        summary_dialog = QDialog(self)
+        summary_dialog.setWindowTitle("自动报告完成")
+        summary_dialog.setMinimumWidth(500)
+        layout = QVBoxLayout(summary_dialog)
+
+        # 标题
+        if failed_items:
+            title = QLabel("报告生成完成（部分步骤失败）")
+        else:
+            title = QLabel("报告生成完成")
+        title_font = title.font()
+        title_font.setBold(True)
+        title_font.setPointSize(14)
+        title.setFont(title_font)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        # 总用时
+        time_label = QLabel(f"总用时: {elapsed_text}")
+        time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        time_label.setStyleSheet("color: #7f8c8d; font-size: 13px;")
+        layout.addWidget(time_label)
+
+        # 成功项：2列网格 + 绿色对勾
+        if success_items:
+            success_label = QLabel("成功项目:")
+            bold_font = success_label.font()
+            bold_font.setBold(True)
+            success_label.setFont(bold_font)
+            success_label.setStyleSheet("color: #27ae60;")
+            layout.addWidget(success_label)
+
+            from PyQt6.QtWidgets import QGridLayout
+            grid = QGridLayout()
+            grid.setSpacing(6)
+            for i, item in enumerate(success_items):
+                label = QLabel(f"  \u2713  {item}")
+                label.setStyleSheet("color: #2c3e50; font-size: 13px;")
+                grid.addWidget(label, i // 2, i % 2)
+            layout.addLayout(grid)
+
+        # 失败项
+        if failed_items:
+            fail_label = QLabel("失败项目:")
+            fail_font = fail_label.font()
+            fail_font.setBold(True)
+            fail_label.setFont(fail_font)
+            fail_label.setStyleSheet("color: #e74c3c;")
+            layout.addWidget(fail_label)
+            for name, err in failed_items:
+                err_short = err[:80] if len(err) > 80 else err
+                err_label = QLabel(f"  \u2717  {name}: {err_short}")
+                err_label.setStyleSheet("color: #c0392b; font-size: 13px;")
+                layout.addWidget(err_label)
+
+        # 提示
+        layout.addSpacing(8)
+        tip_label = QLabel("个体选配需手动执行")
+        tip_label.setStyleSheet("color: #7f8c8d; font-size: 12px;")
+        layout.addWidget(tip_label)
+
+        # 按钮样式
+        primary_style = """
+            QPushButton {
+                background-color: #3498db; color: white;
+                border: none; border-radius: 6px;
+                padding: 8px 20px; font-size: 13px;
+            }
+            QPushButton:hover { background-color: #2980b9; }
+        """
+        secondary_style = """
+            QPushButton {
+                background-color: white; color: #333;
+                border: 1px solid #ddd; border-radius: 6px;
+                padding: 8px 20px; font-size: 13px;
+            }
+            QPushButton:hover { background-color: #f5f5f5; }
+        """
+        close_style = """
+            QPushButton {
+                background-color: transparent; color: #999;
+                border: none; padding: 8px 16px; font-size: 13px;
+            }
+            QPushButton:hover { color: #666; }
+        """
+
+        # 按钮区域
+        layout.addSpacing(8)
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+        btn_layout.addStretch()
+
+        if excel_path:
+            btn_open_excel = QPushButton("打开Excel报告")
+            btn_open_excel.setStyleSheet(primary_style)
+            btn_open_excel.clicked.connect(
+                lambda: self._open_file(excel_path)
+            )
+            btn_layout.addWidget(btn_open_excel)
+
+        if ppt_path:
+            btn_open_ppt = QPushButton("打开PPT报告")
+            btn_open_ppt.setStyleSheet(primary_style)
+            btn_open_ppt.clicked.connect(
+                lambda: self._open_file(ppt_path)
+            )
+            btn_layout.addWidget(btn_open_ppt)
+
+        btn_open_folder = QPushButton("打开项目文件夹")
+        btn_open_folder.setStyleSheet(secondary_style)
+        btn_open_folder.clicked.connect(
+            lambda: self._open_path(str(project_path))
+        )
+        btn_layout.addWidget(btn_open_folder)
+
+        btn_close = QPushButton("关闭")
+        btn_close.setStyleSheet(close_style)
+        btn_close.clicked.connect(summary_dialog.accept)
+        btn_layout.addWidget(btn_close)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+        summary_dialog.exec()
+
+        # 重置状态
+        self.selected_farms.clear()
+        self.update_selection_ui()
+
+        for farm_code, widget in self.farm_list_items.items():
+            widget.set_checked(False)
+
+        self.logger.info(f"自动报告项目完成: {project_path}")
+
+        # 通知主窗口自动选择新创建的项目
+        self.project_created.emit(project_path)
+
+    def _open_path(self, path):
+        """用系统文件管理器打开文件夹"""
+        import subprocess, sys
+        if sys.platform == 'darwin':
+            subprocess.Popen(['open', path])
+        elif sys.platform == 'win32':
+            subprocess.Popen(['explorer', path])
+        else:
+            subprocess.Popen(['xdg-open', path])
+
+    def _open_file(self, file_path):
+        """用系统默认应用打开文件"""
+        import subprocess, sys
+        if sys.platform == 'darwin':
+            subprocess.Popen(['open', file_path])
+        elif sys.platform == 'win32':
+            import os
+            os.startfile(file_path)
+        else:
+            subprocess.Popen(['xdg-open', file_path])

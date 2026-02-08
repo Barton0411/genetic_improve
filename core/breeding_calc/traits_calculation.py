@@ -70,27 +70,15 @@ class TraitsCalculation(BaseCowCalculation):
             if progress_callback:
                 progress_callback(20, f"数据预处理完成，共发现 {len(bull_ids)} 个公牛ID")
 
-            # 3. 处理每个公牛的性状数据
+            # 3. 批量处理公牛性状数据
             print("3. 处理公牛性状数据...")
             if task_info_callback:
                 task_info_callback("处理公牛性状数据")
             if progress_callback:
-                progress_callback(25, "开始处理公牛性状数据...")
-                
-            bull_traits = {}
-            total_bulls = len(bull_ids)
-            for i, bull_id in enumerate(bull_ids, 1):
-                print(f"处理公牛 {bull_id} ({i}/{total_bulls})")
-                if task_info_callback:
-                    task_info_callback(f"处理公牛 {bull_id} ({i}/{total_bulls})")
-                if progress_callback and i % 10 == 0:  # 每10个公牛更新一次进度
-                    current_progress = 25 + int((i / total_bulls) * 20)
-                    progress_callback(current_progress, f"正在处理公牛 {i}/{total_bulls}: {bull_id}")
+                progress_callback(25, "开始批量查询公牛性状数据...")
 
-                traits_data = self.get_bull_traits(bull_id, selected_traits)
-                if traits_data:
-                    # 确保键是字符串类型，以便后续匹配
-                    bull_traits[str(bull_id)] = traits_data
+            bull_traits = self.get_bull_traits_batch(list(bull_ids), selected_traits)
+            print(f"批量查询完成，获取到 {len(bull_traits)} 个公牛的性状数据")
 
             if progress_callback:
                 progress_callback(45, f"公牛性状数据处理完成，获取到 {len(bull_traits)} 个公牛的性状数据")
@@ -917,6 +905,65 @@ class TraitsCalculation(BaseCowCalculation):
             traceback.print_exc()
             return False
 
+    def get_bull_traits_batch(self, bull_ids: list, selected_traits: list) -> dict:
+        """
+        批量从数据库获取多个公牛的性状数据（替代逐个查询，大幅提升性能）
+
+        Args:
+            bull_ids: 公牛ID列表
+            selected_traits: 选中的性状列表
+
+        Returns:
+            dict: {bull_id_str: {trait: value, ...}, ...}
+        """
+        bull_traits = {}
+        if not bull_ids:
+            return bull_traits
+
+        # 清理并分类ID：短ID用NAAB查，长ID用REG查
+        naab_ids = []
+        reg_ids = []
+        for bid in bull_ids:
+            if pd.isna(bid):
+                continue
+            bid_str = str(bid)
+            if len(bid_str) <= 10:
+                naab_ids.append(bid_str)
+            else:
+                reg_ids.append(bid_str)
+
+        try:
+            with self.db_engine.connect() as conn:
+                # 分批查询，避免SQL IN子句过长（每批500个）
+                batch_size = 500
+
+                for batch_start in range(0, len(naab_ids), batch_size):
+                    batch = naab_ids[batch_start:batch_start + batch_size]
+                    placeholders = ','.join([f':id_{i}' for i in range(len(batch))])
+                    params = {f'id_{i}': bid for i, bid in enumerate(batch)}
+                    sql = text(f"SELECT * FROM bull_library WHERE `BULL NAAB` IN ({placeholders})")
+                    results = conn.execute(sql, params).fetchall()
+                    for row in results:
+                        row_dict = dict(row._mapping)
+                        bull_id_key = str(row_dict.get('BULL NAAB', ''))
+                        bull_traits[bull_id_key] = {trait: row_dict.get(trait) for trait in selected_traits}
+
+                for batch_start in range(0, len(reg_ids), batch_size):
+                    batch = reg_ids[batch_start:batch_start + batch_size]
+                    placeholders = ','.join([f':id_{i}' for i in range(len(batch))])
+                    params = {f'id_{i}': bid for i, bid in enumerate(batch)}
+                    sql = text(f"SELECT * FROM bull_library WHERE `BULL REG` IN ({placeholders})")
+                    results = conn.execute(sql, params).fetchall()
+                    for row in results:
+                        row_dict = dict(row._mapping)
+                        bull_id_key = str(row_dict.get('BULL REG', ''))
+                        bull_traits[bull_id_key] = {trait: row_dict.get(trait) for trait in selected_traits}
+
+        except Exception as e:
+            print(f"批量获取公牛性状数据时发生错误: {e}")
+
+        return bull_traits
+
     def get_bull_traits(self, bull_id: str, selected_traits: list) -> dict:
         """
         从数据库获取公牛的性状数据
@@ -1155,6 +1202,13 @@ class TraitsCalculation(BaseCowCalculation):
         Returns:
             bool: 是否保存成功
         """
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QThread
+
+        def _is_main_thread():
+            app = QApplication.instance()
+            return app is not None and QThread.currentThread() == app.thread()
+
         while True:
             try:
                 # 确保 cow_id 列保持为字符串类型（修复格式变化问题）
@@ -1169,19 +1223,33 @@ class TraitsCalculation(BaseCowCalculation):
                     df.to_excel(output_path, index=False)
                     return True
             except PermissionError:
-                from PyQt6.QtWidgets import QMessageBox
-                reply = QMessageBox.question(
-                    None,
-                    "文件被占用",
-                    f"文件 {output_path.name} 正在被其他程序使用。\n"
-                    "请关闭该文件后点击'重试'继续，或点击'取消'停止操作。",
-                    QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Cancel,
-                    QMessageBox.StandardButton.Retry
-                )
-
-                if reply == QMessageBox.StandardButton.Cancel:
-                    print(f"用户取消了保存操作: {output_path}")
+                if _is_main_thread():
+                    from PyQt6.QtWidgets import QMessageBox
+                    reply = QMessageBox.question(
+                        None,
+                        "文件被占用",
+                        f"文件 {output_path.name} 正在被其他程序使用。\n"
+                        "请关闭该文件后点击'重试'继续，或点击'取消'停止操作。",
+                        QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Cancel,
+                        QMessageBox.StandardButton.Retry
+                    )
+                    if reply == QMessageBox.StandardButton.Cancel:
+                        print(f"用户取消了保存操作: {output_path}")
+                        return False
+                else:
+                    import time
+                    for attempt in range(3):
+                        time.sleep(1)
+                        try:
+                            if 'cow_id' in df.columns:
+                                df = df.copy()
+                                df['cow_id'] = df['cow_id'].astype(str)
+                            df.to_excel(output_path, index=False)
+                            return True
+                        except PermissionError:
+                            continue
+                    print(f"[警告] 文件 {output_path.name} 被占用，保存失败")
                     return False
             except Exception as e:
                 print(f"保存文件失败: {e}")
-                return False      
+                return False

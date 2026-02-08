@@ -498,7 +498,7 @@ class Sheet10Builder(BaseSheetBuilder):
             # 保存图片
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_path = Path(self.output_dir) / f"备选公牛排名表_{timestamp}.png"
-            plt.savefig(output_path, dpi=150, bbox_inches='tight',
+            plt.savefig(output_path, dpi=100, bbox_inches='tight',
                        facecolor='white', edgecolor='none')
             plt.close(fig)
 

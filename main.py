@@ -97,10 +97,10 @@ def main():
     login_dialog = LoginDialog()
     
     # 将登录对话框移动到屏幕中下位置
-    screen = app.primaryScreen().geometry()
-    dialog_geometry = login_dialog.geometry()
-    x = (screen.width() - dialog_geometry.width()) // 2  # 水平居中
-    y = int(screen.height() * 0.55)  # 距离顶部55%的位置
+    login_dialog.adjustSize()  # 先确定实际尺寸
+    screen = app.primaryScreen().availableGeometry()
+    x = (screen.width() - login_dialog.width()) // 2 + screen.x()
+    y = int(screen.height() * 0.55) + screen.y()
     login_dialog.move(x, y)
     if login_dialog.exec() == QDialog.DialogCode.Accepted:
         try:

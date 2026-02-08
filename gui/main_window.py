@@ -359,6 +359,17 @@ class MainWindow(QMainWindow):
             self.username = username
             self.login_type = login_type  # 'yili' 或 'yqn'
             self.yqn_token = yqn_token  # 伊起牛API令牌
+
+            # 获取用户真实姓名（直接从singleton api_client缓存获取，避免创建新AuthService触发_restore_session清空缓存）
+            self.service_staff_name = ''
+            if login_type == 'yili':
+                try:
+                    from api.api_client import get_api_client
+                    client = get_api_client()
+                    if client.user_info:
+                        self.service_staff_name = client.user_info.get('name', '') or ''
+                except Exception:
+                    pass
             self.content_stack = QStackedWidget()
             self.selected_project_path = None
             self.templates_path = Path(__file__).parent.parent / "templates"
@@ -833,8 +844,9 @@ class MainWindow(QMainWindow):
         self.content_stack = QStackedWidget(container)
 
         # 按顺序添加页面，每个页面只添加一次
-        farm_page = FarmSelectionPage(yqn_token=self.yqn_token)
+        farm_page = FarmSelectionPage(yqn_token=self.yqn_token, username=self.username)
         farm_page.project_created.connect(self.select_project_by_path)
+        farm_page.user_name_fetched.connect(lambda name: setattr(self, 'service_staff_name', name))
         self.content_stack.addWidget(farm_page)  # 第0页：伊起牛牧场数据选择
         self.create_project_page()         # 第1页：项目管理
         self.create_upload_page()          # 第2页：数据上传
@@ -4128,8 +4140,8 @@ class MainWindow(QMainWindow):
             from PyQt6.QtCore import QThread
             from gui.excel_report_worker import ExcelReportWorker
 
-            # 获取用户名（从设置或默认值）
-            service_staff = getattr(self, 'username', '未指定')
+            # 获取用户真实姓名（username 是工号，不作为 fallback）
+            service_staff = getattr(self, 'service_staff_name', '') or ''
 
             # 创建进度对话框
             self.excel_progress_dialog = ProgressDialog(self)
@@ -4261,23 +4273,8 @@ class MainWindow(QMainWindow):
         import pandas as pd
         import re
 
-        # 获取汇报人
-        reporter_name = "用户"
-        try:
-            from auth.auth_service import AuthService
-            auth_service = AuthService()
-            user_name = auth_service.get_user_name()
-
-            if user_name and self.username:
-                reporter_name = f"{user_name} ({self.username})"
-            elif user_name:
-                reporter_name = user_name
-            elif self.username:
-                reporter_name = self.username
-        except Exception as e:
-            logging.warning(f"无法获取用户信息: {e}")
-            if self.username:
-                reporter_name = self.username
+        # 汇报人：直接使用已缓存的真实姓名（username 是工号，不作为 fallback）
+        reporter_name = self.service_staff_name or "用户"
 
         # 获取牧场名称
         farm_name = "牧场"

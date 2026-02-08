@@ -552,8 +552,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             logger.warning("NM$分布分析Sheet列结构异常，跳过在群牛遗传分布页填充: %s", e)
             return
 
-        # 去掉表头行，只保留实际数据行
-        present_data = nm_df.iloc[1:].copy()
+        # 去掉子表头行（如"分布区间/头数/占比"），只保留实际数据行
+        first_val = str(nm_df.iloc[0, 0]).strip() if len(nm_df) > 0 else ""
+        skip_first = first_val in ('分布区间', '区间')
+        present_data = nm_df.iloc[1:].copy() if skip_first else nm_df.copy()
         present_data = present_data[
             present_data[present_col_interval].notna()
             & present_data[present_col_count].notna()
@@ -565,8 +567,8 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             max_rows = min(len(table.rows), len(present_data) + 1)  # 包含表头
             max_cols = min(len(table.columns), 3)
 
-            # 表头
-            headers = [str(v) for v in nm_df.iloc[0, :3].tolist()]
+            # 表头（硬编码标准表头，避免数据行被当作表头）
+            headers = ["分布区间", "头数", "占比"]
             for c in range(max_cols):
                 self._set_cell_text(table.cell(0, c), headers[c] if c < len(headers) else "")
 
@@ -621,7 +623,7 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
 
         # 全部母牛头数（如果有）
         if all_col_count in nm_df.columns:
-            all_data = nm_df.iloc[1:].copy()
+            all_data = nm_df.iloc[1:].copy() if skip_first else nm_df.copy()
             all_data = all_data[all_data[all_col_interval].notna() & all_data[all_col_count].notna()]
             all_counts = _to_float_list(all_data[all_col_count])
         else:
@@ -700,7 +702,9 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             logger.warning("TPI分布分析Sheet列结构异常，跳过在群母牛TPI分布页填充: %s", e)
             return
 
-        present_data = tpi_df.iloc[1:].copy()
+        first_val = str(tpi_df.iloc[0, 0]).strip() if len(tpi_df) > 0 else ""
+        skip_first = first_val in ('分布区间', '区间')
+        present_data = tpi_df.iloc[1:].copy() if skip_first else tpi_df.copy()
         present_data = present_data[
             present_data[present_col_interval].notna()
             & present_data[present_col_count].notna()
@@ -711,7 +715,7 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             max_rows = min(len(table.rows), len(present_data) + 1)
             max_cols = min(len(table.columns), 3)
 
-            headers = [str(v) for v in tpi_df.iloc[0, :3].tolist()]
+            headers = ["分布区间", "头数", "占比"]
             for c in range(max_cols):
                 self._set_cell_text(table.cell(0, c), headers[c] if c < len(headers) else "")
 
@@ -848,7 +852,9 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             logger.warning("育种指数分布分析Sheet列结构异常，跳过在群母牛育种指数分布页填充: %s", e)
             return
 
-        present_data = idx_df.iloc[1:].copy()
+        first_val = str(idx_df.iloc[0, 0]).strip() if len(idx_df) > 0 else ""
+        skip_first = first_val in ('分布区间', '区间')
+        present_data = idx_df.iloc[1:].copy() if skip_first else idx_df.copy()
         present_data = present_data[
             present_data[present_col_interval].notna()
             & present_data[present_col_count].notna()
@@ -859,7 +865,7 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             max_rows = min(len(table.rows), len(present_data) + 1)
             max_cols = min(len(table.columns), 3)
 
-            headers = [str(v) for v in idx_df.iloc[0, :3].tolist()]
+            headers = ["分布区间", "头数", "占比"]
             for c in range(max_cols):
                 self._set_cell_text(table.cell(0, c), headers[c] if c < len(headers) else "")
 
@@ -1395,7 +1401,8 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
                 continue
         return None
 
-    def _apply_block_to_table(self, table, block_rows: List[List[str]], font_size: int, start_row: int = 0):
+    def _apply_block_to_table(self, table, block_rows: List[List[str]], font_size: int,
+                              start_row: int = 0, bold_first_row: bool = True):
         if not block_rows:
             return
 
@@ -1405,8 +1412,9 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             row_values = block_rows[r]
             for c in range(max_cols):
                 value = row_values[c] if c < len(row_values) else ""
-                # bold只用于block的第一行（相对于block，不是table）
-                self._set_cell_text(table.cell(start_row + r, c), value, font_size=font_size, bold=(r == 0))
+                # bold只用于block的第一行（相对于block，不是table），且仅当bold_first_row=True
+                self._set_cell_text(table.cell(start_row + r, c), value, font_size=font_size,
+                                    bold=(r == 0 and bold_first_row))
 
         # 清空剩余行（从start_row + max_rows开始）
         for r in range(start_row + max_rows, len(table.rows)):
@@ -1424,6 +1432,7 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
         max_rows: Optional[int] = None,
         prepend_title: bool = False,
         start_row: int = 0,
+        skip_header_rows: int = 0,
     ):
         """
         从Excel填充PPT表格
@@ -1438,6 +1447,7 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             max_rows: 最大行数限制（用于截断数据）
             prepend_title: 是否在数据前插入标题行（用于年份表格）
             start_row: 从表格的第几行开始填充（用于保留标题行）
+            skip_header_rows: 跳过block开头的N行（标题行+表头行），用于PPT表格已有表头的情况
         """
         if slide is None:
             return
@@ -1450,6 +1460,10 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             logger.warning("Sheet %s 中未找到标签 %s 的数据块", sheet_name, label)
             return
 
+        # 跳过block开头的N行（标题行+表头行）
+        if skip_header_rows > 0 and len(block) > skip_header_rows:
+            block = block[skip_header_rows:]
+
         # 如果指定了max_rows，截断block
         if max_rows is not None and len(block) > max_rows:
             block = block[:max_rows]
@@ -1460,7 +1474,9 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             title_row = ['', label] + [''] * (len(block[0]) - 2 if block else 6)
             block = [title_row] + block
 
-        self._apply_block_to_table(table, block, font_size=font_size, start_row=start_row)
+        # 跳过了表头行时，数据行第一行不加粗
+        self._apply_block_to_table(table, block, font_size=font_size, start_row=start_row,
+                                    bold_first_row=(skip_header_rows == 0))
 
     def _export_excel_chart_to_image(self, sheet_name: str, image_index: int) -> Optional[str]:
         """
@@ -1550,7 +1566,8 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
 
             # 填充表格数据
             self._fill_table_from_excel(
-                overall_slide, "表格 2", sheet_name, "NM$统计", font_size=9, max_rows=3
+                overall_slide, "表格 2", sheet_name, "NM$统计", font_size=9,
+                skip_header_rows=2, start_row=2
             )
             self._fill_table_from_excel(
                 overall_slide, "表格 7", sheet_name, "在群母牛-NM$五等份分析", font_size=12
@@ -1570,8 +1587,9 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             # 填充表格数据
             maturity_predicate = lambda rows: rows and "成母牛" in str(rows[0][0])
             self._fill_table_from_excel(
-                maturity_slide, "表格 3", sheet_name, "NM$统计",
-                font_size=9, predicate=maturity_predicate
+                maturity_slide, "表格 3", sheet_name, "在群母牛NM$统计",
+                font_size=9, predicate=maturity_predicate,
+                skip_header_rows=2, start_row=2
             )
             self._fill_table_from_excel(
                 maturity_slide, "表格 5", sheet_name, "在群母牛-成母牛组", font_size=12
@@ -1594,8 +1612,9 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             # 填充表格数据
             stage_predicate = lambda rows: rows and "胎" in str(rows[0][0])
             self._fill_table_from_excel(
-                stage_slide, "表格 3", sheet_name, "NM$统计",
-                font_size=9, predicate=stage_predicate
+                stage_slide, "表格 3", sheet_name, "在群母牛NM$统计",
+                font_size=9, predicate=stage_predicate,
+                skip_header_rows=2, start_row=2
             )
             self._fill_table_from_excel(
                 stage_slide, "表格 14", sheet_name, "在群母牛-2胎及以上组", font_size=12
@@ -1627,8 +1646,9 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
                 for row in rows if row and row[0]
             )
             self._fill_table_from_excel(
-                birth_year_slide, "表格 9", sheet_name, "NM$统计",
-                font_size=9, predicate=nm_year_predicate
+                birth_year_slide, "表格 9", sheet_name, "在群母牛NM$统计",
+                font_size=9, predicate=nm_year_predicate,
+                skip_header_rows=2, start_row=2
             )
 
             # 填充年份表格
@@ -1714,7 +1734,8 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
 
             # 填充表格数据
             self._fill_table_from_excel(
-                overall_slide, "表格 2", sheet_name, "TPI统计", font_size=9, max_rows=3
+                overall_slide, "表格 2", sheet_name, "TPI统计", font_size=9,
+                skip_header_rows=2, start_row=2
             )
             self._fill_table_from_excel(
                 overall_slide, "表格 7", sheet_name, "在群母牛-TPI五等份分析", font_size=12
@@ -1735,7 +1756,8 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             maturity_predicate = lambda rows: rows and "成母牛" in str(rows[0][0])
             self._fill_table_from_excel(
                 maturity_slide, "表格 3", sheet_name, "在群母牛TPI统计",
-                font_size=9, predicate=maturity_predicate
+                font_size=9, predicate=maturity_predicate,
+                skip_header_rows=2, start_row=2
             )
             self._fill_table_from_excel(
                 maturity_slide, "表格 5", sheet_name, "在群母牛-成母牛组", font_size=12
@@ -1759,7 +1781,8 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             stage_predicate = lambda rows: rows and "胎" in str(rows[0][0])
             self._fill_table_from_excel(
                 stage_slide, "表格 3", sheet_name, "在群母牛TPI统计",
-                font_size=9, predicate=stage_predicate
+                font_size=9, predicate=stage_predicate,
+                skip_header_rows=2, start_row=2
             )
             self._fill_table_from_excel(
                 stage_slide, "表格 14", sheet_name, "在群母牛-2胎及以上组", font_size=12
@@ -1792,7 +1815,8 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             )
             self._fill_table_from_excel(
                 birth_year_slide, "表格 9", sheet_name, "在群母牛TPI统计",
-                font_size=9, predicate=tpi_year_predicate
+                font_size=9, predicate=tpi_year_predicate,
+                skip_header_rows=2, start_row=2
             )
 
             # 填充年份表格
@@ -1878,7 +1902,8 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
 
             # 填充表格数据
             self._fill_table_from_excel(
-                overall_slide, "表格 2", sheet_name, "育种指数统计", font_size=9, max_rows=3
+                overall_slide, "表格 2", sheet_name, "育种指数统计", font_size=9,
+                skip_header_rows=2, start_row=2
             )
             self._fill_table_from_excel(
                 overall_slide, "表格 7", sheet_name, "在群母牛-育种指数五等份分析", font_size=12
@@ -1899,7 +1924,8 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             index_maturity_predicate = lambda rows: rows and "成母牛" in str(rows[0][0])
             self._fill_table_from_excel(
                 maturity_slide, "表格 3", sheet_name, "在群母牛index统计",
-                font_size=9, predicate=index_maturity_predicate
+                font_size=9, predicate=index_maturity_predicate,
+                skip_header_rows=2, start_row=2
             )
             self._fill_table_from_excel(
                 maturity_slide, "表格 5", sheet_name, "在群母牛-成母牛组", font_size=12
@@ -1923,7 +1949,8 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             index_stage_predicate = lambda rows: rows and "胎" in str(rows[0][0])
             self._fill_table_from_excel(
                 stage_slide, "表格 5", sheet_name, "在群母牛index统计",
-                font_size=9, predicate=index_stage_predicate
+                font_size=9, predicate=index_stage_predicate,
+                skip_header_rows=2, start_row=2
             )
             for table_name, label in [
                 ("表格 14", "在群母牛-2胎及以上组"),
@@ -1953,7 +1980,8 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
             )
             self._fill_table_from_excel(
                 birth_year_slide, "表格 9", sheet_name, "在群母牛index统计",
-                font_size=9, predicate=index_year_predicate
+                font_size=9, predicate=index_year_predicate,
+                skip_header_rows=2, start_row=2
             )
 
             # 填充年份表格
@@ -2241,7 +2269,82 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
         # 用新的数据替换图表，样式（颜色/线型/标记）沿用PPT模板默认设置
         chart.replace_data(chart_data)
 
-        # 更新图表标题为“{性状}性状进展”
+        # 设置数据标签格式为2位小数
+        try:
+            from lxml import etree
+            c_ns = '{http://schemas.openxmlformats.org/drawingml/2006/chart}'
+
+            # 1) 设置plot级别的dLbls，确保所有系列默认继承
+            plot_element = chart.plots[0]._element if chart.plots else None
+            if plot_element is not None:
+                plot_dLbls = plot_element.find(f'{c_ns}dLbls')
+                if plot_dLbls is None:
+                    first_ser = plot_element.find(f'{c_ns}ser')
+                    plot_dLbls = etree.Element(f'{c_ns}dLbls')
+                    if first_ser is not None:
+                        first_ser.addprevious(plot_dLbls)
+                    else:
+                        plot_element.append(plot_dLbls)
+                p_numFmt = plot_dLbls.find(f'{c_ns}numFmt')
+                if p_numFmt is None:
+                    p_numFmt = etree.SubElement(plot_dLbls, f'{c_ns}numFmt')
+                p_numFmt.set('formatCode', '0.00')
+                p_numFmt.set('sourceLinked', '0')
+                p_showVal = plot_dLbls.find(f'{c_ns}showVal')
+                if p_showVal is None:
+                    p_showVal = etree.SubElement(plot_dLbls, f'{c_ns}showVal')
+                p_showVal.set('val', '1')
+
+            # 2) 设置每个series级别的dLbls
+            for series in chart.series:
+                if hasattr(series, 'data_labels'):
+                    series.data_labels.show_value = True
+                    series.data_labels.number_format_is_linked = False
+                    series.data_labels.number_format = '0.00'
+                ser_element = series._element
+                dLbls = ser_element.find(f'{c_ns}dLbls')
+                if dLbls is None:
+                    idx_el = ser_element.find(f'{c_ns}idx')
+                    dLbls = etree.Element(f'{c_ns}dLbls')
+                    if idx_el is not None:
+                        idx_el.addnext(dLbls)
+                    else:
+                        ser_element.insert(0, dLbls)
+                showVal = dLbls.find(f'{c_ns}showVal')
+                if showVal is None:
+                    showVal = etree.SubElement(dLbls, f'{c_ns}showVal')
+                showVal.set('val', '1')
+                numFmt = dLbls.find(f'{c_ns}numFmt')
+                if numFmt is None:
+                    numFmt = etree.SubElement(dLbls, f'{c_ns}numFmt')
+                numFmt.set('formatCode', '0.00')
+                numFmt.set('sourceLinked', '0')
+
+                # 3) 处理个别数据点的dLbl覆盖（优先级高于dLbls）
+                for dLbl in dLbls.findall(f'{c_ns}dLbl'):
+                    lbl_numFmt = dLbl.find(f'{c_ns}numFmt')
+                    if lbl_numFmt is not None:
+                        lbl_numFmt.set('formatCode', '0.00')
+                        lbl_numFmt.set('sourceLinked', '0')
+                    else:
+                        lbl_numFmt = etree.SubElement(dLbl, f'{c_ns}numFmt')
+                        lbl_numFmt.set('formatCode', '0.00')
+                        lbl_numFmt.set('sourceLinked', '0')
+
+                # 4) 设置numCache的formatCode（replace_data默认设为General）
+                for numRef in ser_element.iter(f'{c_ns}numRef'):
+                    numCache = numRef.find(f'{c_ns}numCache')
+                    if numCache is not None:
+                        cache_fmt = numCache.find(f'{c_ns}formatCode')
+                        if cache_fmt is not None:
+                            cache_fmt.text = '0.00'
+                        else:
+                            cache_fmt = etree.SubElement(numCache, f'{c_ns}formatCode')
+                            cache_fmt.text = '0.00'
+        except Exception as e:
+            logger.debug(f"设置数据标签格式时出错: {e}")
+
+        # 更新图表标题为"{性状}性状进展"
         try:
             if not chart.has_title:
                 chart.has_title = True

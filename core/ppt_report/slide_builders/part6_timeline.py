@@ -11,6 +11,7 @@ from io import BytesIO
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as OpenpyxlImage
 from pptx.util import Cm, Pt
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from ..base_builder import BaseSlideBuilder
 from ..config import FONT_NAME_CN
@@ -270,24 +271,35 @@ class Part6TimelineBuilder(BaseSlideBuilder):
             prs_height = self.prs.slide_height
 
             left = (prs_width - width) // 2
-            top = Cm(4)  # 距离顶部4cm
+            top = Cm(6)  # 距离顶部6cm，避免遮挡标题
 
-            # 查找并删除现有的图片占位符
+            # 查找并删除现有的所有图片（先收集再删除，避免迭代中修改集合）
+            # 使用 shape_type 判断，而不是 shape.name（模板中图片名称可能不含"图片"/"Picture"）
+            shapes_to_delete = []
             for shape in slide.shapes:
-                if hasattr(shape, 'name') and ('图片' in shape.name or 'Picture' in shape.name):
-                    sp = shape._element
-                    sp.getparent().remove(sp)
-                    logger.debug(f"  删除占位符: {shape.name}")
-                    break
+                is_picture = getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE
+                has_picture_name = hasattr(shape, 'name') and ('图片' in shape.name or 'Picture' in shape.name or 'Image' in shape.name)
+                if is_picture or has_picture_name:
+                    shapes_to_delete.append(shape)
+
+            for shape in shapes_to_delete:
+                sp = shape._element
+                sp.getparent().remove(sp)
+                logger.debug(f"  删除图片占位符: {shape.name} (type={getattr(shape, 'shape_type', 'unknown')})")
 
             # 添加新图片
-            slide.shapes.add_picture(
+            pic = slide.shapes.add_picture(
                 str(image_path),
                 left=left,
                 top=top,
                 width=width,
                 height=height
             )
+
+            # 将图片置于底层，避免遮挡标题和其他文本
+            sp_tree = slide.shapes._spTree
+            sp_tree.remove(pic._element)
+            sp_tree.insert(2, pic._element)  # index 2: 跳过 cSld 固有元素
 
             logger.debug(f"  图片已添加: {title}, 大小={width.cm:.1f}cm×{height.cm:.1f}cm")
 
