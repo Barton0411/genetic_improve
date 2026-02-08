@@ -273,6 +273,27 @@ class YQNApiClient:
         }
         return self._request("GET", "/stock/stock/getStockDetail", params=params)
 
+    def batch_add_selection(self, records: list) -> dict:
+        """
+        批量新增选配结果
+
+        参数:
+            records: 选配记录列表，每条格式:
+                {
+                    "farmCode": "11432",
+                    "earNum": "1055",
+                    "indexScore": 85.5,
+                    "sexedSemen1": "", ..., "sexedSemen4": "",
+                    "conventionalSemen1": "", ..., "conventionalSemen4": "",
+                    "beefCattleFrozenSemen": ""
+                }
+
+        返回:
+            {"code": 200, "msg": "共N条数据，成功N条，失败N条", "data": [失败详情]}
+        """
+        self.logger.info(f"批量推送选配结果: {len(records)} 条")
+        return self._request("POST", "/breed/selection/batchAdd", json=records)
+
     def search_farms(self, keyword: str, user_farms: List[dict]) -> List[dict]:
         """
         搜索牧场（本地搜索，从用户牧场列表中筛选）

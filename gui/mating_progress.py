@@ -95,18 +95,12 @@ class MatingProgressDialog(QDialog):
         self.progress_bar.setValue(progress)
         
     def on_finished(self, result: dict):
-        """完成处理"""
+        """完成处理 - 自动关闭进度窗口，由 on_mating_completed 显示结果"""
         self.result = result
-        self.title_label.setText("选配完成！")
-        self.info_label.setText("选配任务已成功完成")
         self.progress_bar.setValue(100)
-        
-        # 改变按钮
-        self.cancel_btn.setText("关闭")
-        self.cancel_btn.clicked.disconnect()
-        self.cancel_btn.clicked.connect(self.accept)
-        
-        # 发送完成信号
+
+        # 先关闭进度窗口，再发送完成信号（避免两个窗口同时显示）
+        self.accept()
         self.completed.emit(result)
         
     def on_error(self, error_msg: str):

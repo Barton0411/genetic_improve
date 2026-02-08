@@ -2551,6 +2551,8 @@ class MainWindow(QMainWindow):
         """)
         self.push_result_btn.clicked.connect(self.on_push_mating_results)
         self.push_result_btn.setEnabled(False)  # 初始禁用，选配完成后启用
+        if self.login_type != 'yqn':
+            self.push_result_btn.setToolTip("仅支持伊起牛账号登录后推送")
 
         clear_mating_btn.setStyleSheet(button_style)
         generate_recommendations_btn.setStyleSheet("""
@@ -3811,102 +3813,394 @@ class MainWindow(QMainWindow):
         self.mating_dialog.exec()
 
     def on_push_mating_results(self):
-        """推送选配结果"""
+        """推送选配结果到伊起牛"""
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择项目")
             return
 
+        # 检查登录类型
+        if self.login_type != 'yqn' or not self.yqn_token:
+            QMessageBox.warning(
+                self, "无法推送",
+                "选配推送功能仅支持伊起牛账号登录。\n\n"
+                "请使用伊起牛账号重新登录后再试。"
+            )
+            return
+
         try:
-            # 创建推送器
-            pusher = MatingResultPusher(self.selected_project_path)
+            # 创建推送器（传入当前用户名作为更新人）
+            pusher = MatingResultPusher(self.selected_project_path, update_by=self.username or '')
 
             # 准备推送数据
-            push_data = pusher.prepare_push_data()
-            if not push_data:
-                # 检查是否是因为缺少farm_info.json
-                farm_info_path = self.selected_project_path / "farm_info.json"
-                if not farm_info_path.exists():
+            records = pusher.prepare_push_data()
+            if not records:
+                if not pusher.farm_info:
                     QMessageBox.warning(
-                        self,
-                        "缺少牧场信息",
-                        f"请先创建牧场信息文件：\n{farm_info_path}\n\n"
-                        f"文件格式示例：\n"
-                        f'{{\n'
-                        f'  "farm_code": "10001"\n'
-                        f'}}'
+                        self, "缺少牧场信息",
+                        "未找到项目的牧场信息（project_metadata.json），\n"
+                        "请确认项目数据已正确导入。"
                     )
                 else:
-                    QMessageBox.warning(self, "警告", "无法准备推送数据，请检查选配结果文件和牧场信息")
+                    QMessageBox.warning(self, "警告", "无法准备推送数据，请检查选配结果文件是否存在")
                 return
 
-            # 显示确认对话框，展示将要推送的数据
-            from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox, QLabel
+            # 获取摘要
+            summary = pusher.get_push_summary(records)
 
+            # 显示确认对话框
             confirm_dialog = QDialog(self)
-            confirm_dialog.setWindowTitle("确认推送数据")
-            confirm_dialog.setMinimumSize(600, 500)
+            confirm_dialog.setWindowTitle("确认推送选配结果")
+            confirm_dialog.setMinimumSize(450, 280)
 
             layout = QVBoxLayout()
 
-            # 显示牧场信息
-            info_label = QLabel(f"""
-<b>牧场信息：</b><br>
-牧场编号：{push_data.get('farm_code', '未设置')}<br>
-<br>
-<b>选配信息：</b><br>
-母牛总数：{len(push_data.get('records', []))} 头<br>
-            """)
+            info_html = (
+                f"<h3>即将推送选配结果到伊起牛平台</h3>"
+                f"<table style='margin: 10px 0;'>"
+                f"<tr><td><b>牧场名称：</b></td><td>{summary['farm_name'] or '未知'}</td></tr>"
+                f"<tr><td><b>牧场编号：</b></td><td>{summary['farm_code']}</td></tr>"
+                f"<tr><td><b>母牛总数：</b></td><td>{summary['total']} 头</td></tr>"
+                f"<tr><td><b>含性控冻精：</b></td><td>{summary['has_sexed']} 头</td></tr>"
+                f"<tr><td><b>含常规冻精：</b></td><td>{summary['has_conventional']} 头</td></tr>"
+                f"<tr><td><b>含肉牛冻精：</b></td><td>{summary['has_beef']} 头</td></tr>"
+                f"</table>"
+                f"<p style='color: #e67e22;'>确认推送后，数据将上传至伊起牛系统。</p>"
+            )
+            info_label = QLabel(info_html)
+            info_label.setWordWrap(True)
             layout.addWidget(info_label)
 
-            # 显示详细数据（JSON格式）
-            detail_label = QLabel("<b>推送数据预览（JSON格式）：</b>")
-            layout.addWidget(detail_label)
-
-            text_edit = QTextEdit()
-            text_edit.setReadOnly(True)
-            import json
-            text_edit.setText(json.dumps(push_data, ensure_ascii=False, indent=2))
-            layout.addWidget(text_edit)
-
-            # 按钮
             buttons = QDialogButtonBox(
                 QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
             )
+            buttons.button(QDialogButtonBox.StandardButton.Ok).setText("确认推送")
+            buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
             buttons.accepted.connect(confirm_dialog.accept)
             buttons.rejected.connect(confirm_dialog.reject)
             layout.addWidget(buttons)
 
             confirm_dialog.setLayout(layout)
 
-            # 显示对话框
             if confirm_dialog.exec() != QDialog.DialogCode.Accepted:
                 return
 
-            # 执行推送（当前保存到本地）
-            success = pusher.push_to_api()  # 暂时不传入URL，保存到本地
-
-            if success:
-                QMessageBox.information(
-                    self,
-                    "推送成功",
-                    f"✅ 选配结果推送成功！\n\n"
-                    f"测试模式：数据已保存到项目文件夹\n"
-                    f"文件：api_push_data.json\n\n"
-                    f"未来将推送到真实API服务器"
-                )
-            else:
-                QMessageBox.critical(
-                    self,
-                    "推送失败",
-                    "❌ 推送失败，请查看日志文件"
-                )
+            # 启动推送
+            self._start_push(pusher, records)
 
         except Exception as e:
-            QMessageBox.critical(
-                self,
-                "错误",
-                f"推送过程中发生错误：\n{str(e)}"
+            QMessageBox.critical(self, "错误", f"推送过程中发生错误：\n{str(e)}")
+
+    def _start_push(self, pusher, records):
+        """启动推送流程（含详细进度对话框）"""
+        import time as _time
+        from api.yqn_api_client import YQNApiClient
+        from PyQt6.QtWidgets import QProgressBar
+
+        total = len(records)
+
+        # ── 自定义进度对话框 ──
+        progress_dialog = QDialog(self)
+        progress_dialog.setWindowTitle("推送选配结果")
+        progress_dialog.setFixedWidth(520)
+        progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        progress_dialog.setWindowFlags(
+            progress_dialog.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint
+        )
+
+        p_layout = QVBoxLayout()
+        p_layout.setSpacing(12)
+
+        title_label = QLabel(f"<b>正在推送 {total} 条选配记录到伊起牛...</b>")
+        title_label.setStyleSheet("font-size: 14px;")
+        p_layout.addWidget(title_label)
+
+        progress_bar = QProgressBar()
+        progress_bar.setRange(0, total)
+        progress_bar.setValue(0)
+        progress_bar.setTextVisible(True)
+        progress_bar.setFormat("%v / %m  (%p%)")
+        progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+                text-align: center;
+                height: 22px;
+                font-size: 13px;
+            }
+            QProgressBar::chunk {
+                background-color: #3498db;
+                border-radius: 3px;
+            }
+        """)
+        p_layout.addWidget(progress_bar)
+
+        detail_label = QLabel("准备中...")
+        detail_label.setStyleSheet("color: #555; font-size: 12px;")
+        p_layout.addWidget(detail_label)
+
+        # 动态指示器 + 实时时间更新
+        spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        push_state = {"spinner_idx": 0, "done": 0}  # done 由批次回调更新
+
+        spinner_label = QLabel(spinner_chars[0])
+        spinner_label.setStyleSheet("color: #3498db; font-size: 18px; font-weight: bold;")
+        spinner_label.setFixedWidth(24)
+
+        status_row = QHBoxLayout()
+        status_row.addWidget(spinner_label)
+        status_row.addWidget(detail_label, 1)
+        p_layout.addLayout(status_row)
+
+        push_start_time = _time.time()
+
+        def _fmt_time(seconds):
+            m, s = divmod(int(seconds), 60)
+            return f"{m:02d}:{s:02d}"
+
+        ticker = QTimer(progress_dialog)
+
+        def _tick():
+            # 旋转指示器
+            push_state["spinner_idx"] = (push_state["spinner_idx"] + 1) % len(spinner_chars)
+            spinner_label.setText(spinner_chars[push_state["spinner_idx"]])
+            # 实时更新时间（不依赖批次回调）
+            done = push_state["done"]
+            elapsed = _time.time() - push_start_time
+            if done > 0:
+                remaining = elapsed / done * (total - done)
+                detail_label.setText(
+                    f"已推送 {done}/{total} 头  |  "
+                    f"已用时 {_fmt_time(elapsed)}  |  "
+                    f"预计剩余 {_fmt_time(remaining)}"
+                )
+            else:
+                detail_label.setText(f"已用时 {_fmt_time(elapsed)}  |  等待服务器响应...")
+
+        ticker.timeout.connect(_tick)
+        ticker.start(100)
+
+        progress_dialog.setLayout(p_layout)
+        progress_dialog.show()
+        QApplication.processEvents()
+
+        # ── Worker 线程 ──
+        class PushWorker(QThread):
+            finished = pyqtSignal(dict)
+            error = pyqtSignal(str)
+            progress_update = pyqtSignal(int, int)  # (records_done, total)
+
+            def __init__(self, pusher, token, records):
+                super().__init__()
+                self.pusher = pusher
+                self.token = token
+                self.records = records
+
+            def run(self):
+                try:
+                    client = YQNApiClient(self.token)
+
+                    def on_progress(done, total_count):
+                        self.progress_update.emit(done, total_count)
+
+                    result = self.pusher.push_records(
+                        client, self.records, progress_callback=on_progress
+                    )
+                    self.finished.emit(result)
+                except Exception as e:
+                    self.error.emit(str(e))
+
+        worker = PushWorker(pusher, self.yqn_token, records)
+
+        def on_progress(done, total_count):
+            push_state["done"] = done
+            progress_bar.setValue(done)
+
+        def on_finished(result):
+            ticker.stop()
+            elapsed = _time.time() - push_start_time
+            result['elapsed_seconds'] = elapsed
+            progress_dialog.close()
+            self._show_push_result(result, pusher, records)
+            worker.deleteLater()
+
+        def on_error(err_msg):
+            ticker.stop()
+            progress_dialog.close()
+            QMessageBox.critical(self, "推送失败", f"推送过程中发生错误：\n{err_msg}")
+            worker.deleteLater()
+
+        worker.progress_update.connect(on_progress)
+        worker.finished.connect(on_finished)
+        worker.error.connect(on_error)
+        worker.start()
+
+        # 保存引用防止被垃圾回收
+        self._push_worker = worker
+        self._push_progress_dialog = progress_dialog
+
+    def _show_push_result(self, result: dict, pusher=None, records=None):
+        """显示推送结果对话框（含重试按钮）"""
+        if result.get("error") and result.get("total", 0) == 0:
+            QMessageBox.critical(self, "推送失败", f"推送失败：{result['error']}")
+            return
+
+        total = result.get("total", 0)
+        success_count = result.get("success_count", 0)
+        fail_count = result.get("fail_count", 0)
+        failures = result.get("failures", [])
+        failed_records = result.get("failed_records", [])
+        elapsed = result.get("elapsed_seconds", 0)
+
+        # 确定状态
+        if result.get("success"):
+            color, status = "#27ae60", "推送成功"
+        elif success_count > 0:
+            color, status = "#e67e22", "部分成功"
+        else:
+            color, status = "#e74c3c", "推送失败"
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"推送结果 - {status}")
+        dialog.setMinimumSize(600, 380)
+
+        layout = QVBoxLayout()
+        layout.setSpacing(10)
+
+        # ── 摘要区域 ──
+        from datetime import datetime as _dt
+        from version import get_version
+
+        def _fmt(s):
+            m, sec = divmod(int(s), 60)
+            return f"{m:02d}:{sec:02d}"
+
+        # 从 pusher 获取牧场、文件等信息
+        farm_name = ""
+        farm_code = ""
+        update_by = ""
+        source_file = ""
+        if pusher:
+            farm_name = (pusher.farm_info or {}).get("farm_name", "")
+            farm_code = (pusher.farm_info or {}).get("farm_code", "")
+            update_by = pusher.update_by or ""
+            rf = pusher._find_result_file()
+            if rf:
+                source_file = rf.name
+
+        # 从 records 统计冻精分布
+        has_sexed = has_conv = has_beef = 0
+        if records:
+            has_sexed = sum(1 for r in records if any(r.get(f'sexedSemen{i}') for i in range(1, 5)))
+            has_conv = sum(1 for r in records if any(r.get(f'conventionalSemen{i}') for i in range(1, 5)))
+            has_beef = sum(1 for r in records if r.get('beefCattleFrozenSemen'))
+
+        push_time = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+        speed = f"{total / elapsed:.1f} 条/秒" if elapsed > 0 else "-"
+
+        td_l = "style='padding-right:16px; color:#666;'"
+        sep = "<tr><td colspan='2' style='height:6px;'></td></tr>"
+
+        summary_html = (
+            f"<h2 style='color: {color}; margin-bottom: 8px;'>{status}</h2>"
+            f"<table style='font-size: 14px; line-height: 1.8;'>"
+            # 基本信息
+            f"<tr><td {td_l}>目标牧场：</td>"
+            f"<td><b>{farm_name}</b>（{farm_code}）</td></tr>"
+            f"<tr><td {td_l}>推送人：</td><td>{update_by}</td></tr>"
+            f"<tr><td {td_l}>推送时间：</td><td>{push_time}</td></tr>"
+            f"<tr><td {td_l}>数据来源：</td><td>{source_file}</td></tr>"
+            f"<tr><td {td_l}>软件版本：</td><td>v{get_version()}</td></tr>"
+            f"{sep}"
+            # 推送结果
+            f"<tr><td {td_l}>总记录数：</td>"
+            f"<td><b>{total}</b> 条</td></tr>"
+            f"<tr><td {td_l}>成功：</td>"
+            f"<td style='color: #27ae60;'><b>{success_count}</b> 条</td></tr>"
+            f"<tr><td {td_l}>失败：</td>"
+            f"<td style='color: #e74c3c;'><b>{fail_count}</b> 条</td></tr>"
+            f"<tr><td {td_l}>用时：</td><td>{_fmt(elapsed)}（{speed}）</td></tr>"
+            f"{sep}"
+            # 冻精分配统计
+            f"<tr><td {td_l}>含性控冻精：</td><td>{has_sexed} 头</td></tr>"
+            f"<tr><td {td_l}>含常规冻精：</td><td>{has_conv} 头</td></tr>"
+            f"<tr><td {td_l}>含肉牛冻精：</td><td>{has_beef} 头</td></tr>"
+            f"</table>"
+        )
+        summary_label = QLabel(summary_html)
+        layout.addWidget(summary_label)
+
+        # ── 失败详情表格 ──
+        if failures:
+            fail_header = QLabel("<b>失败详情：</b>")
+            layout.addWidget(fail_header)
+
+            table = QTableWidget()
+            table.setColumnCount(2)
+            table.setHorizontalHeaderLabels(["耳号/批次", "错误信息"])
+            table.horizontalHeader().setStretchLastSection(True)
+            table.horizontalHeader().setSectionResizeMode(
+                0, QHeaderView.ResizeMode.ResizeToContents
             )
+            table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+            table.setAlternatingRowColors(True)
+            table.setRowCount(len(failures))
+
+            for i, fail in enumerate(failures):
+                ear_num = fail.get("earNum", "")
+                if not ear_num:
+                    batch = fail.get("batch", "")
+                    count = fail.get("count", "")
+                    ear_num = f"批次{batch} ({count}条)" if batch else "未知"
+                err_msg = fail.get("errorMsg", fail.get("error", "未知错误"))
+                table.setItem(i, 0, QTableWidgetItem(str(ear_num)))
+                table.setItem(i, 1, QTableWidgetItem(str(err_msg)))
+
+            layout.addWidget(table)
+            dialog.setMinimumSize(600, 480)
+
+        # ── 按钮区域 ──
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        if failed_records and pusher:
+            retry_btn = QPushButton(f"重新推送失败记录 ({len(failed_records)} 条)")
+            retry_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #e67e22;
+                    color: white;
+                    border: none;
+                    padding: 8px 20px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                    font-size: 13px;
+                }
+                QPushButton:hover { background-color: #d35400; }
+            """)
+
+            def on_retry():
+                dialog.close()
+                self._start_push(pusher, failed_records)
+
+            retry_btn.clicked.connect(on_retry)
+            btn_layout.addWidget(retry_btn)
+
+        close_btn = QPushButton("关闭")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                padding: 8px 20px;
+                border-radius: 4px;
+                font-size: 13px;
+                border: 1px solid #bdc3c7;
+            }
+            QPushButton:hover { background-color: #ecf0f1; }
+        """)
+        close_btn.clicked.connect(dialog.accept)
+        btn_layout.addWidget(close_btn)
+
+        layout.addLayout(btn_layout)
+
+        dialog.setLayout(layout)
+        dialog.exec()
 
     def on_mating_completed(self, result: dict):
         """选配完成的处理"""
@@ -3915,28 +4209,104 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'push_result_btn'):
                 self.push_result_btn.setEnabled(True)
 
-            # 构建成功消息
-            message = f"""个体选配完成！
+            report_path = result['report_path']
 
-已生成完整的选配报告：
-{result['report_path'].name}
+            # 自定义完成对话框
+            dialog = QDialog(self)
+            dialog.setWindowTitle("选配完成")
+            dialog.setMinimumWidth(420)
 
-报告包含了所有分组的母牛选配结果。
+            layout = QVBoxLayout()
+            layout.setSpacing(14)
 
-是否打开查看报告？"""
-
-            reply = QMessageBox.question(
-                self,
-                "选配完成",
-                message,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            # 成功信息
+            info_html = (
+                f"<h3 style='color: #27ae60;'>个体选配完成</h3>"
+                f"<p style='font-size: 13px;'>"
+                f"已生成选配报告：<b>{report_path.name}</b><br>"
+                f"报告包含了所有分组的母牛选配结果。</p>"
             )
+            info_label = QLabel(info_html)
+            info_label.setWordWrap(True)
+            layout.addWidget(info_label)
 
-            if reply == QMessageBox.StandardButton.Yes:
+            # 按钮区域
+            btn_layout = QHBoxLayout()
+            btn_layout.setSpacing(10)
+
+            open_file_btn = QPushButton("打开报告")
+            open_file_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #27ae60; color: white; border: none;
+                    padding: 9px 18px; border-radius: 4px;
+                    font-weight: bold; font-size: 13px;
+                }
+                QPushButton:hover { background-color: #229954; }
+            """)
+
+            open_folder_btn = QPushButton("打开文件夹")
+            open_folder_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #2980b9; color: white; border: none;
+                    padding: 9px 18px; border-radius: 4px;
+                    font-weight: bold; font-size: 13px;
+                }
+                QPushButton:hover { background-color: #2471a3; }
+            """)
+
+            push_btn = QPushButton("推送到伊起牛")
+            push_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #e67e22; color: white; border: none;
+                    padding: 9px 18px; border-radius: 4px;
+                    font-weight: bold; font-size: 13px;
+                }
+                QPushButton:hover { background-color: #d35400; }
+                QPushButton:disabled { background-color: #bdc3c7; }
+            """)
+            if self.login_type != 'yqn':
+                push_btn.setEnabled(False)
+                push_btn.setToolTip("仅支持伊起牛账号登录后推送")
+
+            close_btn = QPushButton("关闭")
+            close_btn.setStyleSheet("""
+                QPushButton {
+                    padding: 9px 18px; border-radius: 4px;
+                    font-size: 13px; border: 1px solid #bdc3c7;
+                }
+                QPushButton:hover { background-color: #ecf0f1; }
+            """)
+
+            def _open_file():
                 try:
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(result['report_path'])))
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(report_path)))
                 except Exception as e:
-                    QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}")
+                    QMessageBox.warning(self, "打开失败", f"无法打开文件: {e}")
+
+            def _open_folder():
+                try:
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(report_path.parent)))
+                except Exception as e:
+                    QMessageBox.warning(self, "打开失败", f"无法打开文件夹: {e}")
+
+            def _push():
+                dialog.close()
+                self.on_push_mating_results()
+
+            open_file_btn.clicked.connect(_open_file)
+            open_folder_btn.clicked.connect(_open_folder)
+            push_btn.clicked.connect(_push)
+            close_btn.clicked.connect(dialog.accept)
+
+            btn_layout.addWidget(open_file_btn)
+            btn_layout.addWidget(open_folder_btn)
+            btn_layout.addWidget(push_btn)
+            btn_layout.addStretch()
+            btn_layout.addWidget(close_btn)
+
+            layout.addLayout(btn_layout)
+            dialog.setLayout(layout)
+            dialog.exec()
 
             # 更新分组预览
             self.load_group_preview()
