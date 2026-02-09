@@ -1483,14 +1483,11 @@ class MainWindow(QMainWindow):
             elif text == "自动化生成":
                 self.content_stack.setCurrentIndex(7)  # 自动化生成
 
-            # 切换到个体选配页面时刷新冻精预览
+            # 切换到个体选配页面时延迟刷新，避免页面切换卡顿
             if text == "个体选配" and hasattr(self, 'load_semen_preview'):
-                print("[DEBUG-NAV] 切换到个体选配页面，刷新冻精预览...")
-                self.load_semen_preview()
-                # 同时刷新分组预览
-                self.load_group_preview()
-                # 更新表格样式以适应当前主题
-                self.update_preview_tables_style()
+                from PyQt6.QtCore import QTimer
+                print("[DEBUG-NAV] 切换到个体选配页面，延迟刷新冻精预览...")
+                QTimer.singleShot(50, self._deferred_load_mating_preview)
 
             # 切换到自动化生成页面时刷新对比牧场选择列表
             if text == "自动化生成" and hasattr(self, 'load_benchmark_farms'):
@@ -1498,6 +1495,12 @@ class MainWindow(QMainWindow):
                 self.load_benchmark_farms()
             
             self.update_nav_selected_style()
+
+    def _deferred_load_mating_preview(self):
+        """延迟加载个体选配页面的预览数据，避免页面切换卡顿"""
+        self.load_semen_preview()
+        self.load_group_preview()
+        self.update_preview_tables_style()
 
     # 新增"数据上传"页面函数
     def create_upload_page(self):

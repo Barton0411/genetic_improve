@@ -1,26 +1,18 @@
 {
-  "version": "1.2.3.0",
+  "version": "1.2.3.1",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.0/伊利奶牛选配_v1.2.3.0_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.0/伊利奶牛选配_v1.2.3.0_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.1/伊利奶牛选配_v1.2.3.1_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.1/伊利奶牛选配_v1.2.3.1_win.exe",
   "changes": [
-    "1. <b>功能</b>：选配结果推送对接伊起牛API",
-    "   - 调用batchAdd接口批量推送，自动填充更新人和更新时间",
-    "   - 支持分批推送（每批200条），失败记录可一键重新推送",
+    "1. <b>修复</b>：冻精类型判断规则完善",
+    "   - 新增站号551开头自动识别为性控冻精",
+    "   - 修复551HO系列冻精被错误归类为常规的问题",
     "",
-    "2. <b>优化</b>：推送进度实时显示",
-    "   - 进度条显示已推送头数/总数/百分比",
-    "   - 已用时和预计剩余时间实时刷新，动态旋转指示器",
+    "2. <b>优化</b>：牧场搜索改为全局搜索",
+    "   - 搜索范围从当前区域内扩展为全部牧场",
+    "   - 搜索方式改为回车/点击按钮触发，避免实时搜索卡顿",
     "",
-    "3. <b>优化</b>：推送结果摘要丰富",
-    "   - 展示目标牧场、推送人、推送时间、数据来源、软件版本",
-    "   - 展示冻精分配统计（性控/常规/肉牛），失败明细表格",
-    "",
-    "4. <b>优化</b>：选配完成弹窗整合",
-    "   - 整合为一个结果对话框，含打开报告/打开文件夹/推送按钮",
-    "",
-    "5. <b>修复</b>：推送数据源和字段映射修正",
-    "   - 修复读取不存在的farm_info.json，改为读取project_metadata.json",
-    "   - 中文字段正确映射为API英文字段（earNum等）"
+    "3. <b>优化</b>：个体选配页面切换延迟加载",
+    "   - 切换到个体选配页面时延迟加载预览数据，避免页面切换卡顿"
   ]
 }

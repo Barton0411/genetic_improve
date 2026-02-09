@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QButtonGroup, QRadioButton, QListWidgetItem,
     QAbstractItemView
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QColor, QBrush
 from pathlib import Path
 from datetime import datetime
@@ -313,9 +313,6 @@ class FarmSelectionPage(QWidget):
         header_layout.addStretch()
 
         # 搜索框
-        search_icon = QLabel("🔍")
-        header_layout.addWidget(search_icon)
-
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("搜索牧场名称或站号...")
         self.search_input.setFixedWidth(200)
@@ -330,8 +327,30 @@ class FarmSelectionPage(QWidget):
                 border-color: #409eff;
             }
         """)
-        self.search_input.textChanged.connect(self.on_search_changed)
+        self.search_input.returnPressed.connect(self._do_search)
         header_layout.addWidget(self.search_input)
+
+        # 搜索按钮
+        self.search_btn = QPushButton("搜索")
+        self.search_btn.setFixedWidth(60)
+        self.search_btn.setStyleSheet("""
+            QPushButton {
+                padding: 6px 12px;
+                background-color: #409eff;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: #66b1ff;
+            }
+            QPushButton:pressed {
+                background-color: #3a8ee6;
+            }
+        """)
+        self.search_btn.clicked.connect(self._do_search)
+        header_layout.addWidget(self.search_btn)
 
         layout.addLayout(header_layout)
 
@@ -868,15 +887,18 @@ class FarmSelectionPage(QWidget):
 
     def populate_farm_list(self, farms: list):
         """填充牧场列表"""
+        self.farm_list.setUpdatesEnabled(False)
         self.farm_list.clear()
         self.farm_list_items.clear()
+
+        item_size = QSize(0, 36)
 
         for farm in farms:
             farm_code = farm.get('farmCode', '')
 
             # 创建列表项
             item = QListWidgetItem(self.farm_list)
-            item.setSizeHint(FarmListItem(farm).sizeHint())
+            item.setSizeHint(item_size)
 
             # 创建自定义widget
             farm_widget = FarmListItem(farm)
@@ -888,6 +910,8 @@ class FarmSelectionPage(QWidget):
 
             self.farm_list.setItemWidget(item, farm_widget)
             self.farm_list_items[farm_code] = farm_widget
+
+        self.farm_list.setUpdatesEnabled(True)
 
     def on_farm_checked_changed(self, farm_code: str, is_checked: bool):
         """牧场勾选状态变化"""
@@ -917,28 +941,34 @@ class FarmSelectionPage(QWidget):
         self.auto_report_btn.setEnabled(count > 0)
 
     def on_search_changed(self, text: str):
-        """搜索文本变化"""
+        """搜索文本变化 - 搜索范围为所有牧场，不受左侧筛选限制"""
         text = text.strip().lower()
 
         if not text:
-            # 恢复所有项目可见
-            for i in range(self.farm_list.count()):
-                self.farm_list.item(i).setHidden(False)
+            # 搜索清空时，恢复当前区域选择的牧场列表
+            selected_items = self.region_tree.selectedItems()
+            if selected_items:
+                self.on_region_selected(selected_items[0], 0)
+            else:
+                self.farm_list.clear()
+                self.farm_list_items.clear()
+                self.region_title_label.setText("请选择区域")
             return
 
-        # 筛选匹配项
-        for i in range(self.farm_list.count()):
-            item = self.farm_list.item(i)
-            widget = self.farm_list.itemWidget(item)
-            if widget:
-                farm_data = widget.farm_data
-                farm_code = str(farm_data.get('farmCode', '')).lower()
-                farm_name = str(farm_data.get('name', '')).lower()
+        # 在所有牧场中搜索匹配项
+        matched_farms = []
+        for farm in self.all_farms:
+            farm_code = str(farm.get('farmCode', '')).lower()
+            farm_name = str(farm.get('name', '')).lower()
+            if text in farm_code or text in farm_name:
+                matched_farms.append(farm)
 
-                if text in farm_code or text in farm_name:
-                    item.setHidden(False)
-                else:
-                    item.setHidden(True)
+        self.region_title_label.setText(f"搜索结果 ({len(matched_farms)}个)")
+        self.populate_farm_list(matched_farms)
+
+    def _do_search(self):
+        """防抖后执行搜索"""
+        self.on_search_changed(self.search_input.text())
 
     def on_preview_clicked(self):
         """预览按钮点击"""

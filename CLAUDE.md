@@ -37,7 +37,7 @@ pyinstaller GeneticImprove_win.spec
 
 - 版本号格式：`主版本号.次版本号.修订号.构建号`（如 1.2.2.7）
 - 版本定义在 `version.py` 的 `VERSION` 变量和 `VERSION_HISTORY` 列表
-- 发布时使用 `/release` 斜杠命令或直接说"发布 vX.X.X.X"
+- 发布时使用 `/genetic-release` 斜杠命令（自动递增版本号、更新文件、提交推送、监控构建、上传OSS）
 - 发布流程详见 `docs/版本发布提示词模板.md`，文档更新规则详见 `docs/文档维护规则.md`
 
 ## CI/CD
@@ -89,6 +89,7 @@ utils/                # 工具函数
 4. **个体选配**: `core/matching/complete_mating_executor.py` → `cycle_based_matcher.py`
 5. **报告生成**: `core/excel_report/generator.py` 或 `core/ppt_report/generator.py`
 6. **自动化流程**: `gui/auto_report_worker.py` → `core/auto_analysis_runner.py`（数据下载→分析→Excel→PPT一键完成）
+7. **选配推送**: `core/api/mating_result_pusher.py` → `api/yqn_api_client.py` batchAdd 接口（中文字段→API英文字段映射，分批200条推送）
 
 ### 多线程模式
 
@@ -124,6 +125,15 @@ UI线程只处理界面交互，所有耗时操作通过 Worker 线程执行。W
 - 已废弃：`individual_matcher.py`、`matching_worker.py`、`recommendation_generator.py`
 
 关键参数：默认近交系数阈值 3.125%，支持成母牛/后备牛各三个分组（A/B/C）。
+
+### 选配推送 (core/api/)
+
+- `mating_result_pusher.py` - 读取选配报告 → 转换为API格式 → 调用伊起牛 batchAdd 接口
+- 字段映射：`母牛号→earNum`、`1选性控→sexedSemen1`、`母牛指数得分→indexScore` 等
+- 每条记录包含 `farmCode`、`updateBy`、`updateTime`
+- `push_records()` 分批推送，返回 `failed_records` 供重试
+- 牧场信息从 `project_metadata.json`（`FileManager.save_project_metadata` 生成）读取，兼容旧 `farm_info.json`
+- 仅 `login_type == 'yqn'` 时可用推送功能
 
 ### 数据处理 (core/data/)
 
@@ -195,3 +205,5 @@ response = session.request(method, url, **kwargs)
 - `config/field_mappings.json` - 多数据源字段映射规则（`normalize_mappings` 输入→标准列名，`display_mappings` 标准→中文显示名）
 - `config/db_config.py` - 数据库连接配置
 - `version.py` - 版本号和完整版本历史
+- `version.json` - 客户端更新检查文件（同步到 OSS `latest/version.json`）
+- `project_metadata.json`（项目内） - 牧场信息（由 `FileManager.save_project_metadata` 在数据导入时生成）

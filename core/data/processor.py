@@ -1614,6 +1614,7 @@ def _infer_semen_type(bull_id_raw):
     规则:
       - 前/后缀含 XK/SEX/性控 → 性控
       - 前/后缀含 S/X（单字母标记） → 性控
+      - 站号 551 开头 → 性控（551 为性控冻精专用站号）
       - 其他情况（含P前缀或无标记）→ 常规
     """
     s = str(bull_id_raw).strip().upper()
@@ -1628,6 +1629,13 @@ def _infer_semen_type(bull_id_raw):
     for marker in short_sexed_markers:
         if s.startswith(marker) or s.endswith(marker):
             return '性控'
+
+    # 站号 551 开头 → 性控
+    # 去除可能的前缀标记后，检查纯数字+字母部分是否以551开头
+    import re
+    clean = re.sub(r'^[^0-9]*', '', s)  # 去除开头非数字字符
+    if clean.startswith('551'):
+        return '性控'
 
     # 其他情况（含P前缀或无标记）均为常规
     return '常规'
