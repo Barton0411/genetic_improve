@@ -294,6 +294,30 @@ class YQNApiClient:
         self.logger.info(f"批量推送选配结果: {len(records)} 条")
         return self._request("POST", "/breed/selection/batchAdd", json=records)
 
+    def get_frozen_sperm_type(self, frozen_sperm_num: str) -> Optional[str]:
+        """
+        查询单个冻精的类型
+
+        参数:
+            frozen_sperm_num: 冻精编号（如 551HO03970、S291HO23014）
+
+        返回:
+            "性控" / "常规" / None（未找到）
+        """
+        try:
+            result = self._request("GET", "/material/sperm/getBaseFrozen/spermList",
+                                   params={"frozenSpermNum": frozen_sperm_num})
+            data = result.get("data", [])
+            if data:
+                type_code = data[0].get("frozenSpermType", "")
+                if type_code in ("FST001", "FST003"):
+                    return "性控"
+                elif type_code == "FST002":
+                    return "常规"
+        except Exception as e:
+            self.logger.warning(f"查询冻精类型失败 {frozen_sperm_num}: {e}")
+        return None
+
     def search_farms(self, keyword: str, user_farms: List[dict]) -> List[dict]:
         """
         搜索牧场（本地搜索，从用户牧场列表中筛选）

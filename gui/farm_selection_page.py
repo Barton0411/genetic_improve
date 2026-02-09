@@ -1128,18 +1128,35 @@ class FarmSelectionPage(QWidget):
             )
         else:
             farm = list(self.selected_farms.values())[0]
+            # 检查备选公牛数据是否已自动生成
+            from pathlib import Path
+            bull_file = Path(project_path) / "standardized_data" / "processed_bull_data.xlsx"
+            bull_ready = bull_file.exists()
+
+            completed_lines = (
+                f"✅ 牛群明细已自动下载\n"
+                f"✅ 配种记录已自动下载\n"
+                f"✅ 冻精库存已自动下载并标准化\n"
+                f"✅ 数据已自动标准化"
+            )
+            if bull_ready:
+                completed_lines += f"\n✅ 备选公牛已从冻精库存自动生成"
+
+            pending_lines = ""
+            pending_items = []
+            if not bull_ready:
+                pending_items.append("⚠️ 备选公牛清单")
+            pending_items.append("⚠️ 体型外貌数据 (可选)")
+            pending_items.append("⚠️ 基因组数据 (可选)")
+            if pending_items:
+                pending_lines = "\n\n待手动上传:\n" + "\n".join(pending_items)
+
             success_msg = (
                 f"牧场项目已创建成功!\n\n"
                 f"项目位置: {project_path}\n\n"
                 f"已完成:\n"
-                f"✅ 牛群明细已自动下载\n"
-                f"✅ 配种记录已自动下载\n"
-                f"✅ 冻精库存已自动下载并标准化\n"
-                f"✅ 数据已自动标准化\n\n"
-                f"待手动上传:\n"
-                f"⚠️ 备选公牛清单\n"
-                f"⚠️ 体型外貌数据 (可选)\n"
-                f"⚠️ 基因组数据 (可选)"
+                f"{completed_lines}"
+                f"{pending_lines}"
             )
 
         QMessageBox.information(self, "创建成功", success_msg)

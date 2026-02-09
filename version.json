@@ -1,18 +1,16 @@
 {
-  "version": "1.2.3.1",
+  "version": "1.2.3.2",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.1/伊利奶牛选配_v1.2.3.1_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.1/伊利奶牛选配_v1.2.3.1_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.2/伊利奶牛选配_v1.2.3.2_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.2/伊利奶牛选配_v1.2.3.2_win.exe",
   "changes": [
-    "1. <b>修复</b>：冻精类型判断规则完善",
-    "   - 新增站号551开头自动识别为性控冻精",
-    "   - 修复551HO系列冻精被错误归类为常规的问题",
+    "1. <b>功能</b>：冻精类型API精确查询替代推断",
+    "   - 伊起牛登录时，通过spermList接口逐个查询冻精类型（性控/常规）",
+    "   - API返回结果直接覆盖启发式推断值，提升冻精分类准确性",
+    "   - 未匹配的冻精号保留原有推断结果，查询异常时静默回退",
     "",
-    "2. <b>优化</b>：牧场搜索改为全局搜索",
-    "   - 搜索范围从当前区域内扩展为全部牧场",
-    "   - 搜索方式改为回车/点击按钮触发，避免实时搜索卡顿",
-    "",
-    "3. <b>优化</b>：个体选配页面切换延迟加载",
-    "   - 切换到个体选配页面时延迟加载预览数据，避免页面切换卡顿"
+    "2. <b>优化</b>：项目创建完成对话框动态显示备选公牛状态",
+    "   - 冻精库存自动下载后，备选公牛清单自动标记为已完成",
+    "   - 不再显示多余的手动上传提示"
   ]
 }

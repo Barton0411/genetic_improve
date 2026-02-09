@@ -2800,6 +2800,71 @@ class MainWindow(QMainWindow):
             import traceback
             print(traceback.format_exc())
 
+    def _replace_semen_types_from_api(self, df):
+        """
+        用伊起牛API查询冻精类型，替代推断结果
+
+        参数:
+            df: 包含 bull_id_original 和 semen_type 列的 DataFrame
+
+        返回:
+            (df, replace_count) - 更新后的DataFrame和替换数量
+        """
+        from api.yqn_api_client import YQNApiClient
+
+        replace_count = 0
+        try:
+            client = YQNApiClient(self.yqn_token)
+
+            # 收集唯一的原始号
+            if 'bull_id_original' not in df.columns:
+                print("[SemenType-API] 缺少 bull_id_original 列，跳过API查询")
+                return df, 0
+
+            unique_originals = df['bull_id_original'].dropna().astype(str).unique()
+            unique_originals = [x for x in unique_originals if x and x.lower() != 'nan']
+            print(f"[SemenType-API] 开始查询 {len(unique_originals)} 个唯一冻精号的类型...")
+
+            # 逐个查询，缓存结果
+            type_map = {}
+            matched_count = 0
+            for i, original_id in enumerate(unique_originals):
+                api_type = client.get_frozen_sperm_type(original_id)
+                if api_type:
+                    type_map[original_id] = api_type
+                    matched_count += 1
+                if (i + 1) % 20 == 0:
+                    print(f"[SemenType-API] 已查询 {i + 1}/{len(unique_originals)}，匹配 {matched_count} 个")
+
+            print(f"[SemenType-API] 查询完成: 总计 {len(unique_originals)}，匹配 {matched_count}")
+
+            # 应用替换
+            unmatched = []
+            for original_id, api_type in type_map.items():
+                mask = df['bull_id_original'].astype(str) == original_id
+                old_types = df.loc[mask, 'semen_type'].values
+                for old_type in old_types:
+                    if old_type != api_type:
+                        replace_count += 1
+                df.loc[mask, 'semen_type'] = api_type
+
+            # 记录未匹配的
+            for original_id in unique_originals:
+                if original_id not in type_map:
+                    unmatched.append(original_id)
+
+            if unmatched:
+                print(f"[SemenType-API] 未匹配 {len(unmatched)} 个: {unmatched[:10]}{'...' if len(unmatched) > 10 else ''}")
+            if replace_count > 0:
+                print(f"[SemenType-API] 类型变更 {replace_count} 条")
+
+        except Exception as e:
+            print(f"[SemenType-API] API查询异常，回退到推断值: {e}")
+            import traceback
+            print(traceback.format_exc())
+
+        return df, replace_count
+
     def load_semen_preview(self):
         """加载冻精预览，直接读写 processed_bull_data.xlsx"""
         if not self.selected_project_path:
@@ -2838,6 +2903,16 @@ class MainWindow(QMainWindow):
             # 保留所有行，不去重（同一公牛可能有多种冻精类型）
             df = df.reset_index(drop=True)
             print(f"[SemenPreview] 文件中有效的公牛数据行数: {len(df)}")
+
+            # 伊起牛登录时，用API查询冻精类型替代推断值
+            if self.login_type == 'yqn' and self.yqn_token:
+                df, replace_count = self._replace_semen_types_from_api(df)
+                if replace_count > 0:
+                    try:
+                        df.to_excel(bull_file, index=False)
+                        print(f"[SemenPreview] API类型替换后已保存到文件")
+                    except Exception as e:
+                        print(f"[SemenPreview] 替代后保存失败: {e}")
 
             if hasattr(self, 'semen_tab_widget'):
                 self.semen_tab_widget.clear()
