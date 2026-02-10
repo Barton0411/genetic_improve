@@ -857,11 +857,13 @@ class MainWindow(QMainWindow):
         self.content_stack.addWidget(self.create_mating_page())     # 第6页：个体选配页面（原第5页）
         self.content_stack.addWidget(self.create_report_generation_page())  # 第7页：自动化生成页面（原第6页）
 
-        # 设置所有页面的背景为透明
+        # 设置所有页面的背景为不透明白色（Windows上透明背景会导致背景图穿透，内容看不清）
         for i in range(self.content_stack.count()):
             page = self.content_stack.widget(i)
-            page.setAutoFillBackground(False)
-            page.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            page.setAutoFillBackground(True)
+            palette = page.palette()
+            palette.setColor(QPalette.ColorRole.Window, QColor(255, 255, 255))
+            page.setPalette(palette)
 
         # 设置组件的位置和大小
         def update_geometry():

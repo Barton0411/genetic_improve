@@ -3,10 +3,20 @@
 """
 
 # 版本号格式: 主版本号.次版本号.修订号.构建号 (xxx.xxx.xxx.xxx)
-VERSION = "1.2.3.2"
+VERSION = "1.2.3.3"
 
 # 版本历史（完整记录所有版本）
 VERSION_HISTORY = [
+    {
+        "version": "1.2.3.3",
+        "date": "2026-02-10",
+        "author": "Development Team",
+        "changes": [
+            "1. <b>修复</b>：Windows页面背景图穿透问题",
+            "   - 修复Windows下所有页面背景透明导致奶牛水印图片穿透、内容看不清的问题",
+            "   - 所有页面改为不透明白色背景，Mac和Windows显示一致"
+        ]
+    },
     {
         "version": "1.2.3.2",
         "date": "2026-02-09",

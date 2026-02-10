@@ -1,16 +1,11 @@
 {
-  "version": "1.2.3.2",
+  "version": "1.2.3.3",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.2/伊利奶牛选配_v1.2.3.2_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.2/伊利奶牛选配_v1.2.3.2_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.3/伊利奶牛选配_v1.2.3.3_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.3/伊利奶牛选配_v1.2.3.3_win.exe",
   "changes": [
-    "1. <b>功能</b>：冻精类型API精确查询替代推断",
-    "   - 伊起牛登录时，通过spermList接口逐个查询冻精类型（性控/常规）",
-    "   - API返回结果直接覆盖启发式推断值，提升冻精分类准确性",
-    "   - 未匹配的冻精号保留原有推断结果，查询异常时静默回退",
-    "",
-    "2. <b>优化</b>：项目创建完成对话框动态显示备选公牛状态",
-    "   - 冻精库存自动下载后，备选公牛清单自动标记为已完成",
-    "   - 不再显示多余的手动上传提示"
+    "1. <b>修复</b>：Windows页面背景图穿透问题",
+    "   - 修复Windows下所有页面背景透明导致水印图片穿透、内容看不清的问题",
+    "   - 所有页面改为不透明白色背景，Mac和Windows显示一致"
   ]
 }
