@@ -41,7 +41,7 @@ class DownloadThread(QThread):
                 return
             
             # 发送HTTP请求开始下载
-            response = requests.get(self.url, stream=True, timeout=30)
+            response = requests.get(self.url, stream=True, timeout=30, proxies={'http': None, 'https': None})
             response.raise_for_status()
             
             # 获取文件总大小
