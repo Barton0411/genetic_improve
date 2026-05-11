@@ -98,6 +98,10 @@ class MatingResultPusher:
             value = row.get(column_name, default_value)
             if pd.isna(value):
                 return default_value
+            # 防御历史脏数据：当目标是 str 时，把 float 241215.0 还原成 "241215"，
+            # 避免推送给伊起牛的 earNum 带 ".0" 后缀（与原牛号不匹配）
+            if data_type is str and isinstance(value, float) and value.is_integer():
+                return str(int(value))
             return data_type(value)
         except Exception:
             return default_value
@@ -151,7 +155,13 @@ class MatingResultPusher:
         logger.info(f"读取选配结果: {result_file.name}")
 
         try:
-            mating_df = pd.read_excel(result_file)
+            # 关键：所有 ID 列必须按字符串读取，防止 pandas 把"241215"推断成 float 241215.0，
+            # 否则推送给伊起牛 earNum 会变成"241215.0"，导致与原牛号不匹配
+            id_str_cols = ['母牛号', '原始母牛号', '父号', '原始父号', '耳号',
+                           '1选公牛', '2选公牛', '3选公牛',
+                           '1选性控', '2选性控', '3选性控',
+                           '1选常规', '2选常规', '3选常规']
+            mating_df = pd.read_excel(result_file, dtype={c: str for c in id_str_cols})
 
             # 解析实际列名
             actual_columns = {}

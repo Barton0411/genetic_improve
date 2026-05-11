@@ -400,16 +400,36 @@ class CompleteMatingExecutor:
                 except Exception as e:
                     logger.warning(f"读取现有报告失败: {e}，将创建新报告")
 
-            # 确保母牛号保持为字符串格式
-            if '母牛号' in final_report.columns:
-                final_report['母牛号'] = final_report['母牛号'].astype(str)
+            # 确保母牛号保持为字符串格式 + 修掉历史 "241215.0" 这种脏数据
+            id_cols_to_clean = ['母牛号', '原始母牛号', '父号', '原始父号']
+            for c in id_cols_to_clean:
+                if c in final_report.columns:
+                    final_report[c] = final_report[c].apply(
+                        lambda v: '' if pd.isna(v) else (str(int(v)) if isinstance(v, float) and v.is_integer() else str(v).strip())
+                    )
+
+            # 写入后强制把 ID 列单元格的类型设为文本，否则 openpyxl 会把"241215"渲染成数值cell，
+            # 下游读取 xlsx 时又会被 pandas 推断回 float，再传到伊起牛 earNum 就成"241215.0"了
+            def _force_text_columns(ws, df, cols):
+                for col in cols:
+                    if col in df.columns:
+                        idx = df.columns.get_loc(col) + 1
+                        for row in ws.iter_rows(min_row=2, min_col=idx, max_col=idx):
+                            for cell in row:
+                                if cell.value is not None and not isinstance(cell.value, str):
+                                    v = cell.value
+                                    cell.value = str(int(v)) if isinstance(v, float) and v.is_integer() else str(v)
+                                cell.number_format = '@'
 
             with pd.ExcelWriter(report_path, engine='openpyxl') as writer:
                 final_report.to_excel(writer, sheet_name='选配结果', index=False)
+                _force_text_columns(writer.sheets['选配结果'], final_report, id_cols_to_clean)
 
             # 同时保存为兼容格式
             compat_path = self.project_path / "analysis_results" / "individual_mating_report.xlsx"
-            final_report.to_excel(compat_path, index=False)
+            with pd.ExcelWriter(compat_path, engine='openpyxl') as writer:
+                final_report.to_excel(writer, index=False)
+                _force_text_columns(writer.sheets[list(writer.sheets.keys())[0]], final_report, id_cols_to_clean)
             
             if progress_callback:
                 progress_callback("选配完成！", 100)

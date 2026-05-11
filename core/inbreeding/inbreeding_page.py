@@ -2820,7 +2820,7 @@ class InbreedingPage(QWidget):
             if hasattr(self, 'progress_dialog') and self.progress_dialog:
                 self.progress_dialog.update_info(f"读取配种记录文件: {breeding_file.name}")
             
-            df = pd.read_excel(breeding_file)
+            df = pd.read_excel(breeding_file, dtype={'耳号': str, '父号': str, '冻精编号': str})
             print(f"读取到{len(df)}条配对记录")
             if hasattr(self, 'progress_dialog') and self.progress_dialog:
                 self.progress_dialog.update_info(f"成功读取 {len(df)} 条配种记录")
@@ -2856,7 +2856,7 @@ class InbreedingPage(QWidget):
                 if i < 5 or i % 100 == 0:  # 只打印前5行和每100行，避免日志过长
                     print(f"分析第{i+1}条配对记录")
                 _, row = row  # 解包iterrows返回的元组
-                cow_id = str(row['耳号'])
+                cow_id = str(row['耳号']).strip() if pd.notna(row['耳号']) else ''
 
                 # 读取配种日期
                 breeding_date = row['配种日期'] if '配种日期' in row and pd.notna(row['配种日期']) else ''

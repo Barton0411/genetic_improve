@@ -55,6 +55,11 @@ class AutoReportWorker(QThread):
     def _make_sub_progress(self, task_name, start_pct, end_pct):
         """创建子任务进度回调，将 0-100% 映射到全局 start_pct-end_pct"""
         def callback(sub_pct, msg=""):
+            # 容忍 None：底层有些模块会传 progress_callback(None, "出错: ...") 表示异常状态，
+            # 此时不应该再爆 None/int 错误掩盖真正的异常 message
+            if sub_pct is None:
+                self.progress.emit(start_pct, f"[{task_name}] {msg}")
+                return
             global_pct = start_pct + int(sub_pct / 100 * (end_pct - start_pct))
             self.progress.emit(global_pct, f"[{task_name}] {msg}")
             # 同时发送子任务独立进度

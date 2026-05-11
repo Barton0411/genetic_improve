@@ -2184,9 +2184,31 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
 
     # ========== 第12步: 保存文件 ==========
     print(f"\n【步骤12】保存标准化文件")
+    # 强制ID列为字符串类型，避免xlsx读出后被pandas推断为float（"241215" → 241215.0）
+    id_cols = ['耳号', '父号', '冻精编号']
+    for col in id_cols:
+        if col in df_final.columns:
+            df_final[col] = df_final[col].astype(str).replace({'nan': '', 'None': ''})
     output_file = standardized_path / "processed_breeding_data.xlsx"
     try:
-        df_final.to_excel(output_file, index=False)
+        # openpyxl 在 to_excel 写入时，对纯数字字符串（如"241215"）会自动渲染为数值 cell。
+        # 写入后遍历 ID 列，把 cell.value 强制覆写回字符串、并设单元格格式为文本，
+        # 保证下次读取（无论是否带 dtype）都得到正确的字符串。
+        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+            df_final.to_excel(writer, index=False)
+            ws = writer.sheets[list(writer.sheets.keys())[0]]
+            col_indices = [df_final.columns.get_loc(c) + 1 for c in id_cols if c in df_final.columns]
+            for col_idx in col_indices:
+                for row in ws.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx):
+                    for cell in row:
+                        if cell.value is not None and not isinstance(cell.value, str):
+                            # 数字 241215.0 → "241215"，避免出现 ".0" 后缀
+                            v = cell.value
+                            if isinstance(v, float) and v.is_integer():
+                                cell.value = str(int(v))
+                            else:
+                                cell.value = str(v)
+                        cell.number_format = '@'
         print(f"  ✓ 文件已保存: {output_file}")
     except Exception as e:
         error_msg = f"保存文件失败: {e}"

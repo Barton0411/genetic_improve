@@ -163,7 +163,7 @@ def run_mated_bull_traits(project_path, selected_traits=None, progress_cb=None):
         return False, "未找到配种记录文件"
 
     try:
-        breeding_df = pd.read_excel(breeding_data_path)
+        breeding_df = pd.read_excel(breeding_data_path, dtype={'耳号': str, '父号': str, '冻精编号': str})
         breeding_df['配种年份'] = pd.to_datetime(breeding_df['配种日期']).dt.year
     except Exception as e:
         return False, f"读取配种记录失败：{str(e)}"
@@ -390,7 +390,7 @@ def _collect_required_bulls(analysis_type, project_path, pedigree_db):
     # 收集配种/备选公牛号
     if analysis_type == 'mated':
         breeding_file = project_path / "standardized_data" / "processed_breeding_data.xlsx"
-        breeding_df = pd.read_excel(breeding_file)
+        breeding_df = pd.read_excel(breeding_file, dtype={'耳号': str, '父号': str, '冻精编号': str})
         bull_ids = breeding_df['冻精编号'].dropna().astype(str).unique()
         for bull_id in bull_ids:
             if bull_id and bull_id.strip():
@@ -510,12 +510,12 @@ def _analyze_mated_pairs(project_path, bull_genes, pedigree_db, progress_cb=None
     """分析已配公牛对"""
     results = []
     breeding_file = project_path / "standardized_data" / "processed_breeding_data.xlsx"
-    df = pd.read_excel(breeding_file)
+    df = pd.read_excel(breeding_file, dtype={'耳号': str, '父号': str, '冻精编号': str})
 
     missing_gene_default = {gene: 'missing data' for gene in DEFECT_GENES}
 
     for i, (_, row) in enumerate(df.iterrows()):
-        cow_id = str(row['耳号'])
+        cow_id = str(row['耳号']).strip() if pd.notna(row['耳号']) else ''
         breeding_date = row['配种日期'] if '配种日期' in row and pd.notna(row['配种日期']) else ''
 
         original_sire_id = str(row['父号']) if pd.notna(row['父号']) else ''
@@ -612,6 +612,14 @@ def _calculate_inbreeding_coefficients(results, progress_cb=None):
 
                     if math.isnan(offspring_inbreeding):
                         offspring_inbreeding = 0.0
+
+                    # 父女配兜底：母牛 cow_id 在 pedigree 中查不到时，通径法会返回 0；
+                    # 但上层 result 里"父号"已经标准化好，若与配种公牛号一致，至少保证不漏报 0.25 这个直系血亲场景
+                    if offspring_inbreeding == 0.0 and sire_id and sire_id == bull_id:
+                        bull_f, _, _ = calculator.calculate_inbreeding_coefficient(bull_id)
+                        offspring_inbreeding = 0.25 * (1 + bull_f)
+                        offspring_contributions = {bull_id: offspring_inbreeding}
+                        offspring_paths = {bull_id: [(f"{bull_id} → 后代 ← {cow_id} ← {bull_id}", offspring_inbreeding, 0, 1, bull_f)]}
 
                     result['后代近交系数'] = f"{offspring_inbreeding:.2%}"
                     result['后代近交详情'] = {

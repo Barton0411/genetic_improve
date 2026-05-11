@@ -1,11 +1,20 @@
 {
-  "version": "1.2.3.4",
+  "version": "1.2.3.5",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.4/伊利奶牛选配_v1.2.3.4_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.4/伊利奶牛选配_v1.2.3.4_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.5/伊利奶牛选配_v1.2.3.5_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.5/伊利奶牛选配_v1.2.3.5_win.exe",
   "changes": [
-    "1. <b>修复</b>：Windows更新下载代理报错",
-    "   - 修复公司网络环境下更新下载因代理连接被拒绝而失败的问题",
-    "   - 更新下载请求禁用代理直连，与其他网络请求保持一致"
+    "1. <b>修复</b>：后代近交系数计算漏报（重要）",
+    "   - 修复已配公牛近交分析中，配种记录耳号类型漂移导致与系谱库失配的问题",
+    "   - 历史上所有父女配、母子配、半同胞等高近交风险配对被静默标记为 0%，本次修复后能正确报出真实近交系数",
+    "   - 加入父女配兜底逻辑，避免数据缺失再次漏报最严重的直系血亲场景",
+    "",
+    "2. <b>修复</b>：个体选配推送伊起牛 earNum 类型污染",
+    "   - 修复推送给伊起牛系统的耳号字段带 \".0\" 后缀的问题，确保 earNum 与源数据完全一致",
+    "   - 选配报告 ID 列单元格强制文本格式，推送端读取强制按字符串处理",
+    "",
+    "3. <b>优化</b>：数据标准化文件稳定性",
+    "   - processed_breeding_data.xlsx 中耳号/父号/冻精编号写入时强制文本格式，杜绝类型漂移",
+    "   - 自动报告流程容忍底层 None 进度值，避免次生异常掩盖真实错误"
   ]
 }
