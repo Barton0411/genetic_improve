@@ -437,8 +437,24 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
+    - name: Download all artifacts (with retry)
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        # 用 gh CLI 下载并加 30s 间隔的外层重试，规避大文件(数百MB)下载偶发失败
+        for i in 1 2 3 4 5; do
+          echo "📥 下载 artifacts 尝试 $i/5 ..."
+          if gh run download ${{ github.run_id }} --dir .; then
+            echo "✅ artifacts 下载成功"
+            break
+          fi
+          if [ "$i" = "5" ]; then
+            echo "❌ 5 次重试后仍失败"
+            exit 1
+          fi
+          echo "⏳ 等待 30s 后重试..."
+          sleep 30
+        done
 
     - name: List downloaded artifacts
       run: |
@@ -584,18 +600,31 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-    
+    - name: Download all artifacts (with retry)
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        for i in 1 2 3 4 5; do
+          echo "📥 下载 artifacts 尝试 $i/5 ..."
+          if gh run download ${{ github.run_id }} --dir .; then
+            echo "✅ artifacts 下载成功"
+            break
+          fi
+          if [ "$i" = "5" ]; then echo "❌ 5 次重试后仍失败"; exit 1; fi
+          echo "⏳ 等待 30s 后重试..."; sleep 30
+        done
+
     - name: Get version from tag
       id: get_version
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-    
-    - name: Download changelog artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: changelog-file
-        path: ./changelog
+
+    - name: Stage changelog
+      run: |
+        # 第一步已下载全部 artifact，changelog 在 ./changelog-file/ 子目录，展平到 ./changelog/
+        # 保持后续步骤引用的 changelog/CHANGELOG_v*.txt 路径不变
+        mkdir -p ./changelog
+        find ./changelog-file -type f -name 'CHANGELOG_*' -exec cp {} ./changelog/ \; 2>/dev/null || true
+        ls -la ./changelog/ || echo "changelog 目录为空（将使用默认 release notes）"
     
     - name: Generate release notes
       id: release_notes
