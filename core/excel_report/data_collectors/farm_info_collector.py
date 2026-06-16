@@ -179,6 +179,20 @@ def _collect_herd_structure(project_folder: Path) -> dict:
             lactating_cows = df_active[df_active['lac'] > 0]
             avg_dim = lactating_cows[dim_col].mean()
 
+        # 品种构成统计（存栏头数照实含全部品种；此处统计构成用于报告说明：
+        # 育种分析仅针对奶牛，需注明存栏中奶牛/肉牛各多少头）
+        from config.breed_constants import is_dairy_breed
+        breed_composition = {}
+        dairy_count = total_count
+        beef_count = 0
+        if 'breed' in df_active.columns:
+            breed_composition = (
+                df_active['breed'].fillna('荷斯坦').astype(str).str.strip()
+                .value_counts().to_dict()
+            )
+            dairy_count = int(sum(c for b, c in breed_composition.items() if is_dairy_breed(b)))
+            beef_count = total_count - dairy_count
+
         return {
             'total_count': total_count,
             'lactating_count': lactating_count,
@@ -187,6 +201,9 @@ def _collect_herd_structure(project_folder: Path) -> dict:
             'avg_lactation': round(avg_lactation, 2) if avg_lactation else 0,
             'avg_dim': round(avg_dim, 0) if avg_dim else 0,  # 平均泌乳天数取整
             'lactation_distribution': lactation_distribution,
+            'breed_composition': breed_composition,  # {品种: 头数}
+            'dairy_count': dairy_count,              # 奶牛品种头数
+            'beef_count': beef_count,                # 肉牛品种头数
             'cow_data': df_active
         }
 
@@ -293,6 +310,9 @@ def _get_empty_herd_structure() -> dict:
         'avg_lactation': 0,
         'avg_dim': 0,
         'lactation_distribution': {},
+        'breed_composition': {},
+        'dairy_count': 0,
+        'beef_count': 0,
         'cow_data': pd.DataFrame()
     }
 

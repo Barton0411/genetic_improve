@@ -139,11 +139,17 @@ class Sheet9Builder(BaseSheetBuilder):
             else:
                 # 计算加权平均（按使用次数加权）
                 if trait in detail_df.columns:
-                    valid_data = detail_df[[trait, '使用次数']].dropna(subset=[trait])
-                    if len(valid_data) > 0:
+                    valid_data = detail_df[[trait, '使用次数']].copy()
+                    # 性状列可能是 object dtype（含字符串/空值），强制转数值，
+                    # 否则 object 列做除法会报 ufunc 'divide' not supported
+                    valid_data[trait] = pd.to_numeric(valid_data[trait], errors='coerce')
+                    valid_data['使用次数'] = pd.to_numeric(valid_data['使用次数'], errors='coerce')
+                    valid_data = valid_data.dropna(subset=[trait, '使用次数'])
+                    weight_sum = valid_data['使用次数'].sum()
+                    if len(valid_data) > 0 and weight_sum > 0:
                         weighted_avg = (
                             valid_data[trait] * valid_data['使用次数']
-                        ).sum() / valid_data['使用次数'].sum()
+                        ).sum() / weight_sum
                         stat_row_data[trait] = weighted_avg
                     else:
                         stat_row_data[trait] = None

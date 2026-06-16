@@ -6,6 +6,8 @@ import pandas as pd
 import logging
 from pathlib import Path
 
+from config.breed_constants import is_dairy_breed
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,6 +39,16 @@ def generate_pedigree_analysis_result(project_path: Path) -> bool:
 
         # 只保留母牛（排除公牛）
         df = df[df['sex'] == '母'].copy()
+
+        # 系谱完整性仅统计奶牛品种，排除肉牛品种（如西门塔尔、安格斯等）
+        if 'breed' in df.columns:
+            before_count = len(df)
+            df = df[df['breed'].apply(is_dairy_breed)].copy()
+            excluded = before_count - len(df)
+            if excluded > 0:
+                logger.info(f"  - 已排除非奶牛品种 {excluded} 头（系谱完整性仅统计奶牛）")
+        else:
+            logger.warning("  - 数据缺少 breed 列，无法按品种过滤，结果可能包含肉牛")
 
         # 使用当前年份动态生成年份分组（最近4年 + 5年及以前）
         # 例如2025年：bins=[-inf, 2021, 2022, 2023, 2024, 2025]

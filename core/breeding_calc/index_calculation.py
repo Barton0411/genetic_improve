@@ -510,7 +510,11 @@ class IndexCalculation(BaseCowCalculation):
                 return False, None
                 
             cow_df = pd.read_excel(cow_data_path)
-            
+
+            # 育种分析仅针对奶牛品种，排除肉牛品种
+            from config.breed_constants import filter_dairy_cows
+            cow_df = filter_dairy_cows(cow_df, log_prefix="母牛性状计算：")
+
             # 对每个母牛计算选中的性状
             for trait in selected_traits:
                 trait_col = f'sire_{trait}'

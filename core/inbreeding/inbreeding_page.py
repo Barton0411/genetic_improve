@@ -149,7 +149,8 @@ except ImportError:
 
 class PedigreeDialog(QDialog):
     """血缘关系图对话框"""
-    def __init__(self, cow_id, sire_id, bull_id, parent=None, inbreeding_details=None, offspring_details=None):
+    def __init__(self, cow_id, sire_id, bull_id, parent=None, inbreeding_details=None, offspring_details=None,
+                 cow_self_mode=False, dam_id=None):
         super().__init__(parent)
         self.cow_id = cow_id
         self.sire_id = sire_id
@@ -157,6 +158,9 @@ class PedigreeDialog(QDialog):
         self.parent_widget = parent
         self.inbreeding_details = inbreeding_details  # 母牛近交详情
         self.offspring_details = offspring_details    # 后代近交详情
+        # 母牛自身近交模式：根节点为母牛本身，父系=母牛的父、母系=母牛的母
+        self.cow_self_mode = cow_self_mode
+        self.dam_id = dam_id
         self.setup_ui()
         
     def setup_ui(self):
@@ -200,7 +204,18 @@ class PedigreeDialog(QDialog):
                 warning_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 warning_label.setStyleSheet("font-weight: bold; font-size: 14px; color: red;")
                 upper_layout.addWidget(warning_label)
-        
+
+        # 添加母牛自身近交系数显示（母牛 = 父 × 母 的后代，与后代近交同口径）
+        if self.inbreeding_details and 'system' in self.inbreeding_details:
+            cow_self_inbreeding = self.inbreeding_details['system']
+            self.cow_self_label = QLabel(f"母牛自身近交系数: {cow_self_inbreeding:.2%}")
+            self.cow_self_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            if cow_self_inbreeding > 0.0625:  # 6.25%
+                self.cow_self_label.setStyleSheet("font-weight: bold; font-size: 14px; color: red;")
+            else:
+                self.cow_self_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+            upper_layout.addWidget(self.cow_self_label)
+
         # 创建图形画布
         self.figure = Figure(figsize=(10, 8))  # 增加画布大小
         self.canvas = FigureCanvas(self.figure)
@@ -231,7 +246,19 @@ class PedigreeDialog(QDialog):
             calc_layout = QVBoxLayout(calc_tab)
             self.create_calculation_process_widget(calc_layout, self.offspring_details)
             tab_widget.addTab(calc_tab, "计算过程")
-        
+
+        # 母牛自身近交详情标签页（母牛 = 父 × 母 的后代，与后代近交完全相同的展示组件）
+        if self.inbreeding_details and self.inbreeding_details.get('common_ancestors'):
+            cow_self_tab = QWidget()
+            cow_self_layout = QVBoxLayout(cow_self_tab)
+            self.create_inbreeding_details_widget(cow_self_layout, self.inbreeding_details, "母牛自身近交详情")
+            tab_widget.addTab(cow_self_tab, "母牛自身近交详情")
+
+            cow_self_calc_tab = QWidget()
+            cow_self_calc_layout = QVBoxLayout(cow_self_calc_tab)
+            self.create_calculation_process_widget(cow_self_calc_layout, self.inbreeding_details)
+            tab_widget.addTab(cow_self_calc_tab, "母牛近交计算过程")
+
         splitter.addWidget(lower_widget)
         
         # 设置分割器比例
@@ -272,9 +299,12 @@ class PedigreeDialog(QDialog):
         """锁定模式下的画布点击事件（只处理双击）"""
         if event.dblclick:  # 只处理双击事件
             try:
-                # 创建并显示最大化图像对话框
-                max_dialog = MaximizedPedigreeDialog(self, self.cow_id, self.sire_id, self.bull_id, 
-                                                   self.offspring_details)
+                # 创建并显示最大化图像对话框（透传母牛自身近交模式）
+                max_dialog = MaximizedPedigreeDialog(self, self.cow_id, self.sire_id, self.bull_id,
+                                                   self.offspring_details,
+                                                   cow_self_mode=getattr(self, 'cow_self_mode', False),
+                                                   dam_id=getattr(self, 'dam_id', None),
+                                                   inbreeding_details=getattr(self, 'inbreeding_details', None))
                 max_dialog.exec()
             except Exception as e:
                 logging.error(f"打开血缘关系图详细视图时出错: {e}")
@@ -670,12 +700,26 @@ class PedigreeDialog(QDialog):
             
             # 查询NAAB号码
             naab_dict = self.query_naab_numbers(pedigree_db)
-            
+
+            # 区分两种场景：
+            #   后代近交：根=预期后代，父系根=配种公牛(bull)，母系根=母牛(cow)
+            #   母牛自身近交：根=母牛本身，父系根=母牛的父(sire)，母系根=母牛的母(dam)
+            if getattr(self, 'cow_self_mode', False):
+                pat_root = self.sire_id or '父亲未知'
+                mat_root = (getattr(self, 'dam_id', '') or '') or '母亲未知'
+                root_label = self.cow_id  # 根节点就是这头母牛本身
+                ca_details = self.inbreeding_details
+            else:
+                pat_root = self.bull_id
+                mat_root = self.cow_id
+                root_label = "预期后代"
+                ca_details = self.offspring_details
+
             # 初始化共同祖先集合
             common_ancestors = set()
-            if self.offspring_details and 'common_ancestors' in self.offspring_details:
-                common_ancestors = set(self.offspring_details['common_ancestors'].keys())
-            
+            if ca_details and 'common_ancestors' in ca_details:
+                common_ancestors = set(ca_details['common_ancestors'].keys())
+
             # 检查特殊情况：如果配种公牛就是母牛的父亲，添加到共同祖先
             cow_info = pedigree_db.pedigree.get(self.cow_id, {})
             cow_father = cow_info.get('sire', '')
@@ -717,7 +761,7 @@ class PedigreeDialog(QDialog):
             
             # 逐代处理所有节点
             # 初始化第0代 - 预期后代
-            self.nodes[(0, 0)] = (0, 0, "预期后代")
+            self.nodes[(0, 0)] = (0, 0, root_label)
             node_ancestors[(0, 0)] = []
             
             # 第1代 - 父亲和母亲
@@ -726,12 +770,12 @@ class PedigreeDialog(QDialog):
             half_spacing = gen1_spacing / 2
             
             # 父亲位置（上方）
-            self.nodes[(1, 0)] = (h_spacing, half_spacing, self.bull_id)
-            node_ancestors[(1, 0)] = [self.bull_id]
-            
+            self.nodes[(1, 0)] = (h_spacing, half_spacing, pat_root)
+            node_ancestors[(1, 0)] = [pat_root]
+
             # 母亲位置（下方）
-            self.nodes[(1, 1)] = (h_spacing, -half_spacing, self.cow_id)
-            node_ancestors[(1, 1)] = [self.cow_id]
+            self.nodes[(1, 1)] = (h_spacing, -half_spacing, mat_root)
+            node_ancestors[(1, 1)] = [mat_root]
             
             # 添加从预期后代到父母的连接
             edges.append((node_width/2, 0, h_spacing-node_width/2, half_spacing))    # 到父亲
@@ -806,8 +850,8 @@ class PedigreeDialog(QDialog):
                 build_pedigree(next_gen, dam_position, dam_id)
             
             # 从第一代递归构建
-            build_pedigree(1, 0, self.bull_id)  # 从父亲开始
-            build_pedigree(1, 1, self.cow_id)   # 从母亲开始
+            build_pedigree(1, 0, pat_root)  # 从父系根开始
+            build_pedigree(1, 1, mat_root)  # 从母系根开始
             
             # 过滤共同祖先，每条血缘路径上只保留最接近的一个
             filtered_common_ancestors = set()
@@ -855,13 +899,13 @@ class PedigreeDialog(QDialog):
                             print(f"  过滤掉了以下更远共同祖先: {', '.join(path_common_ancestors[1:])}")
             
             # 确保公牛和母牛如果是共同祖先，也被包含在过滤后的集合中
-            if self.bull_id in common_ancestors:
-                filtered_common_ancestors.add(self.bull_id)
-                print(f"添加公牛 {self.bull_id} 到过滤后的共同祖先集合")
-            
-            if self.cow_id in common_ancestors:
-                filtered_common_ancestors.add(self.cow_id)
-                print(f"添加母牛 {self.cow_id} 到过滤后的共同祖先集合")
+            if pat_root in common_ancestors:
+                filtered_common_ancestors.add(pat_root)
+                print(f"添加父系根 {pat_root} 到过滤后的共同祖先集合")
+
+            if mat_root in common_ancestors:
+                filtered_common_ancestors.add(mat_root)
+                print(f"添加母系根 {mat_root} 到过滤后的共同祖先集合")
             
             # 最终共同祖先列表
             print(f"过滤前共同祖先数量: {len(common_ancestors)}")
@@ -884,7 +928,7 @@ class PedigreeDialog(QDialog):
             # 绘制节点（方框）
             for (gen, pos), (x, y, node_id) in self.nodes.items():
                 # 确定方框颜色
-                if node_id == "预期后代":
+                if node_id == root_label:
                     facecolor = 'lightgreen'
                     edgecolor = 'green'
                     text_color = 'black'
@@ -1094,7 +1138,7 @@ class PedigreeDialog(QDialog):
             
             # 创建图例
             legend_elements = [
-                plt.Rectangle((0, 0), 1, 1, facecolor='lightgreen', edgecolor='green', label='预期后代'),
+                plt.Rectangle((0, 0), 1, 1, facecolor='lightgreen', edgecolor='green', label=('本头母牛' if getattr(self, 'cow_self_mode', False) else '预期后代')),
                 plt.Rectangle((0, 0), 1, 1, facecolor='#444444', edgecolor='#333333', label='父系'),
                 plt.Rectangle((0, 0), 1, 1, facecolor='white', edgecolor='gray', label='母系')
             ]
@@ -1215,17 +1259,22 @@ class PedigreeDialog(QDialog):
 # 添加最大化对话框类
 class MaximizedPedigreeDialog(QDialog):
     """最大化血缘图对话框"""
-    def __init__(self, parent, cow_id, sire_id, bull_id, offspring_details):
+    def __init__(self, parent, cow_id, sire_id, bull_id, offspring_details,
+                 cow_self_mode=False, dam_id=None, inbreeding_details=None):
         super().__init__(parent)
         self.setWindowTitle("血缘关系图 (6代完整视图)")
         self.setWindowState(Qt.WindowState.WindowMaximized)
-        
+
         # 保存必要的数据
         self.parent_widget = parent
         self.cow_id = cow_id
         self.sire_id = sire_id
         self.bull_id = bull_id
         self.offspring_details = offspring_details
+        # 母牛自身近交模式：根=母牛本身，父系=母牛父，母系=母牛母
+        self.cow_self_mode = cow_self_mode
+        self.dam_id = dam_id
+        self.inbreeding_details = inbreeding_details
         
         # 血统图属性
         self.base_node_height = 10.0  # 基础节点高度，用于计算字体大小
@@ -1775,11 +1824,23 @@ class MaximizedPedigreeDialog(QDialog):
             # 查询NAAB号码 - 复用父窗口的查询函数
             naab_dict = self.parent_widget.query_naab_numbers(pedigree_db)
             
+            # 区分场景：母牛自身近交 vs 后代近交
+            if getattr(self, 'cow_self_mode', False):
+                pat_root = self.sire_id or '父亲未知'
+                mat_root = (getattr(self, 'dam_id', '') or '') or '母亲未知'
+                root_label = self.cow_id
+                ca_details = self.inbreeding_details
+            else:
+                pat_root = self.bull_id
+                mat_root = self.cow_id
+                root_label = "预期后代"
+                ca_details = self.offspring_details
+
             # 初始化共同祖先集合
             common_ancestors = set()
-            if self.offspring_details and 'common_ancestors' in self.offspring_details:
-                common_ancestors = set(self.offspring_details['common_ancestors'].keys())
-            
+            if ca_details and 'common_ancestors' in ca_details:
+                common_ancestors = set(ca_details['common_ancestors'].keys())
+
             # 为共同祖先分配颜色
             common_ancestor_colors = {}
             color_options = ['#FF9999', '#99FF99', '#9999FF', '#FFFF99', '#FF99FF', '#99FFFF']
@@ -1838,12 +1899,12 @@ class MaximizedPedigreeDialog(QDialog):
             # 存储格式: {(gen, pos): animal_id}
             pedigree_structure = {}
             
-            # 初始化第0代 - 预期后代
-            pedigree_structure[(0, 0)] = "预期后代"
-            
-            # 第1代 - 父亲和母亲
-            pedigree_structure[(1, 0)] = self.bull_id  # 父亲
-            pedigree_structure[(1, 1)] = self.cow_id   # 母亲
+            # 初始化第0代 - 根节点（后代 或 母牛本身）
+            pedigree_structure[(0, 0)] = root_label
+
+            # 第1代 - 父系根 / 母系根
+            pedigree_structure[(1, 0)] = pat_root  # 父系
+            pedigree_structure[(1, 1)] = mat_root  # 母系
             
             # 递归构建系谱结构
             def build_pedigree_structure(gen, pos, animal_id):
@@ -1875,8 +1936,8 @@ class MaximizedPedigreeDialog(QDialog):
                 build_pedigree_structure(next_gen, dam_pos, dam_id)
             
             # 从第一代递归构建
-            build_pedigree_structure(1, 0, self.bull_id)  # 从父亲开始
-            build_pedigree_structure(1, 1, self.cow_id)   # 从母亲开始
+            build_pedigree_structure(1, 0, pat_root)  # 从父系根开始
+            build_pedigree_structure(1, 1, mat_root)  # 从母系根开始
             
             # 计算所有节点位置
             for (gen, pos), animal_id in pedigree_structure.items():
@@ -1904,7 +1965,7 @@ class MaximizedPedigreeDialog(QDialog):
             self.node_rects = []  # 存储节点矩形
             for (gen, pos), (x, y, animal_id) in nodes.items():
                 # 确定方框颜色
-                if animal_id == "预期后代":
+                if animal_id == root_label:
                     facecolor = 'lightgreen'
                     edgecolor = 'green'
                     text_color = 'black'
@@ -2036,7 +2097,7 @@ class MaximizedPedigreeDialog(QDialog):
             
             # 创建图例
             legend_elements = [
-                plt.Rectangle((0, 0), 1, 1, facecolor='lightgreen', edgecolor='green', label='预期后代'),
+                plt.Rectangle((0, 0), 1, 1, facecolor='lightgreen', edgecolor='green', label=('本头母牛' if getattr(self, 'cow_self_mode', False) else '预期后代')),
                 plt.Rectangle((0, 0), 1, 1, facecolor='#444444', edgecolor='#333333', label='父系'),
                 plt.Rectangle((0, 0), 1, 1, facecolor='white', edgecolor='gray', label='母系')
             ]
@@ -2287,10 +2348,11 @@ class InbreedingPage(QWidget):
         
         # 右下按钮区域
         button_layout = QHBoxLayout()
+        self.cow_self_btn = QPushButton("母牛近交分析")
         self.mated_bull_btn = QPushButton("已配公牛分析")
         self.candidate_bull_btn = QPushButton("备选公牛分析")
-        
-        for btn in [self.mated_bull_btn, self.candidate_bull_btn]:
+
+        for btn in [self.cow_self_btn, self.mated_bull_btn, self.candidate_bull_btn]:
             btn.setStyleSheet("""
                 QPushButton {
                     background-color: #3498db;
@@ -2305,8 +2367,30 @@ class InbreedingPage(QWidget):
                 }
             """)
             button_layout.addWidget(btn)
-        
+
         right_layout.addLayout(button_layout)
+
+        # 清空按钮区（每个分析各配一个，删除对应缓存后可重新计算）
+        clear_layout = QHBoxLayout()
+        self.clear_cow_self_btn = QPushButton("清空母牛近交")
+        self.clear_mated_btn = QPushButton("清空已配")
+        self.clear_candidate_btn = QPushButton("清空备选")
+        for btn in [self.clear_cow_self_btn, self.clear_mated_btn, self.clear_candidate_btn]:
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #e74c3c;
+                    color: white;
+                    border: none;
+                    padding: 6px 12px;
+                    border-radius: 4px;
+                    min-width: 120px;
+                }
+                QPushButton:hover {
+                    background-color: #c0392b;
+                }
+            """)
+            clear_layout.addWidget(btn)
+        right_layout.addLayout(clear_layout)
         
         # 添加导出按钮
         export_btn = QPushButton("导出分析结果")
@@ -2337,8 +2421,12 @@ class InbreedingPage(QWidget):
         main_layout.addWidget(splitter)
         
         # 连接信号
+        self.cow_self_btn.clicked.connect(lambda: self.start_analysis("cow_self"))
         self.mated_bull_btn.clicked.connect(lambda: self.start_analysis("mated"))
         self.candidate_bull_btn.clicked.connect(lambda: self.start_analysis("candidate"))
+        self.clear_cow_self_btn.clicked.connect(lambda: self.clear_analysis("cow_self"))
+        self.clear_mated_btn.clicked.connect(lambda: self.clear_analysis("mated"))
+        self.clear_candidate_btn.clicked.connect(lambda: self.clear_analysis("candidate"))
 
     def get_project_path(self) -> Optional[Path]:
         """获取当前项目路径"""
@@ -2806,8 +2894,14 @@ class InbreedingPage(QWidget):
             except:
                 offspring_details = None
 
+        # 母号（母牛自身近交分析结果含 '母号' 列）
+        dam_id = self.detail_model.df.iloc[row].get('母号', '')
+        # 母牛自身近交场景：无配种/备选公牛，但有母牛自身近交详情
+        cow_self_mode = (not bull_id) and bool(inbreeding_details)
+
         # 显示血缘关系图对话框
-        dialog = PedigreeDialog(cow_id, sire_id, bull_id, self, inbreeding_details, offspring_details)
+        dialog = PedigreeDialog(cow_id, sire_id, bull_id, self, inbreeding_details, offspring_details,
+                                cow_self_mode=cow_self_mode, dam_id=dam_id)
         dialog.exec()
 
     def analyze_mated_pairs(self, project_path: Path, bull_genes: Dict[str, str]) -> List[Dict]:
@@ -2821,6 +2915,23 @@ class InbreedingPage(QWidget):
                 self.progress_dialog.update_info(f"读取配种记录文件: {breeding_file.name}")
             
             df = pd.read_excel(breeding_file, dtype={'耳号': str, '父号': str, '冻精编号': str})
+
+            # 育种分析仅针对奶牛母牛：按母牛品种过滤配种记录（配种记录本身无品种列，
+            # 需借助母牛档案 processed_cow_data 的 breed/sex 建立奶牛母牛白名单）
+            try:
+                cow_data_file = project_path / "standardized_data" / "processed_cow_data.xlsx"
+                if cow_data_file.exists():
+                    from config.breed_constants import filter_dairy_cows
+                    cow_ref = pd.read_excel(cow_data_file, dtype={'cow_id': str})
+                    cow_ref = filter_dairy_cows(cow_ref, log_prefix="已配公牛分析：")
+                    if 'cow_id' in cow_ref.columns:
+                        dairy_ids = set(cow_ref['cow_id'].astype(str).str.strip())
+                        before = len(df)
+                        df = df[df['耳号'].astype(str).str.strip().isin(dairy_ids)]
+                        print(f"已配公牛分析：按奶牛母牛过滤配种记录 {before} -> {len(df)}")
+            except Exception as e:
+                print(f"已配公牛分析品种过滤失败（继续不过滤）: {e}")
+
             print(f"读取到{len(df)}条配对记录")
             if hasattr(self, 'progress_dialog') and self.progress_dialog:
                 self.progress_dialog.update_info(f"成功读取 {len(df)} 条配种记录")
@@ -2934,6 +3045,11 @@ class InbreedingPage(QWidget):
             
             cow_df = pd.read_excel(cow_file)
             bull_df = pd.read_excel(bull_file)
+
+            # 育种分析仅针对奶牛母牛：排除公牛与肉牛品种
+            from config.breed_constants import filter_dairy_cows
+            cow_df = filter_dairy_cows(cow_df, log_prefix="备选公牛分析：")
+
             print(f"读取到{len(cow_df)}条母牛记录和{len(bull_df)}条备选公牛记录")
             if hasattr(self, 'progress_dialog') and self.progress_dialog:
                 self.progress_dialog.update_info(f"成功读取 {len(cow_df)} 条母牛记录")
@@ -3194,7 +3310,32 @@ class InbreedingPage(QWidget):
                 # 获取标准化的ID
                 cow_id = result['母牛号']
                 sire_id = result['父号']  # 已经标准化的REG格式
-                
+
+                # 计算母牛本身的近交系数：母牛 = 父(sire) × 母(dam) 的"后代"，
+                # 因此与后代预测调用完全相同的方法 calculate_potential_offspring_inbreeding，
+                # 这样共同祖先/路径/系数的计算与展示都与后代近交系数完全一致。
+                # 修复历史问题：此前母牛自身近交系数被硬编码为 0.0%，从未真实计算。
+                try:
+                    cow_info = calculator.pedigree_db.pedigree.get(cow_id, {}) if hasattr(calculator, 'pedigree_db') else {}
+                    dam_id = cow_info.get('dam', '') or ''
+                    if sire_id and dam_id:
+                        cow_self_f, cow_self_contrib, cow_self_paths = calculator.calculate_potential_offspring_inbreeding(sire_id, dam_id)
+                        if math.isnan(cow_self_f):
+                            cow_self_f = 0.0
+                    else:
+                        # 父母信息不全，无法通过通径法计算母牛自身近交
+                        cow_self_f, cow_self_contrib, cow_self_paths = 0.0, {}, {}
+                    result['近交系数'] = f"{cow_self_f:.2%}"
+                    result['近交详情'] = {
+                        'system': cow_self_f,
+                        'common_ancestors': cow_self_contrib,
+                        'paths': cow_self_paths
+                    }
+                except Exception as e:
+                    print(f"[ERROR] 计算母牛 {cow_id} 自身近交系数时出错: {str(e)}")
+                    result['近交系数'] = "0.00%"
+                    result['近交详情'] = {'system': 0.0, 'common_ancestors': {}, 'paths': {}}
+
                 # 获取标准化后的配种公牛或备选公牛ID
                 bull_id = result.get('配种公牛号', result.get('备选公牛号', ''))  # 已经标准化的REG格式
 
@@ -3311,10 +3452,268 @@ class InbreedingPage(QWidget):
             self.progress_dialog.update_info(message)    # 更新详细信息区域
             QApplication.processEvents()
     
+    # 各分析类型对应的固定结果文件名（覆盖式，便于"算一次后直接展示"的缓存命中）
+    RESULT_FILENAMES = {
+        "mated": "已配公牛_近交系数及隐性基因分析结果.xlsx",
+        "candidate": "备选公牛_近交系数及隐性基因分析结果.xlsx",
+        "cow_self": "母牛近交系数分析结果.xlsx",
+    }
+
+    def _get_result_file(self, project_path, analysis_type):
+        """返回指定分析类型的固定结果文件路径，未知类型返回 None"""
+        filename = self.RESULT_FILENAMES.get(analysis_type)
+        if not filename:
+            return None
+        return project_path / "analysis_results" / filename
+
+    def analyze_cow_self(self, project_path) -> List[Dict]:
+        """计算每头母牛自身的近交系数 + 母牛(父系)隐性基因状态（仅奶牛母牛）
+
+        - 近交系数：母牛 = 父(sire) × 母(dam) 的"后代"，与后代近交系数调用完全相同的方法
+          calculate_potential_offspring_inbreeding(sire, dam)，计算/展示口径一致。
+        - 隐性基因：母牛通过父号(sire)查询携带状态，与已配/备选的母牛侧口径一致。
+        """
+        from core.inbreeding.path_inbreeding_calculator import PathInbreedingCalculator
+        from core.data.update_manager import get_pedigree_db
+        from config.breed_constants import filter_dairy_cows
+
+        results = []
+        cow_file = project_path / "standardized_data" / "processed_cow_data.xlsx"
+        if not cow_file.exists():
+            print(f"母牛数据文件不存在: {cow_file}")
+            return results
+
+        cow_df = pd.read_excel(cow_file, dtype={'cow_id': str})
+        # 仅分析奶牛母牛（排除公牛与肉牛品种）
+        cow_df = filter_dairy_cows(cow_df, log_prefix="母牛近交分析：")
+
+        pedigree_db = get_pedigree_db()
+        calculator = PathInbreedingCalculator(max_generations=6)
+
+        columns = list(cow_df.columns)
+        total = len(cow_df)
+
+        # 预解析每头母牛的 父号/母号，并收集父号用于批量查询隐性基因
+        rows_cache = []
+        sire_ids = set()
+        for row in cow_df.itertuples(index=False, name=None):
+            row_dict = dict(zip(columns, row))
+            cow_id = str(row_dict.get('cow_id', '')).strip()
+            if not cow_id or cow_id.lower() == 'nan':
+                continue
+
+            sire_raw = row_dict.get('sire', '')
+            original_sire = str(sire_raw).strip() if sire_raw is not None and str(sire_raw).lower() != 'nan' else ''
+            sire_id = pedigree_db.standardize_animal_id(original_sire, 'bull') if original_sire else ''
+            if sire_id:
+                sire_ids.add(sire_id)
+
+            # 母号（dam）：优先用系谱库节点，回退到 cow_data 的 dam 列
+            cow_info = calculator.pedigree_db.pedigree.get(cow_id, {}) if hasattr(calculator, 'pedigree_db') else {}
+            dam_id = cow_info.get('dam', '') or ''
+            if not dam_id:
+                dam_raw = row_dict.get('dam', '')
+                dam_str = str(dam_raw).strip() if dam_raw is not None and str(dam_raw).lower() != 'nan' else ''
+                dam_id = pedigree_db.standardize_animal_id(dam_str, 'cow') if dam_str else ''
+
+            rows_cache.append((row_dict, cow_id, original_sire, sire_id, dam_id))
+
+        # 批量查询母牛父系隐性基因
+        self.update_progress(35, "查询母牛父系隐性基因...")
+        QApplication.processEvents()
+        sire_genes_map, _ = self.query_bull_genes(sire_ids)
+
+        for i, (row_dict, cow_id, original_sire, sire_id, dam_id) in enumerate(rows_cache):
+            if hasattr(self, 'progress_dialog') and self.progress_dialog and self.progress_dialog.cancelled:
+                print("用户取消了母牛近交分析")
+                break
+            if i % 50 == 0:
+                progress = int(40 + (i / total) * 45) if total else 85
+                self.update_progress(progress, f"计算母牛近交系数 ({i+1}/{total})")
+                QApplication.processEvents()
+
+            # 母牛自身近交 = 父 × 母 的"后代近交"，方法与已配/备选完全一致
+            try:
+                if sire_id and dam_id:
+                    f_val, contrib, paths = calculator.calculate_potential_offspring_inbreeding(sire_id, dam_id)
+                    if math.isnan(f_val):
+                        f_val = 0.0
+                else:
+                    f_val, contrib, paths = 0.0, {}, {}
+            except Exception as e:
+                print(f"[ERROR] 计算母牛 {cow_id} 近交系数出错: {e}")
+                f_val, contrib, paths = 0.0, {}, {}
+
+            result = {
+                '母牛号': cow_id,
+                '父号': sire_id,
+                '原始父号': original_sire if original_sire != sire_id else '',
+                '母号': dam_id,
+                '出生日期': row_dict.get('birth_date', ''),
+                '胎次': row_dict.get('lac', ''),
+                '是否在场': row_dict.get('是否在场', ''),
+                '近交系数': f"{f_val:.2%}",
+                # 与已配/备选一致的列名，双击可在 PedigreeDialog 中查看共同祖先
+                '近交详情': {'system': f_val, 'common_ancestors': contrib, 'paths': paths},
+            }
+
+            # 母牛(父系)隐性基因状态：复用 detail_model 的着色状态值
+            sire_genes = sire_genes_map.get(sire_id, {})
+            for gene in self.defect_genes:
+                g = sire_genes.get(gene, 'missing data')
+                if g == 'missing data':
+                    result[gene] = '缺少母牛父亲信息'
+                elif g == 'C':
+                    result[gene] = '仅母牛父亲携带'  # 母牛父系携带该隐性基因
+                elif g == 'F':
+                    result[gene] = '-'
+                else:
+                    result[gene] = g
+                result[f"{gene}(父)"] = g
+
+            results.append(result)
+
+        print(f"母牛近交分析：共计算 {len(results)} 头母牛")
+        return results
+
+    def collect_cow_self_abnormal(self, results: List[Dict]) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """母牛近交分析的异常明细与统计
+
+        异常项：① 母牛父系携带隐性基因；② 母牛自身近交系数过高(>6.25%)。
+        """
+        abnormal_records = []
+        gene_stats = {gene: 0 for gene in self.defect_genes}
+        inbreeding_count = 0
+
+        for result in results:
+            # ① 母牛父系携带隐性基因
+            # 列顺序与已配/备选异常表一致（母牛号/父号/公牛号/异常类型/状态），
+            # 公牛号留空（母牛自身分析无配种公牛），避免 AbnormalDetailModel 列数不匹配
+            for gene in self.defect_genes:
+                if result.get(gene) == '仅母牛父亲携带':
+                    abnormal_records.append({
+                        '母牛号': result['母牛号'],
+                        '父号': result['父号'],
+                        '公牛号': '',
+                        '异常类型': gene,
+                        '状态': '母牛父系携带隐性基因'
+                    })
+                    gene_stats[gene] += 1
+
+            # ② 母牛自身近交系数过高
+            inbreeding_str = result.get('近交系数', '0%')
+            try:
+                v = float(str(inbreeding_str).strip('%')) / 100
+                if v > 0.0625:  # 6.25%
+                    abnormal_records.append({
+                        '母牛号': result['母牛号'],
+                        '父号': result['父号'],
+                        '公牛号': '',
+                        '异常类型': '近交系数过高',
+                        '状态': f'{v:.2%}'
+                    })
+                    inbreeding_count += 1
+            except (ValueError, TypeError):
+                pass
+
+        abnormal_df = pd.DataFrame(abnormal_records)
+        stats_records = [
+            {'异常类型': gene, '数量': c}
+            for gene, c in gene_stats.items() if c > 0
+        ]
+        if inbreeding_count > 0:
+            stats_records.append({'异常类型': '近交系数过高', '数量': inbreeding_count})
+        stats_df = pd.DataFrame(stats_records)
+        return abnormal_df, stats_df
+
+    def load_cached_results(self, analysis_type, file_path) -> bool:
+        """从已保存的结果文件加载并展示，成功返回 True"""
+        try:
+            xls = pd.ExcelFile(file_path)
+            sheets = xls.sheet_names
+            detail_df = pd.read_excel(file_path, sheet_name='配对明细表') if '配对明细表' in sheets else pd.DataFrame()
+            abnormal_df = pd.read_excel(file_path, sheet_name='异常明细表') if '异常明细表' in sheets else pd.DataFrame()
+            stats_df = pd.read_excel(file_path, sheet_name='统计表') if '统计表' in sheets else pd.DataFrame()
+
+            # 保持牛号类列为字符串
+            for df in (detail_df, abnormal_df):
+                for col in ['母牛号', 'cow_id', '公牛号', 'bull_id', 'NAAB', '父号', '配种公牛号', '备选公牛号']:
+                    if col in df.columns:
+                        df[col] = df[col].astype(str)
+
+            self.detail_model.update_data(detail_df)
+            self.abnormal_model.update_data(abnormal_df)
+            self.stats_model.update_data(stats_df)
+            self._apply_default_sorting()
+            return True
+        except Exception as e:
+            print(f"加载缓存结果失败: {e}")
+            logging.error(f"加载缓存结果失败: {e}")
+            return False
+
+    def clear_analysis(self, analysis_type):
+        """清空指定分析的缓存结果文件并清空表格，便于重新计算"""
+        type_names = {"mated": "已配公牛分析", "candidate": "备选公牛分析", "cow_self": "母牛近交分析"}
+        type_name = type_names.get(analysis_type, analysis_type)
+
+        project_path = self.get_project_path()
+        if not project_path:
+            return
+
+        result_file = self._get_result_file(project_path, analysis_type)
+        existed = bool(result_file and result_file.exists())
+
+        reply = QMessageBox.question(
+            self, "确认清空",
+            f"确定要清空「{type_name}」的缓存结果吗？\n清空后下次点击将重新计算。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            if existed:
+                result_file.unlink()
+                print(f"已删除缓存文件: {result_file}")
+            # 同时清理历史带时间戳命名的旧结果文件
+            self._remove_legacy_result_files(project_path, analysis_type)
+
+            # 如果当前展示的就是该类型，清空表格
+            if getattr(self, '_last_analysis_type', None) == analysis_type:
+                self.detail_model.update_data(pd.DataFrame())
+                self.abnormal_model.update_data(pd.DataFrame())
+                self.stats_model.update_data(pd.DataFrame())
+
+            QMessageBox.information(self, "已清空", f"「{type_name}」缓存已清空，可重新计算。")
+        except Exception as e:
+            logging.error(f"清空{type_name}缓存失败: {e}")
+            QMessageBox.critical(self, "清空失败", f"清空过程中发生错误：\n{str(e)}")
+
+    def _remove_legacy_result_files(self, project_path, analysis_type):
+        """删除历史带时间戳命名的旧结果文件（迁移到固定文件名之前产生的）"""
+        analysis_dir = project_path / "analysis_results"
+        if not analysis_dir.exists():
+            return
+        prefix_map = {
+            "mated": "已配公牛_近交系数及隐性基因分析结果",
+            "candidate": "备选公牛_近交系数及隐性基因分析结果",
+            "cow_self": "母牛近交系数分析结果",
+        }
+        prefix = prefix_map.get(analysis_type)
+        if not prefix:
+            return
+        for f in analysis_dir.glob(f"{prefix}_*.xlsx"):
+            try:
+                f.unlink()
+                print(f"已删除历史结果文件: {f}")
+            except Exception as e:
+                print(f"删除历史结果文件失败 {f}: {e}")
+
     def start_analysis(self, analysis_type: str):
         """开始分析
         Args:
-            analysis_type: 分析类型，"mated" 表示已配公牛分析，"candidate" 表示备选公牛分析
+            analysis_type: 分析类型，"mated"=已配公牛分析，"candidate"=备选公牛分析，"cow_self"=母牛近交分析
         """
         # 保存最后的分析类型
         self._last_analysis_type = analysis_type
@@ -3327,7 +3726,17 @@ class InbreedingPage(QWidget):
             QMessageBox.warning(self, "错误", "未找到项目路径，请先选择项目。")
             return
         print(f"项目路径: {project_path}")
-        
+
+        # 缓存：若已有该分析的结果文件，直接加载展示，不重新计算。
+        # （需要重算时使用对应的"清空"按钮删除缓存后再点分析）
+        cached_file = self._get_result_file(project_path, analysis_type)
+        if cached_file and cached_file.exists():
+            if self.load_cached_results(analysis_type, cached_file):
+                print(f"已从缓存加载{analysis_type}分析结果: {cached_file}")
+                return
+            else:
+                print(f"缓存文件加载失败，将重新计算: {cached_file}")
+
         # 初始化数据库连接
         if not self.init_db_connection():
             print("数据库连接失败，无法执行分析")
@@ -3382,7 +3791,23 @@ class InbreedingPage(QWidget):
             print("开始构建母牛系谱库...")
             pedigree_db.build_cow_pedigree(cow_file, update_progress)
             print("母牛系谱库构建完成")
-                
+
+            # 母牛近交分析：只计算每头母牛自身的近交系数，无需公牛配对/隐性基因查询
+            if analysis_type == "cow_self":
+                results = self.analyze_cow_self(project_path)
+                self.update_progress(90, "收集异常与统计...")
+                QApplication.processEvents()
+                abnormal_df, stats_df = self.collect_cow_self_abnormal(results)
+                results_df = pd.DataFrame(results)
+                self.detail_model.update_data(results_df)
+                self.abnormal_model.update_data(abnormal_df)
+                self.stats_model.update_data(stats_df)
+                self._apply_default_sorting()
+                self.progress_dialog.update_progress(100)
+                print(f"母牛近交分析完成，共{len(results)}头母牛")
+                self.export_results(auto_save=True)
+                return
+
             # 收集所需的公牛号
             print("开始收集所需的公牛号...")
             required_bulls, bull_sources = self.collect_required_bulls(analysis_type, project_path)
@@ -3590,6 +4015,8 @@ class InbreedingPage(QWidget):
             else:
                 if self._last_analysis_type == "mated":
                     default_filename = "已配公牛_近交系数及隐性基因分析结果.xlsx"
+                elif self._last_analysis_type == "cow_self":
+                    default_filename = "母牛近交系数分析结果.xlsx"
                 else:
                     default_filename = "备选公牛_近交系数及隐性基因分析结果.xlsx"
 
@@ -3605,10 +4032,8 @@ class InbreedingPage(QWidget):
                 if not analysis_dir.exists():
                     analysis_dir.mkdir(parents=True, exist_ok=True)
                     
-                # 添加时间戳到文件名
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{default_filename.split('.')[0]}_{timestamp}.xlsx"
-                file_path = str(analysis_dir / filename)
+                # 使用固定文件名（覆盖式），便于"算一次后直接展示"的缓存命中
+                file_path = str(analysis_dir / default_filename)
             else:
                 # 手动选择保存位置
                 file_path, _ = QFileDialog.getSaveFileName(

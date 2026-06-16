@@ -10,6 +10,7 @@ from typing import Optional, Tuple
 from sqlalchemy import create_engine, text
 
 from core.data.update_manager import LOCAL_DB_PATH
+from config.breed_constants import is_dairy_breed
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,11 @@ class PedigreeAnalysis:
         
         # 添加性别限制，排除公牛
         df = df[df['sex'] != '公']
-        
+
+        # 系谱完整性仅统计奶牛品种，排除肉牛品种（如西门塔尔、安格斯等）
+        if 'breed' in df.columns:
+            df = df[df['breed'].apply(is_dairy_breed)]
+
         # 使用当前年份（动态），而不是数据中的最大年份
         # 这样可以确保始终显示"最近4年+5年及以前"的分组
         current_year = pd.Timestamp.now().year

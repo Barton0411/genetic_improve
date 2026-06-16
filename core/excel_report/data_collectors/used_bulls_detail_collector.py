@@ -169,7 +169,9 @@ class UsedBullsDetailCollector:
                             row[trait] = None
                     else:
                         # 其他性状取平均值（如果有多条记录）
-                        trait_values = bull_data[trait].dropna()
+                        # 性状列可能是 object dtype（含字符串），强制转数值，
+                        # 否则下游加权平均做除法会报 ufunc 'divide' not supported
+                        trait_values = pd.to_numeric(bull_data[trait], errors='coerce').dropna()
                         if len(trait_values) > 0:
                             # 如果所有值相同(公牛性状应该相同)，取第一个
                             # 如果不同(异常情况)，取平均值

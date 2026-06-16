@@ -170,7 +170,8 @@ class UsedBullsSummaryCollector:
                     if trait == 'Eval Date':
                         continue
 
-                    trait_values = year_data[trait].dropna()
+                    # 性状列可能是 object dtype（含字符串），强制转数值后再求均值
+                    trait_values = pd.to_numeric(year_data[trait], errors='coerce').dropna()
                     if len(trait_values) > 0:
                         row[f'平均{trait}'] = trait_values.mean()
                     else:

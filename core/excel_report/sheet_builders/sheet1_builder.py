@@ -148,7 +148,18 @@ class Sheet1Builder(BaseSheetBuilder):
 
         # 合计行
         self._write_total_row(current_row, ["合计", total_count, 100], start_col=start_col)
-        current_row += 2
+        current_row += 1
+
+        # 品种构成说明（存栏头数照实含全部品种，育种分析仅针对奶牛，此处注明构成）
+        beef_count = herd_structure.get('beef_count', 0)
+        if beef_count and beef_count > 0:
+            dairy_count = herd_structure.get('dairy_count', total_count - beef_count)
+            note = (f"注：在群{total_count}头中，奶牛{dairy_count}头、肉牛{beef_count}头；"
+                    f"以下育种相关分析仅统计奶牛品种。")
+            note_cell = self.ws.cell(row=current_row, column=start_col, value=note)
+            self.style_manager.apply_data_style(note_cell, alignment='left')
+            current_row += 1
+        current_row += 1
 
         # 平均胎次和泌乳天数（添加边框）
         avg_lactation = herd_structure.get('avg_lactation', 0)

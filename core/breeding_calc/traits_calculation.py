@@ -48,7 +48,13 @@ class TraitsCalculation(BaseCowCalculation):
             cow_df = self.read_data(project_path, "processed_cow_data.xlsx")
             if cow_df is None:
                 return False, "读取母牛数据失败"
-            
+
+            # 育种分析仅针对奶牛品种，排除肉牛品种（西门塔尔、安格斯等）。
+            # 这是性状派生文件（detail/scores/final）的统一过滤点，
+            # 下游性状/指数/系谱完整性/选配/报告均从这些派生文件取数，自动只剩奶牛。
+            from config.breed_constants import filter_dairy_cows
+            cow_df = filter_dairy_cows(cow_df, log_prefix="性状计算：")
+
             print(f"成功读取 {len(cow_df)} 条母牛记录")
             if progress_callback:
                 progress_callback(15, f"成功读取 {len(cow_df)} 条母牛记录")
@@ -158,8 +164,12 @@ class TraitsCalculation(BaseCowCalculation):
                 
             pedigree_output_path = output_dir / f"{self.output_prefix}_scores_pedigree.xlsx"
             # 优化：直接传DataFrame，避免重复读取Excel文件
+            self._last_scores_error = None
             if not self.calculate_trait_scores_from_df(cow_df, yearly_output_path, pedigree_output_path,
                                                        apply_formatting=False, selected_traits=selected_traits):
+                detail = getattr(self, '_last_scores_error', None)
+                if detail:
+                    return False, f"计算性状得分失败：{detail}"
                 return False, "计算性状得分失败"
 
             if progress_callback:
@@ -753,10 +763,18 @@ class TraitsCalculation(BaseCowCalculation):
                             # source=1 如果有trait值，否则 source=2 如果有年份，否则 source=3
                             df[source_col] = np.where(has_trait, 1, np.where(has_year, 2, 3))
 
-            return self.save_results_with_retry(df, output_path, apply_formatting=apply_formatting)
+            save_ok = self.save_results_with_retry(df, output_path, apply_formatting=apply_formatting)
+            if not save_ok:
+                self._last_scores_error = (
+                    f"保存得分文件失败（文件可能被 Excel 占用或磁盘空间不足）: {output_path.name}"
+                )
+            return save_ok
 
         except Exception as e:
-            print(f"计算性状得分失败: {e}")
+            import traceback
+            tb = traceback.format_exc()
+            print(f"计算性状得分失败: {e}\n{tb}")
+            self._last_scores_error = f"{type(e).__name__}: {e}"
             return False
 
     def calculate_single_trait_score(self, df: pd.DataFrame, trait: str,

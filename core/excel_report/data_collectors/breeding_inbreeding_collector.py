@@ -49,15 +49,16 @@ def collect_breeding_inbreeding_data(analysis_folder: Path, cache=None) -> dict:
     """
     try:
         # 1. 查找最新的已配公牛分析结果文件
-        pattern = str(analysis_folder / "已配公牛_近交系数及隐性基因分析结果_*.xlsx")
+        # 兼容固定文件名（新）与历史带时间戳文件名（旧）
+        pattern = str(analysis_folder / "已配公牛_近交系数及隐性基因分析结果*.xlsx")
         files = glob.glob(pattern)
 
         if not files:
             logger.warning(f"未找到已配公牛分析结果文件: {pattern}")
             return {}
 
-        # 按文件名时间戳排序
-        latest_file = max(files, key=lambda x: Path(x).name)
+        # 按文件修改时间取最新（固定文件名为最近一次覆盖写入，mtime 最大）
+        latest_file = max(files, key=lambda x: Path(x).stat().st_mtime)
         logger.info(f"读取文件: {latest_file}")
 
         # 2. 读取数据（使用缓存）

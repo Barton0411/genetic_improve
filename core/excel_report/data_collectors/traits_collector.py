@@ -65,6 +65,9 @@ def collect_traits_data(analysis_folder: Path, project_folder: Path) -> dict:
                 logger.info("  - sex列全为空，已填充为'母'")
             else:
                 detail_df['sex'] = detail_df['sex'].fillna('母')
+            # 兜底：排除公牛与肉牛品种（旧派生文件可能未在生成时过滤）
+            from config.breed_constants import filter_dairy_cows
+            detail_df = filter_dairy_cows(detail_df, log_prefix="育种性状明细(报告)：")
         else:
             logger.warning(f"育种性状明细文件不存在: {detail_file}")
 

@@ -186,7 +186,7 @@ class InbreedingDetailModel(QAbstractTableModel):
         display_columns = []
 
         # 先添加基本信息列
-        for col in ['母牛号', '父号', '配种公牛号', '备选公牛号']:
+        for col in ['母牛号', '父号', '母号', '配种公牛号', '备选公牛号']:
             if col in df.columns:
                 display_columns.append(col)
 
@@ -194,6 +194,10 @@ class InbreedingDetailModel(QAbstractTableModel):
         for col in ['原始备选公牛号', '原始配种公牛号']:
             if col in df.columns:
                 display_columns.append(col)
+
+        # 添加母牛自身近交系数列（母牛近交分析必显示；已配/备选也一并展示）
+        if '近交系数' in df.columns:
+            display_columns.append('近交系数')
 
         # 添加后代近交系数列
         if '后代近交系数' in df.columns:

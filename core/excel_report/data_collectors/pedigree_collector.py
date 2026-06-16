@@ -90,6 +90,9 @@ def collect_pedigree_data(analysis_folder: Path) -> dict:
                 detail_source_df['sex'] = detail_source_df['sex'].fillna('母')
         # 只保留母牛
         detail_source_df = detail_source_df[detail_source_df['sex'] == '母'].copy()
+        # 兜底：排除肉牛品种（旧派生文件可能在生成时尚未过滤；明细含 breed 列可直接过滤）
+        from config.breed_constants import filter_dairy_cows
+        detail_source_df = filter_dairy_cows(detail_source_df, log_prefix="系谱识别明细(报告)：")
 
         # 处理汇总数据（按出生年份）- 只显示在群母牛
         summary_df = summary_source_df[summary_source_df['是否在场'] == '是'].copy()
