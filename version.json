@@ -1,20 +1,20 @@
 {
-  "version": "1.2.3.5",
+  "version": "1.2.3.6",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.5/伊利奶牛选配_v1.2.3.5_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.5/伊利奶牛选配_v1.2.3.5_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.6/伊利奶牛选配_v1.2.3.6_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.6/伊利奶牛选配_v1.2.3.6_win.exe",
   "changes": [
-    "1. <b>修复</b>：后代近交系数计算漏报（重要）",
-    "   - 修复已配公牛近交分析中，配种记录耳号类型漂移导致与系谱库失配的问题",
-    "   - 历史上所有父女配、母子配、半同胞等高近交风险配对被静默标记为 0%，本次修复后能正确报出真实近交系数",
-    "   - 加入父女配兜底逻辑，避免数据缺失再次漏报最严重的直系血亲场景",
+    "1. <b>功能</b>：所有育种分析仅统计奶牛母牛",
+    "   - 性状、指数、系谱识别、近交、选配等分析统一排除公牛和肉牛品种（如西门塔尔、安格斯）",
+    "   - 牧场存栏/在群头数照实统计全部牛只，并在牧场概况注明奶牛/肉牛构成",
+    "   - 严格按品种字段过滤，不影响“肉牛冻精”配种方式",
     "",
-    "2. <b>修复</b>：个体选配推送伊起牛 earNum 类型污染",
-    "   - 修复推送给伊起牛系统的耳号字段带 \".0\" 后缀的问题，确保 earNum 与源数据完全一致",
-    "   - 选配报告 ID 列单元格强制文本格式，推送端读取强制按字符串处理",
+    "2. <b>功能</b>：新增母牛近交分析",
+    "   - 计算每头母牛自身近交系数（父×母 Wright 通径法，与后代近交同口径）",
+    "   - 含母牛（经父号）隐性基因状态与异常统计，血缘图正确展示母牛本身及共同祖先",
+    "   - 已配/备选/母牛三类分析支持结果缓存与一键清空重算",
     "",
-    "3. <b>优化</b>：数据标准化文件稳定性",
-    "   - processed_breeding_data.xlsx 中耳号/父号/冻精编号写入时强制文本格式，杜绝类型漂移",
-    "   - 自动报告流程容忍底层 None 进度值，避免次生异常掩盖真实错误"
+    "3. <b>修复</b>：生成 Excel 报告时除法报错",
+    "   - 修复已用公牛性状列为文本类型时加权平均报 ufunc 'divide' not supported 的问题"
   ]
 }
