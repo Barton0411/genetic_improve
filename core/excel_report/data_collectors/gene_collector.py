@@ -68,7 +68,7 @@ def collect_breeding_genes_data(analysis_folder: Path, cache=None) -> dict:
     """
     try:
         # 1. 查找最新的已配公牛分析结果文件
-        pattern = str(analysis_folder / "已配公牛_近交系数及隐性基因分析结果_*.xlsx")
+        pattern = str(analysis_folder / "已配公牛_近交系数及隐性基因分析结果*.xlsx")
         files = glob.glob(pattern)
 
         if not files:
@@ -77,7 +77,7 @@ def collect_breeding_genes_data(analysis_folder: Path, cache=None) -> dict:
 
         # 按文件名时间戳排序（文件名格式：已配公牛_近交系数及隐性基因分析结果_YYYYMMDD_HHMMSS.xlsx）
         # 时间戳格式天然可排序，直接按文件名排序即可
-        latest_file = max(files, key=lambda x: Path(x).name)
+        latest_file = max(files, key=lambda x: Path(x).stat().st_mtime)
         logger.info(f"读取文件: {latest_file}")
 
         # 2. 读取数据（使用缓存）

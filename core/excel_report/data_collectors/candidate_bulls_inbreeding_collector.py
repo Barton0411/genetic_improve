@@ -55,14 +55,14 @@ def collect_candidate_bulls_inbreeding_data(analysis_folder: Path, project_folde
     """
     try:
         # 1. 查找最新的备选公牛分析结果文件
-        pattern = str(analysis_folder / "备选公牛_近交系数及隐性基因分析结果_*.xlsx")
+        pattern = str(analysis_folder / "备选公牛_近交系数及隐性基因分析结果*.xlsx")
         files = glob.glob(pattern)
 
         if not files:
             logger.warning(f"未找到备选公牛分析结果文件: {pattern}")
             return {}
 
-        latest_file = max(files, key=lambda x: Path(x).name)
+        latest_file = max(files, key=lambda x: Path(x).stat().st_mtime)
         logger.info(f"读取文件: {latest_file}")
 
         # 2. 读取数据（使用缓存）

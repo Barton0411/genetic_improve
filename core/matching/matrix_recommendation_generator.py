@@ -119,11 +119,11 @@ class MatrixRecommendationGenerator:
         """加载近交系数数据"""
         try:
             # 尝试查找备选公牛近交系数文件
-            possible_files = list(self.project_path.glob("**/备选公牛_近交系数及隐性基因分析结果_*.xlsx"))
+            possible_files = list(self.project_path.glob("**/备选公牛_近交系数及隐性基因分析结果*.xlsx"))
 
             if not possible_files:
                 error_msg = (
-                    f"缺少文件：备选公牛_近交系数及隐性基因分析结果_*.xlsx\n"
+                    f"缺少文件：备选公牛_近交系数及隐性基因分析结果*.xlsx\n"
                     f"搜索路径：{self.project_path}\n"
                     f"解决方法：请先执行「备选公牛近交和隐性基因分析」功能"
                 )

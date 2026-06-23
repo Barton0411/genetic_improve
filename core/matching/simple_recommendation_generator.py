@@ -142,7 +142,7 @@ class SimpleRecommendationGenerator:
             
             # 查找近交系数和隐性基因分析文件
             patterns = [
-                "备选公牛_近交系数及隐性基因分析结果_*.xlsx",
+                "备选公牛_近交系数及隐性基因分析结果*.xlsx",
                 "*近交系数*隐性基因*.xlsx",
                 "candidate_inbreeding_coefficients.xlsx"
             ]

@@ -15,7 +15,7 @@ def collect_candidate_bulls_detail_data(analysis_folder: Path, cache=None) -> di
     """
     收集备选公牛明细数据 (Sheet 14)
 
-    直接读取"备选公牛_近交系数及隐性基因分析结果_*.xlsx"文件
+    直接读取"备选公牛_近交系数及隐性基因分析结果*.xlsx"文件
 
     Args:
         analysis_folder: 分析结果文件夹路径
@@ -30,7 +30,7 @@ def collect_candidate_bulls_detail_data(analysis_folder: Path, cache=None) -> di
     """
     try:
         # 1. 查找最新的备选公牛分析结果文件
-        pattern = str(analysis_folder / "备选公牛_近交系数及隐性基因分析结果_*.xlsx")
+        pattern = str(analysis_folder / "备选公牛_近交系数及隐性基因分析结果*.xlsx")
         files = glob.glob(pattern)
 
         if not files:
@@ -38,7 +38,7 @@ def collect_candidate_bulls_detail_data(analysis_folder: Path, cache=None) -> di
             return {}
 
         # 按文件名时间戳排序，获取最新文件
-        latest_file = max(files, key=lambda x: Path(x).name)
+        latest_file = max(files, key=lambda x: Path(x).stat().st_mtime)
         logger.info(f"读取文件: {latest_file}")
 
         # 2. 读取Excel文件（使用缓存）

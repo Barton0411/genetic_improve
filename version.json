@@ -1,20 +1,11 @@
 {
-  "version": "1.2.3.6",
+  "version": "1.2.3.8",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.6/伊利奶牛选配_v1.2.3.6_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.6/伊利奶牛选配_v1.2.3.6_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.8/伊利奶牛选配_v1.2.3.8_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.8/伊利奶牛选配_v1.2.3.8_win.exe",
   "changes": [
-    "1. <b>功能</b>：所有育种分析仅统计奶牛母牛",
-    "   - 性状、指数、系谱识别、近交、选配等分析统一排除公牛和肉牛品种（如西门塔尔、安格斯）",
-    "   - 牧场存栏/在群头数照实统计全部牛只，并在牧场概况注明奶牛/肉牛构成",
-    "   - 严格按品种字段过滤，不影响“肉牛冻精”配种方式",
-    "",
-    "2. <b>功能</b>：新增母牛近交分析",
-    "   - 计算每头母牛自身近交系数（父×母 Wright 通径法，与后代近交同口径）",
-    "   - 含母牛（经父号）隐性基因状态与异常统计，血缘图正确展示母牛本身及共同祖先",
-    "   - 已配/备选/母牛三类分析支持结果缓存与一键清空重算",
-    "",
-    "3. <b>修复</b>：生成 Excel 报告时除法报错",
-    "   - 修复已用公牛性状列为文本类型时加权平均报 ufunc 'divide' not supported 的问题"
+    "1. <b>修复</b>：个体选配误报“缺少备选公牛近交结果文件”（重要）",
+    "   - 1.2.3.6 将近交分析结果改为固定文件名后，个体选配/推荐矩阵/报告等读取处仍按旧的带时间戳文件名匹配，导致明明已有结果文件却报缺失",
+    "   - 统一兼容固定文件名与历史带时间戳文件名，并按文件修改时间取最新"
   ]
 }

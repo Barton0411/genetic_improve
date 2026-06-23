@@ -27,14 +27,14 @@ def _extract_bull_genes(analysis_folder: Path) -> pd.DataFrame:
     """
     try:
         # 查找备选公牛隐性基因分析文件
-        gene_files = list(analysis_folder.glob("备选公牛_近交系数及隐性基因分析结果_*.xlsx"))
+        gene_files = list(analysis_folder.glob("备选公牛_近交系数及隐性基因分析结果*.xlsx"))
 
         if not gene_files:
             logger.warning("未找到备选公牛基因分析文件")
             return pd.DataFrame()
 
         # 使用最新的文件
-        gene_file = sorted(gene_files)[-1]
+        gene_file = max(gene_files, key=lambda x: x.stat().st_mtime)
         logger.info(f"读取基因分析文件: {gene_file.name}")
 
         # 读取配对明细表

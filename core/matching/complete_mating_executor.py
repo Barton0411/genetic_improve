@@ -449,7 +449,7 @@ class CompleteMatingExecutor:
         """预加载约束数据，避免重复I/O操作"""
         try:
             # 1. 加载近交系数及隐性基因分析结果
-            possible_files = list(self.project_path.glob("**/备选公牛_近交系数及隐性基因分析结果_*.xlsx"))
+            possible_files = list(self.project_path.glob("**/备选公牛_近交系数及隐性基因分析结果*.xlsx"))
             if possible_files:
                 latest_file = max(possible_files, key=lambda x: x.stat().st_mtime)
                 self.cached_inbreeding_df = pd.read_excel(latest_file)
