@@ -1,11 +1,11 @@
 {
-  "version": "1.2.3.8",
+  "version": "1.2.3.9",
   "force_update": false,
-  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.8/伊利奶牛选配_v1.2.3.8_mac.dmg",
-  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.8/伊利奶牛选配_v1.2.3.8_win.exe",
+  "mac_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.9/伊利奶牛选配_v1.2.3.9_mac.dmg",
+  "win_download_url": "https://genetic-improve.oss-cn-beijing.aliyuncs.com/releases/v1.2.3.9/伊利奶牛选配_v1.2.3.9_win.exe",
   "changes": [
-    "1. <b>修复</b>：个体选配误报“缺少备选公牛近交结果文件”（重要）",
-    "   - 1.2.3.6 将近交分析结果改为固定文件名后，个体选配/推荐矩阵/报告等读取处仍按旧的带时间戳文件名匹配，导致明明已有结果文件却报缺失",
-    "   - 统一兼容固定文件名与历史带时间戳文件名，并按文件修改时间取最新"
+    "1. <b>修复</b>：伊起牛牧场母牛性状/指数分析报“处理年度数据失败”（重要）",
+    "   - 1.2.3.6 的“仅统计奶牛”品种过滤只认中文品种名，而伊起牛品种字段是代码（如CC002=中国荷斯坦），导致全部母牛被误判为非奶牛过滤为空，母牛性状/指数/系谱分析中断",
+    "   - 现兼容品种代码、英文名及“X牛/中国X”等中文变体（娟姗牛、荷斯坦牛等），并增加“过滤后为空则保留全部”兜底，避免整场牛被误删"
   ]
 }
