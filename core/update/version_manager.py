@@ -87,8 +87,11 @@ class VersionManager:
             version_url = f"{self.server_url}/releases/latest/version.json"
             logger.info(f"检查版本更新: {version_url}")
             
-            # 请求版本信息（忽略系统代理）
-            response = requests.get(version_url, timeout=10, proxies={'http': None, 'https': None})
+            # 请求版本信息（禁用代理直连，避免系统代理未启动时连接被拒）
+            session = requests.Session()
+            session.trust_env = False
+            session.proxies = {'http': None, 'https': None}
+            response = session.get(version_url, timeout=10)
             
             if response.status_code == 200:
                 version_info = response.json()

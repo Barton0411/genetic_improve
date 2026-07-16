@@ -24,14 +24,16 @@ python -m py_compile <file.py>
 # 安装依赖
 pip install -r requirements.txt
 
-# 打包 Mac 版本
-pyinstaller GeneticImprove.spec
+# 打包 macOS（两个 spec 文件均可用）
+pyinstaller GeneticImprove.spec          # 主 spec
+pyinstaller genetic_improve.spec         # 备用 spec
 
-# 打包 Windows 版本
-pyinstaller GeneticImprove_win.spec
+# 打包 Windows（两个 spec 文件均可用）
+pyinstaller GeneticImprove_win.spec      # 主 spec
+pyinstaller genetic_improve_windows.spec # 备用 spec
 ```
 
-注意：项目没有正式的测试框架或测试套件。`scripts/` 下有手动测试脚本。
+注意：项目没有正式的测试框架或测试套件。`scripts/` 下有手动测试脚本和部署脚本（`deploy_*.sh`、`upload_*.py`）。
 
 ## 版本管理
 
@@ -207,3 +209,10 @@ response = session.request(method, url, **kwargs)
 - `version.py` - 版本号和完整版本历史
 - `version.json` - 客户端更新检查文件（同步到 OSS `latest/version.json`）
 - `project_metadata.json`（项目内） - 牧场信息（由 `FileManager.save_project_metadata` 在数据导入时生成）
+
+## 超大文件编辑注意
+
+以下文件体积极大，修改前务必先用行号精确定位，避免全文读取：
+- `core/data/processor.py`（~97KB）- 核心数据标准化引擎
+- `gui/main_window.py` - 主窗口UI入口，功能高度集中
+- `core/grouping/group_manager.py` - `apply_temp_strategy` 约800行

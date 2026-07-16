@@ -128,32 +128,6 @@ async def get_database_version():
         logger.error(f"获取数据库版本失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/data/bull_library")
-async def get_bull_library():
-    """获取公牛库数据（无需认证）"""
-    try:
-        query = "SELECT * FROM bull_library"
-        df = pd.read_sql(query, engine)
-
-        # 过滤表头行
-        if 'BULL NAAB' in df.columns:
-            df = df[df['BULL NAAB'] != 'BULL NAAB']
-
-        # 转换为JSON格式
-        data = df.to_dict(orient='records')
-
-        return APIResponse(
-            success=True,
-            message=f"成功获取{len(data)}条公牛记录",
-            data={
-                "total": len(data),
-                "records": data
-            }
-        )
-    except Exception as e:
-        logger.error(f"获取公牛库数据失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/api/data/missing_bulls")
 async def upload_missing_bulls(request: MissingBullRequest):
     """上传缺失公牛记录（无需认证）"""
@@ -181,40 +155,6 @@ async def upload_missing_bulls(request: MissingBullRequest):
         )
     except Exception as e:
         logger.error(f"上传缺失公牛记录失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/data/sync_bull_library")
-async def sync_bull_library(user=Depends(verify_token)):
-    """同步公牛库数据（替代原check_and_update_database）"""
-    try:
-        # 获取云端数据
-        query = "SELECT * FROM bull_library"
-        df = pd.read_sql(query, engine)
-
-        # 过滤表头行
-        if 'BULL NAAB' in df.columns:
-            initial_count = len(df)
-            df = df[df['BULL NAAB'] != 'BULL NAAB']
-            filtered_count = len(df)
-            if initial_count != filtered_count:
-                logger.info(f"过滤掉 {initial_count - filtered_count} 条表头记录")
-
-        # 获取版本信息
-        with engine.connect() as conn:
-            result = conn.execute(text("SELECT version FROM db_version ORDER BY id DESC LIMIT 1")).fetchone()
-            version = result[0] if result else "1.0.0"
-
-        return APIResponse(
-            success=True,
-            message=f"成功同步{len(df)}条公牛记录",
-            data={
-                "total_records": len(df),
-                "version": version,
-                "records": df.to_dict(orient='records')
-            }
-        )
-    except Exception as e:
-        logger.error(f"同步公牛库数据失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/data/invitation_codes")

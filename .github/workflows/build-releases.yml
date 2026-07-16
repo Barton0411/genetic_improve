@@ -568,6 +568,13 @@ jobs:
         VERSION="${{ steps.get_version.outputs.VERSION }}"
         echo "📝 更新 version.json..."
 
+        # 关键修复：从 git 恢复 version.json，确保上传的是本 tag 提交里的版本。
+        # 此前 "Download all artifacts" 用 gh run download --dir . 会把各 artifact 子目录里
+        # 夹带的旧 version.json 污染工作区，导致上传到 OSS 的版本号是旧的（客户端检查不到更新）。
+        git checkout HEAD -- version.json
+        echo "已从 git(HEAD=本tag) 恢复 version.json，当前版本号："
+        python3 -c "import json; print(json.load(open('version.json'))['version'])"
+
         # 读取version.json内容并上传
         if [ -f "version.json" ]; then
           echo "✅ 找到 version.json，上传到 OSS..."

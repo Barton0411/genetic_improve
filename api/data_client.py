@@ -98,32 +98,6 @@ class DataAPIClient:
             logger.error(f"获取数据库版本和时间失败: {e}")
             return False, None, None, str(e)
 
-    def get_bull_library(self) -> Tuple[bool, Optional[List[Dict]], str]:
-        """
-        获取公牛库数据
-
-        Returns:
-            Tuple[bool, Optional[List[Dict]], str]: (成功标志, 公牛记录列表, 消息)
-        """
-        try:
-            response = self.session.get(
-                f"{self.base_url}/api/data/bull_library",
-                timeout=self.timeout
-            )
-            response.raise_for_status()
-
-            data = response.json()
-            if data.get('success'):
-                records = data['data'].get('records', [])
-                total = data['data'].get('total', 0)
-                return True, records, f"成功获取{total}条公牛记录"
-            else:
-                return False, None, data.get('message', '获取公牛库失败')
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"获取公牛库数据失败: {e}")
-            return False, None, str(e)
-
     def upload_missing_bulls(self, missing_bulls: List[Dict]) -> Tuple[bool, str]:
         """
         上传缺失公牛记录
@@ -161,63 +135,6 @@ class DataAPIClient:
             print(f"[检查点-DataClient.upload] ❌ 请求异常: {e}")
             logger.error(f"上传缺失公牛记录失败: {e}")
             return False, str(e)
-
-    def download_bull_library(self, save_path: str) -> Tuple[bool, str]:
-        """
-        下载bull_library数据库文件
-
-        Args:
-            save_path: 保存路径
-
-        Returns:
-            Tuple[bool, str]: (成功标志, 消息或文件路径)
-        """
-        try:
-            response = self.session.get(
-                f"{self.base_url}/api/data/bull_library",
-                stream=True,
-                timeout=120
-            )
-            response.raise_for_status()
-
-            # 保存文件
-            with open(save_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-
-            return True, save_path
-
-        except Exception as e:
-            logger.error(f"下载bull_library失败: {e}")
-            return False, str(e)
-
-    def sync_bull_library(self) -> Tuple[bool, Optional[Dict], str]:
-        """
-        同步公牛库数据（替代check_and_update_database）
-
-        Returns:
-            Tuple[bool, Optional[Dict], str]: (成功标志, 数据字典, 消息)
-        """
-        try:
-            response = self.session.post(
-                f"{self.base_url}/api/data/sync_bull_library",
-                timeout=self.timeout
-            )
-            response.raise_for_status()
-
-            data = response.json()
-            if data.get('success'):
-                sync_data = data.get('data', {})
-                total = sync_data.get('total_records', 0)
-                version = sync_data.get('version', 'unknown')
-                return True, sync_data, f"成功同步{total}条记录，版本{version}"
-            else:
-                return False, None, data.get('message', '同步失败')
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"同步公牛库数据失败: {e}")
-            return False, None, str(e)
 
     def check_connection(self) -> bool:
         """
@@ -289,21 +206,6 @@ def get_cloud_db_version_with_time() -> Tuple[Optional[str], Optional[str]]:
     else:
         logger.error(f"获取版本和时间失败: {message}")
         return None, None
-
-def fetch_cloud_bull_library() -> Optional[List[Dict]]:
-    """
-    获取云端公牛库数据（兼容接口）
-
-    Returns:
-        Optional[List[Dict]]: 公牛记录列表，失败返回None
-    """
-    client = get_data_client()
-    success, records, message = client.get_bull_library()
-    if success:
-        return records
-    else:
-        logger.error(f"获取公牛库失败: {message}")
-        return None
 
 def upload_missing_bulls_to_cloud(missing_bulls: List[Dict]) -> bool:
     """

@@ -40,8 +40,11 @@ class DownloadThread(QThread):
                 self.finished.emit(False, "下载地址无效")
                 return
             
-            # 发送HTTP请求开始下载
-            response = requests.get(self.url, stream=True, timeout=30, proxies={'http': None, 'https': None})
+            # 发送HTTP请求开始下载（禁用代理直连，避免系统代理未启动时连接被拒）
+            session = requests.Session()
+            session.trust_env = False
+            session.proxies = {'http': None, 'https': None}
+            response = session.get(self.url, stream=True, timeout=30)
             response.raise_for_status()
             
             # 获取文件总大小

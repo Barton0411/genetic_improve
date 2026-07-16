@@ -325,11 +325,14 @@ class SmartUpdater:
         package_path = temp_dir / f"update_package_{update_info['version']}.zip"
         
         logger.info(f"开始下载更新包: {package_url}")
-        
-        # TODO: 实现带进度的下载
+
+        # 禁用代理直连（ProxyHandler({}) 忽略系统代理，避免代理未启动时连接被拒）
         import urllib.request
-        urllib.request.urlretrieve(package_url, package_path)
-        
+        import shutil
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(package_url, timeout=30) as resp, open(package_path, 'wb') as f:
+            shutil.copyfileobj(resp, f)
+
         logger.info(f"更新包下载完成: {package_path}")
         return package_path
     
