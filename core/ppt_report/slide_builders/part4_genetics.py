@@ -320,11 +320,18 @@ class Part4GeneticsBuilder(BaseSlideBuilder):
                 if pd.isna(val):
                     return False
                 val_str = str(val).strip()
+                import re
                 # 排除汇总行
                 if any(kw in val_str for kw in ["总计", "合计", "对比", "小计"]):
                     return False
+                # 排除对比牧场行 / 外部参考行（形如"潍坊牧场 (2022年 - 2026年)"）：
+                #   这些行也含"年"和4位数字，若不排除会被误计入"共计头数"及趋势分析
+                if any(kw in val_str for kw in ["牧场", "参考", "(", "（"]):
+                    return False
+                # 含两个及以上4位年份（年份区间，如"2022 - 2026"）也不是单年份行
+                if len(re.findall(r'\d{4}', val_str)) >= 2:
+                    return False
                 # 包含"年"且有4位数字的行认为是年份行
-                import re
                 if "年" in val_str and re.search(r'\d{4}', val_str):
                     return True
                 # 纯4位数字也是年份

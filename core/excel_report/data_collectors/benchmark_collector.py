@@ -57,6 +57,12 @@ class BenchmarkDataCollector:
         try:
             logger.info("开始收集对比数据...")
 
+            # 总开关：默认关闭。关闭时不带任何对比牧场/参考数据，
+            # 避免历史勾选残留导致报告表格与"共计头数"误带对比牧场。
+            if not self.benchmark_manager.get_comparison_enabled():
+                logger.info("对比牧场总开关未开启，本次报告不带对比数据")
+                return {'farms': [], 'references': []}
+
             # 获取用户勾选的对比数据
             selected_comparisons = self.benchmark_manager.get_selected_comparisons()
 

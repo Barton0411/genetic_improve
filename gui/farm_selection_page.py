@@ -1268,6 +1268,15 @@ class FarmSelectionPage(QWidget):
             progress_dialog.set_task_info("正在准备...")
             progress_dialog.show()
 
+            # 自动报告为无人值守流程，强制关闭对比牧场总开关：
+            # 避免历史勾选残留导致自动生成的报告静默带上对比牧场。
+            # 需要对比时请走手动生成 Excel 报告并在弹窗中确认。
+            try:
+                from core.benchmark import BenchmarkManager
+                BenchmarkManager().set_comparison_enabled(False)
+            except Exception as e:
+                self.logger.warning(f"关闭对比牧场总开关失败（不影响生成）: {e}")
+
             # 创建 AutoReportWorker
             from gui.auto_report_worker import AutoReportWorker
             self.auto_worker = AutoReportWorker(

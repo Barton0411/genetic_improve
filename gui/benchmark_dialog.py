@@ -550,8 +550,9 @@ class AddFarmDialog(QDialog):
         file_group = QGroupBox("数据文件*")
         file_layout = QVBoxLayout()
 
-        info_label = QLabel('请选择"关键育种性状分析结果.xlsx"文件')
+        info_label = QLabel('可直接选择"项目文件夹"（自动定位其中的分析报告），或手动选择"关键育种性状分析结果.xlsx"文件')
         info_label.setStyleSheet("color: #7f8c8d;")
+        info_label.setWordWrap(True)
         file_layout.addWidget(info_label)
 
         file_btn_layout = QHBoxLayout()
@@ -559,6 +560,10 @@ class AddFarmDialog(QDialog):
         self.file_path_edit.setReadOnly(True)
         self.file_path_edit.setPlaceholderText("未选择文件")
         file_btn_layout.addWidget(self.file_path_edit)
+
+        self.browse_folder_btn = QPushButton("选择项目文件夹...")
+        self.browse_folder_btn.clicked.connect(self.browse_folder)
+        file_btn_layout.addWidget(self.browse_folder_btn)
 
         self.browse_btn = QPushButton("选择Excel文件...")
         self.browse_btn.clicked.connect(self.browse_file)
@@ -606,33 +611,100 @@ class AddFarmDialog(QDialog):
         )
 
         if file_path:
-            file_path = Path(file_path)
+            self._apply_excel_file(Path(file_path))
 
-            # 验证文件
-            from core.benchmark import TraitsExcelParser
-            parser = TraitsExcelParser(file_path)
+    def browse_folder(self):
+        """浏览项目文件夹，自动定位其中的分析报告文件"""
+        folder = QFileDialog.getExistingDirectory(self, "选择项目文件夹", "")
+        if not folder:
+            return
 
-            is_valid, error_msg = parser.validate()
-            if not is_valid:
-                QMessageBox.warning(self, "文件验证失败", error_msg)
-                return
+        folder = Path(folder)
+        report = self._locate_report_in_folder(folder)
 
-            # 显示预览
-            preview_text = parser.get_preview_info()
-            if preview_text:
-                self.preview_label.setText(preview_text)
-                self.preview_label.setStyleSheet("""
-                    QLabel {
-                        color: #27ae60;
-                        padding: 10px;
-                        background-color: #e8f8f5;
-                        border: 1px solid #27ae60;
-                        border-radius: 4px;
-                    }
-                """)
+        if report is None:
+            # 未找到可用报告：提示并让用户决定是否改为手动选择文件
+            reply = QMessageBox.question(
+                self,
+                "未找到分析报告",
+                f"在该项目文件夹内未找到可用的分析报告：\n"
+                f"（analysis_results/关键育种性状分析结果.xlsx）\n\n"
+                f"该牧场可能尚未生成分析报告。\n"
+                f"是否改为手动选择 Excel 文件？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.browse_file()
+            return
 
-            self.excel_file_path = file_path
-            self.file_path_edit.setText(str(file_path))
+        # 用项目文件夹名作为默认牧场名（仅当用户尚未填写）
+        if not self.name_edit.text().strip():
+            self.name_edit.setText(folder.name)
+
+        self._apply_excel_file(report)
+
+    def _locate_report_in_folder(self, folder: Path):
+        """
+        在项目文件夹内定位含所需 sheet 的分析报告文件。
+
+        优先约定位置，找不到再递归查找第一个通过校验的 xlsx。
+        返回 Path 或 None。
+        """
+        from core.benchmark import TraitsExcelParser
+
+        # 1) 约定位置优先
+        for candidate in (
+            folder / "analysis_results" / "关键育种性状分析结果.xlsx",
+            folder / "关键育种性状分析结果.xlsx",
+        ):
+            try:
+                if candidate.exists() and TraitsExcelParser(candidate).validate()[0]:
+                    return candidate
+            except Exception:
+                continue
+
+        # 2) 递归查找第一个通过校验的 xlsx（跳过 Excel 临时文件）
+        try:
+            for xlsx in sorted(folder.rglob("*.xlsx")):
+                if xlsx.name.startswith("~$"):
+                    continue
+                try:
+                    if TraitsExcelParser(xlsx).validate()[0]:
+                        return xlsx
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        return None
+
+    def _apply_excel_file(self, file_path: Path):
+        """校验并应用选中的分析报告文件（验证 + 预览 + 记录路径）"""
+        from core.benchmark import TraitsExcelParser
+        parser = TraitsExcelParser(file_path)
+
+        is_valid, error_msg = parser.validate()
+        if not is_valid:
+            QMessageBox.warning(self, "文件验证失败", error_msg)
+            return
+
+        # 显示预览
+        preview_text = parser.get_preview_info()
+        if preview_text:
+            self.preview_label.setText(preview_text)
+            self.preview_label.setStyleSheet("""
+                QLabel {
+                    color: #27ae60;
+                    padding: 10px;
+                    background-color: #e8f8f5;
+                    border: 1px solid #27ae60;
+                    border-radius: 4px;
+                }
+            """)
+
+        self.excel_file_path = file_path
+        self.file_path_edit.setText(str(file_path))
 
     def accept_dialog(self):
         """确认对话框"""

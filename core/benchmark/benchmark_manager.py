@@ -358,6 +358,30 @@ class BenchmarkManager:
         """
         return self.config.get('selected_comparisons', [])
 
+    def get_comparison_enabled(self) -> bool:
+        """
+        获取"本次报告是否启用对比牧场"总开关。
+
+        默认关闭（False）：避免历史勾选残留导致每次生成都误带对比牧场。
+        由生成报告入口在每次生成前根据用户确认写入。
+        """
+        # 每次读取前重新加载，确保拿到入口刚写入的最新值
+        self.config = self._load_config()
+        return bool(self.config.get('comparison_enabled', False))
+
+    def set_comparison_enabled(self, enabled: bool):
+        """
+        设置"本次报告是否启用对比牧场"总开关。
+
+        Args:
+            enabled: True=本次报告加入已勾选的对比牧场；False=不带任何对比牧场
+        """
+        # 先重新加载配置，避免覆盖其他更改
+        self.config = self._load_config()
+        self.config['comparison_enabled'] = bool(enabled)
+        self._save_config()
+        logger.info(f"对比牧场总开关已设为: {enabled}")
+
     def get_comparison_data(self, farm_id: str, sheet_type: str, year_row: str) -> Optional[Dict]:
         """
         获取指定牧场指定年份的对比数据

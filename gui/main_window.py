@@ -4580,10 +4580,114 @@ class MainWindow(QMainWindow):
         self._start_ppt_background_generation()
         self._show_ppt_progress_dialog()
 
+    def _confirm_comparison_before_report(self) -> bool:
+        """
+        生成报告前确认本次是否加入已勾选的对比牧场。
+
+        对比牧场总开关默认关闭：避免历史勾选残留（如同事此前对比的潍坊/昌邑）
+        导致每次生成都误带对比牧场、并把对比牧场牛数计入"共计头数"。
+        - 无已勾选对比 → 直接关闭，不打扰
+        - 有已勾选对比 → 弹窗让用户当次决定加不加，默认"不加入"
+
+        Returns:
+            True  = 继续生成报告
+            False = 用户取消生成（例如勾错了要回去重新勾选）
+        """
+        try:
+            selected = self.benchmark_manager.get_selected_comparisons()
+        except Exception as e:
+            logging.warning(f"读取对比勾选失败，按不带对比处理: {e}")
+            selected = []
+
+        if not selected:
+            try:
+                self.benchmark_manager.set_comparison_enabled(False)
+            except Exception:
+                pass
+            return True
+
+        # 解析为真实名称，并过滤掉指向已删除牧场/参考的"孤儿勾选"
+        names = []
+        valid = []
+        for c in selected:
+            try:
+                if c.get('farm_id'):
+                    farm = self.benchmark_manager.get_farm_by_id(c['farm_id'])
+                    if farm:
+                        names.append(f"对比牧场：{farm['name']}")
+                        valid.append(c)
+                elif c.get('reference_id'):
+                    ref = self.benchmark_manager.get_reference_by_id(c['reference_id'])
+                    if ref:
+                        names.append(f"外部参考：{ref['name']}")
+                        valid.append(c)
+            except Exception:
+                continue
+
+        # 全是孤儿 → 等同于未勾选
+        if not valid:
+            logging.info("已勾选项均指向已删除来源，本次不带对比")
+            try:
+                self.benchmark_manager.save_selected_comparisons([])
+                self.benchmark_manager.set_comparison_enabled(False)
+            except Exception:
+                pass
+            return True
+
+        # 存在孤儿则回写清理后的列表，保证报告生成用的与弹窗展示的一致
+        if len(valid) != len(selected):
+            logging.info(f"确认弹窗过滤孤儿勾选: {len(selected)} -> {len(valid)}")
+            try:
+                self.benchmark_manager.save_selected_comparisons(valid)
+            except Exception:
+                pass
+
+        # 一行一个，便于看清到底和哪些牧场对比
+        name_str = "\n".join(f"    {i + 1}. {n}" for i, n in enumerate(names))
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("对比牧场确认")
+        msg.setIcon(QMessageBox.Icon.Question)
+        msg.setText(
+            f"本次报告将与以下 {len(valid)} 个对比来源进行对比：\n\n{name_str}\n\n"
+            f"是否加入这些对比？"
+        )
+        msg.setInformativeText(
+            "• 加入对比：报告中显示上述对比行\n"
+            "• 不加入：仅统计当前分析牧场，不显示对比行、不计入共计头数\n"
+            "• 取消生成：不生成报告，返回重新勾选对比来源"
+        )
+        yes_btn = msg.addButton("加入对比", QMessageBox.ButtonRole.YesRole)
+        no_btn = msg.addButton("不加入", QMessageBox.ButtonRole.NoRole)
+        cancel_btn = msg.addButton("取消生成", QMessageBox.ButtonRole.RejectRole)
+        msg.setDefaultButton(no_btn)
+        msg.setEscapeButton(cancel_btn)
+        msg.exec()
+
+        clicked = msg.clickedButton()
+
+        # 取消生成：勾错了要回去重新选
+        if clicked is cancel_btn:
+            logging.info("用户取消生成报告（返回重新勾选对比来源）")
+            return False
+
+        enabled = (clicked is yes_btn)
+        try:
+            self.benchmark_manager.set_comparison_enabled(enabled)
+        except Exception as e:
+            logging.warning(f"写入对比总开关失败: {e}")
+        logging.info(f"本次报告对比牧场: {'加入' if enabled else '不加入'}")
+        return True
+
     def on_generate_excel_report(self):
         """生成Excel综合报告（使用后台线程）"""
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
+            return
+
+        # 生成前确认是否加入对比牧场（默认不加，避免历史勾选残留）
+        # 用户选"取消生成"则中止，让其回去重新勾选对比来源
+        if not self._confirm_comparison_before_report():
             return
 
         try:
@@ -4860,8 +4964,26 @@ class MainWindow(QMainWindow):
                     saved_comparisons=saved_comparisons
                 )
 
-            # 刷新完成后，重新构建 selected_comparisons 列表
-            self.selected_comparisons = saved_comparisons
+            # 清理"孤儿勾选"：指向已删除牧场/参考的选择项。
+            # 这些项在表格里没有对应行（用户看不见），却仍留在 selected_comparisons 中，
+            # 会导致确认弹窗和报告生成误带已删除的对比来源。
+            live_farm_ids = {f['id'] for f in farms}
+            live_ref_ids = {r['id'] for r in references}
+            cleaned = [
+                c for c in saved_comparisons
+                if (c.get('farm_id') in live_farm_ids)
+                or (c.get('reference_id') in live_ref_ids)
+            ]
+            if len(cleaned) != len(saved_comparisons):
+                logging.info(
+                    f"清理孤儿对比勾选: {len(saved_comparisons)} -> {len(cleaned)} "
+                    f"(移除 {len(saved_comparisons) - len(cleaned)} 个已删除来源)"
+                )
+                self.selected_comparisons = cleaned
+                # 回写磁盘，保证内存/磁盘/界面三者一致
+                self.benchmark_manager.save_selected_comparisons(cleaned)
+            else:
+                self.selected_comparisons = saved_comparisons
 
             logging.info(f"✓ 对比数据加载完成，表格共有 {self.comparison_sources_table.rowCount()} 行")
             logging.info(f"✓ 选中状态已恢复: {len(self.selected_comparisons)} 个")
