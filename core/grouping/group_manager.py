@@ -159,13 +159,22 @@ class GroupManager:
             if pd.isna(calving_date):
                 return 0
             calving_date = pd.to_datetime(calving_date)
-            return (self.today - calving_date).dt.days
+            return (self.today - calving_date).days
         except:
             return 0
 
     def is_pregnant(self, status: str) -> bool:
         """判断是否已孕"""
-        return status in ["初检孕", "复检孕"]
+        return str(status).strip() in ["初检孕", "复检孕"]
+
+    def is_temporarily_ineligible(self, status: str) -> bool:
+        """判断当前是否不应进入选配。
+
+        慧牧云没有提供配种明细时，仍会给出“已配、干奶、禁配”等牛只
+        状态。这些牛不应仅因为不是“初检孕/复检孕”就被当作未孕牛再次
+        分配公牛。
+        """
+        return str(status).strip() in ["已配", "干奶", "禁配"]
 
     def is_sexed_method(self, method: str) -> bool:
         """判断是否为性控方法"""
@@ -185,6 +194,9 @@ class GroupManager:
         
         # 标记已孕和难孕
         df['is_pregnant'] = df['repro_status'].apply(self.is_pregnant)
+        df['is_temporarily_ineligible'] = df['repro_status'].apply(
+            self.is_temporarily_ineligible
+        )
         
         # 确保 group 列是字符串类型
         if 'group' not in df.columns:
@@ -196,20 +208,38 @@ class GroupManager:
         cow_mask = df['lac'] > 0
         
         # 后备牛难孕条件：日龄 >= 18*30.8 且未孕
-        mask = heifer_mask & (df['age_days'] >= 18*30.8) & ~df['is_pregnant']
+        mask = (
+            heifer_mask
+            & (df['age_days'] >= 18*30.8)
+            & ~df['is_pregnant']
+            & ~df['is_temporarily_ineligible']
+        )
         df.loc[mask, 'group'] = '后备牛+难孕牛+非性控'
         
         # 后备牛已孕
         mask = heifer_mask & df['is_pregnant']
         df.loc[mask, 'group'] = '后备牛+已孕牛+非性控'
+
+        # 后备牛当前已配、干奶或禁配，不进入本轮选配
+        mask = heifer_mask & df['is_temporarily_ineligible']
+        df.loc[mask, 'group'] = '后备牛+暂不选配牛+非性控'
         
         # 成母牛难孕条件：DIM >= 150 且未孕
-        mask = cow_mask & (df['dim'] >= 150) & ~df['is_pregnant']
+        mask = (
+            cow_mask
+            & (df['dim'] >= 150)
+            & ~df['is_pregnant']
+            & ~df['is_temporarily_ineligible']
+        )
         df.loc[mask, 'group'] = '成母牛+难孕牛+非性控'
         
         # 成母牛已孕
         mask = cow_mask & df['is_pregnant']
         df.loc[mask, 'group'] = '成母牛+已孕牛+非性控'
+
+        # 成母牛当前已配、干奶或禁配，不进入本轮选配
+        mask = cow_mask & df['is_temporarily_ineligible']
+        df.loc[mask, 'group'] = '成母牛+暂不选配牛+非性控'
         
         return df
 
@@ -477,11 +507,19 @@ class GroupManager:
         )
         df['日龄'] = pd.to_numeric(df['日龄'], errors='coerce')
 
-        # 计算DIM - 正确处理NaN值
-        df['DIM'] = df['calving_date'].apply(
+        # 保留源系统提供的DIM。部分干奶牛的DIM会停留在干奶时点，若直接
+        # 用当前日期减产犊日期覆盖，会改变源数据并导致报告对账不一致。
+        source_dim = (
+            pd.to_numeric(df['DIM'], errors='coerce')
+            if 'DIM' in df.columns
+            else pd.Series(index=df.index, dtype='float64')
+        )
+        calculated_dim = df['calving_date'].apply(
             lambda x: (today - x).days if pd.notna(x) else None
         )
-        df['DIM'] = pd.to_numeric(df['DIM'], errors='coerce')
+        calculated_dim = pd.to_numeric(calculated_dim, errors='coerce')
+        df['calculated_DIM'] = calculated_dim
+        df['DIM'] = source_dim.combine_first(calculated_dim)
 
         # 检查日龄计算是否有异常值
         invalid_age_mask = df['日龄'].notna() & ((df['日龄'] < 0) | (df['日龄'] > 3650))  # 超过10年的日龄视为异常
@@ -519,13 +557,22 @@ class GroupManager:
         heifer_df = df[heifer_mask].copy()
 
         # 标记已孕和难孕牛 - 先处理NaN值
-        pregnant_mask = heifer_df['repro_status'].fillna('').isin(['初检孕', '复检孕'])
+        pregnant_mask = heifer_df['repro_status'].apply(self.is_pregnant)
+        ineligible_mask = heifer_df['repro_status'].apply(
+            self.is_temporarily_ineligible
+        )
         # 日龄中的None/NaN值视为0，确保布尔表达式有效性
         valid_age_mask = heifer_df['日龄'].notna()
-        difficult_mask = valid_age_mask & (heifer_df['日龄'] >= 18 * 30.8) & ~pregnant_mask
+        difficult_mask = (
+            valid_age_mask
+            & (heifer_df['日龄'] >= 18 * 30.8)
+            & ~pregnant_mask
+            & ~ineligible_mask
+        )
 
         # 分配特殊组
         heifer_df.loc[pregnant_mask, 'group'] = '后备牛已孕牛'
+        heifer_df.loc[ineligible_mask, 'group'] = '后备牛暂不选配牛'
         heifer_df.loc[difficult_mask, 'group'] = '后备牛难孕牛'
         
         pregnant_count = pregnant_mask.sum()
@@ -539,7 +586,7 @@ class GroupManager:
         print(f"后备牛难孕牛数量：{difficult_count}头")
         
         # 处理普通后备牛（排除已孕和难孕）
-        normal_mask = ~(pregnant_mask | difficult_mask)
+        normal_mask = ~(pregnant_mask | ineligible_mask | difficult_mask)
         heifer_normal = heifer_df[normal_mask]
         normal_count = len(heifer_normal)
         
@@ -598,17 +645,26 @@ class GroupManager:
         # 处理成母牛
         mature_df = df[mature_mask].copy()
         # 标记已孕和难孕牛 - 先处理NaN值
-        pregnant_mask = mature_df['repro_status'].fillna('').isin(['初检孕', '复检孕'])
+        pregnant_mask = mature_df['repro_status'].apply(self.is_pregnant)
+        ineligible_mask = mature_df['repro_status'].apply(
+            self.is_temporarily_ineligible
+        )
         # 难孕牛：有DIM数据且DIM >= 600天且未孕（根据实际数据调整阈值）
         # DIM为空的牛不算难孕牛，应该归为未孕牛
-        difficult_mask = mature_df['DIM'].notna() & (mature_df['DIM'] >= 600) & ~pregnant_mask
+        difficult_mask = (
+            mature_df['DIM'].notna()
+            & (mature_df['DIM'] >= 600)
+            & ~pregnant_mask
+            & ~ineligible_mask
+        )
 
         # 分配周期
         mature_df.loc[pregnant_mask, 'group'] = '成母牛已孕牛'
+        mature_df.loc[ineligible_mask, 'group'] = '成母牛暂不选配牛'
         mature_df.loc[difficult_mask, 'group'] = '成母牛难孕牛'
 
         # 标记正常成母牛为未孕牛（而不是按周期分）
-        normal_mask = ~(pregnant_mask | difficult_mask)
+        normal_mask = ~(pregnant_mask | ineligible_mask | difficult_mask)
         mature_df.loc[normal_mask, 'group'] = '成母牛未孕牛'
         
         pregnant_count = pregnant_mask.sum()
@@ -616,7 +672,7 @@ class GroupManager:
         normal_count = normal_mask.sum()
         
         # 计算基础未孕牛（所有非已孕的牛）
-        base_unpregnant_mask = ~pregnant_mask
+        base_unpregnant_mask = ~(pregnant_mask | ineligible_mask)
         base_unpregnant_count = base_unpregnant_mask.sum()
         
         # 调试：分析DIM分布
@@ -988,7 +1044,9 @@ class GroupManager:
         print("\n处理已孕牛和难孕牛...")
         # 确保group列存在且处理NaN值
         if 'group' in result_df.columns:
-            special_mask = result_df['group'].fillna('').str.contains('已孕牛|难孕牛', na=False)
+            special_mask = result_df['group'].fillna('').str.contains(
+                '已孕牛|难孕牛|暂不选配牛', na=False
+            )
             special_mask = special_mask & ~result_df.index.isin(processed_cows)
             special_df = result_df[special_mask]
             special_count = len(special_df)
@@ -1119,4 +1177,4 @@ class GroupManager:
         summary = pd.DataFrame(self.cow_data['group'].value_counts())
         summary.columns = ['数量']
         summary.index.name = '分组'
-        return summary.reset_index() 
+        return summary.reset_index()

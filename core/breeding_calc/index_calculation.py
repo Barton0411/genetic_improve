@@ -461,18 +461,37 @@ class IndexCalculation(BaseCowCalculation):
                 progress_callback(85, "计算指数得分...")
 
             score = np.zeros(len(bull_df))
+            valid_score_mask = np.ones(len(bull_df), dtype=bool)
             for trait, weight in weight_values.items():
                 if trait in TRAIT_SD and trait in bull_df.columns:
-                    # 使用向量化操作，NaN 值用 0 填充
-                    trait_values = bull_df[trait].fillna(0).values
-                    score += (trait_values / TRAIT_SD[trait]) * weight
-            bull_df[f'{weight_name}_index'] = score
+                    trait_values = pd.to_numeric(
+                        bull_df[trait], errors='coerce'
+                    )
+                    valid_score_mask &= trait_values.notna().to_numpy()
+                    score += (
+                        trait_values.fillna(0).to_numpy()
+                        / TRAIT_SD[trait]
+                    ) * weight
+
+            # 缺少参与指数计算的任何性状时，不能把缺失值当作0分。
+            # 否则在真实指数允许为负数时，缺失公牛会被错误排在有效公牛前面。
+            score[~valid_score_mask] = np.nan
+            index_col = f'{weight_name}_index'
+            bull_df[index_col] = score
 
             # 8. 排序并添加排名
             if progress_callback:
                 progress_callback(90, "排序并添加排名...")
-            bull_df = bull_df.sort_values(f'{weight_name}_index', ascending=False)
-            bull_df['ranking'] = range(1, len(bull_df) + 1)
+            bull_df = bull_df.sort_values(
+                index_col, ascending=False, na_position='last'
+            )
+            bull_df['ranking'] = pd.Series(
+                pd.NA, index=bull_df.index, dtype='Int64'
+            )
+            valid_index = bull_df[index_col].notna()
+            bull_df.loc[valid_index, 'ranking'] = range(
+                1, int(valid_index.sum()) + 1
+            )
 
             # 9. 保存结果
             if task_info_callback:

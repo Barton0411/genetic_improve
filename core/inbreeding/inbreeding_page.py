@@ -3008,7 +3008,7 @@ class InbreedingPage(QWidget):
                     '原始父号': original_sire_id if original_sire_id != sire_id else '',
                     '配种公牛号': bull_id,
                     '原始公牛号': original_bull_id if original_bull_id != bull_id else '',
-                    '近交系数': f"{inbreeding_coef:.2%}",  # 格式化为百分比
+                    '近交系数': f"{inbreeding_coef:.3%}",  # 保留阈值判断所需精度
                 }
                 
                 # 添加基因分析结果
@@ -3160,7 +3160,7 @@ class InbreedingPage(QWidget):
                         '原始父号': original_sire_id if original_sire_id != sire_id else '',
                         '备选公牛号': bull_id,
                         '原始备选公牛号': original_bull_id if original_bull_id != bull_id else '',
-                        '近交系数': f"{inbreeding_coef:.2%}",  # 格式化为百分比
+                        '近交系数': f"{inbreeding_coef:.3%}",  # 保留阈值判断所需精度
                     }
                     
                     # 添加基因分析结果
@@ -3229,7 +3229,7 @@ class InbreedingPage(QWidget):
                             '父号': result['父号'],
                             '公牛号': result.get('配种公牛号', result.get('备选公牛号')),
                             '异常类型': '近交系数过高',
-                            '状态': f'{inbreeding_value:.2%}'
+                            '状态': f'{inbreeding_value:.3%}'
                         })
                         inbreeding_count += 1
                 except (ValueError, TypeError):
@@ -3325,7 +3325,7 @@ class InbreedingPage(QWidget):
                     else:
                         # 父母信息不全，无法通过通径法计算母牛自身近交
                         cow_self_f, cow_self_contrib, cow_self_paths = 0.0, {}, {}
-                    result['近交系数'] = f"{cow_self_f:.2%}"
+                    result['近交系数'] = f"{cow_self_f:.3%}"
                     result['近交详情'] = {
                         'system': cow_self_f,
                         'common_ancestors': cow_self_contrib,
@@ -3363,7 +3363,7 @@ class InbreedingPage(QWidget):
                             print(f"[WARNING] 后代近交系数为NaN，设置为0.0")
                             offspring_inbreeding = 0.0
                             
-                        result['后代近交系数'] = f"{offspring_inbreeding:.2%}"
+                        result['后代近交系数'] = f"{offspring_inbreeding:.3%}"
                         
                         # 检查是否为近亲繁殖情况
                         if bull_id == sire_id:
@@ -3552,7 +3552,7 @@ class InbreedingPage(QWidget):
                 '出生日期': row_dict.get('birth_date', ''),
                 '胎次': row_dict.get('lac', ''),
                 '是否在场': row_dict.get('是否在场', ''),
-                '近交系数': f"{f_val:.2%}",
+                '近交系数': f"{f_val:.3%}",
                 # 与已配/备选一致的列名，双击可在 PedigreeDialog 中查看共同祖先
                 '近交详情': {'system': f_val, 'common_ancestors': contrib, 'paths': paths},
             }
@@ -3610,7 +3610,7 @@ class InbreedingPage(QWidget):
                         '父号': result['父号'],
                         '公牛号': '',
                         '异常类型': '近交系数过高',
-                        '状态': f'{v:.2%}'
+                        '状态': f'{v:.3%}'
                     })
                     inbreeding_count += 1
             except (ValueError, TypeError):

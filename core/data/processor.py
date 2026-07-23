@@ -1012,6 +1012,20 @@ def preprocess_cow_data(cow_df, progress_callback=None, source_system: str = "�
         cow_df.rename(columns=column_mapping, inplace=True)
         print("[DEBUG-4] 转换后列名:", cow_df.columns.tolist())
 
+        # 慧牧云使用“妊娠”表示已经确认怀孕；现有分组逻辑使用
+        # “初检孕/复检孕”。在数据边界统一口径，避免把已孕牛误分到
+        # 未孕牛组并参与当前选配。
+        if source_system == "慧牧云" and "repro_status" in cow_df.columns:
+            pregnant_count = (cow_df["repro_status"] == "妊娠").sum()
+            if pregnant_count:
+                cow_df["repro_status"] = cow_df["repro_status"].replace(
+                    {"妊娠": "复检孕"}
+                )
+                print(
+                    f"[DEBUG-4.0] 慧牧云繁育状态转换："
+                    f"妊娠→复检孕 {pregnant_count} 条"
+                )
+
         # DC305 特殊数据清洗
         if source_system == "优源-DC305":
             print("[DEBUG-4.1] DC305特殊数据清洗...")

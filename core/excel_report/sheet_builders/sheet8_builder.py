@@ -74,6 +74,23 @@ class Sheet8Builder(BaseSheetBuilder):
                 logger.warning("Sheet8: 缺少数据，跳过生成")
                 return
 
+            summary_data = data.get('summary_data')
+            progress_data = data.get('progress_data')
+            scatter_data_all = data.get('scatter_data_all')
+            scatter_data_12m = data.get('scatter_data_12m')
+            has_content = any(
+                item is not None and not item.empty
+                for item in (
+                    summary_data,
+                    progress_data,
+                    scatter_data_all,
+                    scatter_data_12m,
+                )
+            )
+            if not has_content:
+                logger.warning("Sheet8: 没有已用公牛数据，跳过生成")
+                return
+
             # 创建Sheet
             self._create_sheet("已用公牛性状汇总")
             logger.info("构建Sheet 8: 已用公牛性状汇总分析")
@@ -81,7 +98,6 @@ class Sheet8Builder(BaseSheetBuilder):
             current_row = 1
 
             # 1. 构建汇总表
-            summary_data = data.get('summary_data')
             if summary_data is not None and not summary_data.empty:
                 logger.info(f"  构建汇总表: {len(summary_data)} 行")
                 summary_start_row = current_row
@@ -99,16 +115,12 @@ class Sheet8Builder(BaseSheetBuilder):
                 current_row += 3  # 空3行
 
             # 3. 构建性状进展数据表
-            progress_data = data.get('progress_data')
             if progress_data is not None and not progress_data.empty:
                 logger.info(f"  构建进展数据表: {len(progress_data)} 个性状")
                 current_row = self._build_progress_table(progress_data, current_row)
                 current_row += 3  # 空3行
 
             # 4. 构建两个散点图：并排显示在同一行
-            scatter_data_all = data.get('scatter_data_all')
-            scatter_data_12m = data.get('scatter_data_12m')
-
             if (scatter_data_all is not None and not scatter_data_all.empty) or \
                (scatter_data_12m is not None and not scatter_data_12m.empty):
                 logger.info(f"  构建散点图（并排布局）")

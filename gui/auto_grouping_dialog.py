@@ -616,6 +616,7 @@ class AutoGroupingDialog(QDialog):
 <h4>2. 后备牛分组</h4>
 <ul>
 <li><b>已孕牛：</b>repro_status 为 "初检孕" 或 "复检孕"</li>
+<li><b>暂不选配牛：</b>repro_status 为 "已配"、"干奶" 或 "禁配"</li>
 <li><b>难孕牛：</b>日龄 ≥ 18×30.8(约553天) 且未孕</li>
 <li><b>周期分组：</b>对普通后备牛（非已孕/难孕）按日龄分周期
   <ul>
@@ -629,13 +630,14 @@ class AutoGroupingDialog(QDialog):
 <h4>3. 成母牛分组</h4>
 <ul>
 <li><b>已孕牛：</b>repro_status 为 "初检孕" 或 "复检孕"</li>
+<li><b>暂不选配牛：</b>repro_status 为 "已配"、"干奶" 或 "禁配"</li>
 <li><b>难孕牛：</b>泌乳天数(DIM) ≥ 150 且未孕</li>
 <li><b>未孕牛：</b>非已孕且非难孕的成母牛</li>
 </ul>
 
 <h4>4. 遗传物质分配规则</h4>
 <ol>
-<li><b>已孕牛和难孕牛：</b>统一使用非性控</li>
+<li><b>已孕牛、难孕牛和暂不选配牛：</b>统一标记为非性控；暂不选配牛不应勾选进入本轮选配</li>
 <li><b>后备牛各周期：</b>
   <ul>
   <li>先按ranking排序（从小到大）</li>
@@ -695,4 +697,4 @@ class AutoGroupingDialog(QDialog):
         layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
         
         # 显示对话框
-        dialog.exec() 
+        dialog.exec()

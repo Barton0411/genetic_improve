@@ -621,7 +621,9 @@ def _calculate_inbreeding_coefficients(results, progress_cb=None):
                         offspring_contributions = {bull_id: offspring_inbreeding}
                         offspring_paths = {bull_id: [(f"{bull_id} → 后代 ← {cow_id} ← {bull_id}", offspring_inbreeding, 0, 1, bull_f)]}
 
-                    result['后代近交系数'] = f"{offspring_inbreeding:.2%}"
+                    # 保留到0.001个百分点，避免6.25%阈值附近因显示值
+                    # 过早四舍五入而改变后续选配判断。
+                    result['后代近交系数'] = f"{offspring_inbreeding:.3%}"
                     result['后代近交详情'] = {
                         'system': offspring_inbreeding,
                         'common_ancestors': offspring_contributions,
@@ -682,7 +684,7 @@ def _collect_abnormal_pairs(results):
                         '父号': result['父号'],
                         '公牛号': result.get('配种公牛号', result.get('备选公牛号')),
                         '异常类型': '近交系数过高',
-                        '状态': f'{inbreeding_value:.2%}'
+                        '状态': f'{inbreeding_value:.3%}'
                     })
                     inbreeding_count += 1
             except (ValueError, TypeError):
@@ -720,11 +722,17 @@ def _upload_missing_bulls(missing_bulls, source):
 
 # ============ Excel报告 ============
 
-def run_excel_report(project_path, progress_cb=None, service_staff=None):
+def run_excel_report(
+    project_path,
+    progress_cb=None,
+    service_staff=None,
+    farm_name=None,
+):
     """生成Excel综合报告"""
     from core.excel_report.generator import ExcelReportGenerator
     gen = ExcelReportGenerator(project_path, service_staff=service_staff,
-                                progress_callback=progress_cb)
+                                progress_callback=progress_cb,
+                                farm_name=farm_name)
     return gen.generate()
 
 

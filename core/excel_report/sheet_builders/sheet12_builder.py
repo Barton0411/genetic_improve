@@ -106,7 +106,15 @@ class Sheet12Builder(BaseSheetBuilder):
         start_row += 1
 
         # 在群母牛总数说明行
-        summary_text = f"在群母牛总数：成母牛{bull['mature_cow_count']}头 + 后备牛{bull['heifer_count']}头 = 全群{bull['total_cow_count']}头"
+        coverage = bull.get('gene_coverage', {})
+        summary_text = (
+            f"在群母牛总数：成母牛{bull['mature_cow_count']}头 + "
+            f"后备牛{bull['heifer_count']}头 = 全群{bull['total_cow_count']}头；"
+            f"隐性基因可评估：成母牛{coverage.get('mature_evaluable', 0)}头 + "
+            f"后备牛{coverage.get('heifer_evaluable', 0)}头 = "
+            f"全群{coverage.get('total_evaluable', 0)}头，"
+            f"缺失{coverage.get('missing', bull['total_cow_count'])}头"
+        )
         cell = self.ws.cell(row=start_row, column=1, value=summary_text)
         cell.font = Font(size=10, italic=True)
         cell.alignment = Alignment(horizontal='left', vertical='center')
@@ -116,11 +124,11 @@ class Sheet12Builder(BaseSheetBuilder):
         # 表头
         headers = [
             '基因',
-            f'成母牛-纯合\n(总{bull["mature_cow_count"]}头)',
+            f'成母牛-纯合\n(可评估{coverage.get("mature_evaluable", 0)}/总{bull["mature_cow_count"]}头)',
             '占比',
-            f'后备牛-纯合\n(总{bull["heifer_count"]}头)',
+            f'后备牛-纯合\n(可评估{coverage.get("heifer_evaluable", 0)}/总{bull["heifer_count"]}头)',
             '占比',
-            f'全群-纯合\n(总{bull["total_cow_count"]}头)',
+            f'全群-纯合\n(可评估{coverage.get("total_evaluable", 0)}/总{bull["total_cow_count"]}头)',
             '占比'
         ]
 

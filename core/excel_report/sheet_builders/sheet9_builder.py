@@ -41,17 +41,21 @@ class Sheet9Builder(BaseSheetBuilder):
                 logger.warning("Sheet9: 缺少数据，跳过生成")
                 return
 
-            # 创建Sheet
-            self._create_sheet("已用公牛性状明细")
-            logger.info("构建Sheet 9: 已用公牛性状明细")
-
             yearly_details = data.get('yearly_details', {})
             trait_columns = data.get('trait_columns', [])
             year_range = data.get('year_range', [])
 
-            if not yearly_details:
+            has_content = any(
+                detail_df is not None and not detail_df.empty
+                for detail_df in yearly_details.values()
+            )
+            if not has_content:
                 logger.warning("Sheet9: 没有年度数据")
                 return
+
+            # 创建Sheet
+            self._create_sheet("已用公牛性状明细")
+            logger.info("构建Sheet 9: 已用公牛性状明细")
 
             current_row = 1
 

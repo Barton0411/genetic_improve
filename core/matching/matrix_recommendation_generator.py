@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 
 class MatrixRecommendationGenerator:
     """生成完整配对矩阵的推荐生成器"""
+
+    BULL_ID_COLUMNS = [
+        '原始备选公牛号', '备选公牛号', '公牛号', 'sire_id', 'bull_id'
+    ]
     
     def __init__(self, project_path: Path):
         self.project_path = project_path
@@ -25,6 +29,33 @@ class MatrixRecommendationGenerator:
         self.group_manager = None  # 分组管理器
         self.last_error = None  # 存储最后的错误信息
         self.skipped_bulls = []  # 存储被跳过的公牛
+
+    @staticmethod
+    def _is_valid_identifier(value) -> bool:
+        if pd.isna(value):
+            return False
+        text = str(value).strip()
+        return bool(text) and text.lower() not in {'nan', 'none', 'null'}
+
+    @classmethod
+    def _resolve_row_bull_id(cls, row) -> str:
+        """逐行选择可用的公牛号，原始短号为空时回退到标准号。"""
+        for column in cls.BULL_ID_COLUMNS:
+            if column in row.index and cls._is_valid_identifier(row[column]):
+                return str(row[column]).strip()
+        return ''
+
+    @classmethod
+    def _bull_id_match_mask(cls, frame: pd.DataFrame, bull_id: str):
+        """在所有可用公牛号列中匹配，避免整列优先级造成半表失配。"""
+        mask = pd.Series(False, index=frame.index)
+        target = str(bull_id).strip()
+        for column in cls.BULL_ID_COLUMNS:
+            if column not in frame.columns:
+                continue
+            values = frame[column].where(frame[column].notna(), '').astype(str).str.strip()
+            mask |= values.eq(target)
+        return mask
         
     def load_data(self, skip_missing_bulls: bool = False) -> bool:
         """加载所需数据
@@ -137,17 +168,29 @@ class MatrixRecommendationGenerator:
             # 确保母牛号和公牛号保持为字符串格式
             if '母牛号' in self.inbreeding_data.columns:
                 self.inbreeding_data['母牛号'] = self.inbreeding_data['母牛号'].astype(str)
-            if '原始备选公牛号' in self.inbreeding_data.columns:
-                self.inbreeding_data['原始备选公牛号'] = self.inbreeding_data['原始备选公牛号'].astype(str)
+            for column in self.BULL_ID_COLUMNS:
+                if column in self.inbreeding_data.columns:
+                    self.inbreeding_data[column] = self.inbreeding_data[
+                        column
+                    ].where(
+                        self.inbreeding_data[column].notna(), ''
+                    ).astype(str)
             logger.info(f"从 {latest_file.name} 加载了近交系数数据")
             
             # 验证数据完整性
-            required_cols = ['母牛号', '原始备选公牛号', '后代近交系数']
+            required_cols = ['母牛号', '后代近交系数']
             missing_cols = [col for col in required_cols if col not in self.inbreeding_data.columns]
             if missing_cols:
                 error_msg = f"近交系数文件缺少必要列: {missing_cols}"
                 logger.error(error_msg)
                 self.last_error = error_msg
+                return False
+            if not any(
+                col in self.inbreeding_data.columns
+                for col in self.BULL_ID_COLUMNS
+            ):
+                self.last_error = "近交系数文件缺少备选公牛号列"
+                logger.error(self.last_error)
                 return False
                 
             return True
@@ -526,17 +569,18 @@ class MatrixRecommendationGenerator:
 
         # 找到实际的列名
         cow_cols = ['母牛号', 'dam_id', 'cow_id']
-        bull_cols = ['原始备选公牛号', '备选公牛号', '公牛号', 'sire_id', 'bull_id']
         coeff_cols = ['后代近交系数', '近交系数', 'inbreeding_coefficient']
 
         cow_col = next((col for col in cow_cols if col in self.inbreeding_data.columns), None)
-        bull_col = next((col for col in bull_cols if col in self.inbreeding_data.columns), None)
         coeff_col = next((col for col in coeff_cols if col in self.inbreeding_data.columns), None)
 
-        if cow_col and bull_col and coeff_col:
+        if cow_col and coeff_col:
             # 构建查找字典，一次遍历
             for _, row in self.inbreeding_data.iterrows():
-                key = (str(row[cow_col]), str(row[bull_col]))
+                row_bull_id = self._resolve_row_bull_id(row)
+                if not row_bull_id:
+                    continue
+                key = (str(row[cow_col]), row_bull_id)
                 value = row[coeff_col]
                 if pd.notna(value):
                     if isinstance(value, str) and '%' in value:
@@ -555,7 +599,12 @@ class MatrixRecommendationGenerator:
         inbreeding_matrix = pd.DataFrame(result, index=cow_ids, columns=bull_ids)
 
         # 向量化格式化
-        formatted_matrix = inbreeding_matrix.applymap(lambda x: f"{x*100:.3f}%")
+        # DataFrame.applymap was removed in pandas 3.0. Apply Series.map
+        # column-by-column so the desktop app remains compatible with both
+        # older pandas releases and the current runtime.
+        formatted_matrix = inbreeding_matrix.apply(
+            lambda column: column.map(lambda x: f"{x*100:.3f}%")
+        )
 
         non_zero_count = (inbreeding_matrix > 0).sum().sum()
         logger.info(f"近交系数矩阵：非零值数量 = {non_zero_count}/{len(cow_ids)*len(bull_ids)}")
@@ -633,26 +682,29 @@ class MatrixRecommendationGenerator:
         try:
             # 尝试不同的列名组合
             cow_cols = ['母牛号', 'dam_id', 'cow_id']
-            bull_cols = ['原始备选公牛号', '备选公牛号', '公牛号', 'sire_id', 'bull_id']
             coeff_cols = ['后代近交系数', '近交系数', 'inbreeding_coefficient']  # 优先使用后代近交系数
             
             # 找到实际的列名
             cow_col = next((col for col in cow_cols if col in self.inbreeding_data.columns), None)
-            bull_col = next((col for col in bull_cols if col in self.inbreeding_data.columns), None)
             coeff_col = next((col for col in coeff_cols if col in self.inbreeding_data.columns), None)
             
-            if not all([cow_col, bull_col, coeff_col]):
-                logger.debug(f"缺少必要列: cow_col={cow_col}, bull_col={bull_col}, coeff_col={coeff_col}")
+            if not all([cow_col, coeff_col]):
+                logger.debug(
+                    f"缺少必要列: cow_col={cow_col}, coeff_col={coeff_col}"
+                )
                 return 0.0
                 
             # 查找数据
-            mask = (self.inbreeding_data[cow_col].astype(str) == str(cow_id)) & \
-                   (self.inbreeding_data[bull_col].astype(str) == str(bull_id))
+            mask = (
+                self.inbreeding_data[cow_col].astype(str) == str(cow_id)
+            ) & self._bull_id_match_mask(self.inbreeding_data, bull_id)
             
             # 调试特定配对
             if cow_id == '24115' and bull_id == '007HO16284':
                 logger.debug(f"调试配对 24115-007HO16284:")
-                logger.debug(f"  使用列: {cow_col}={cow_id}, {bull_col}={bull_id}")
+                logger.debug(
+                    f"  使用列: {cow_col}={cow_id}, 公牛号={bull_id}"
+                )
                 logger.debug(f"  找到记录数: {mask.sum()}")
                 if mask.any():
                     row = self.inbreeding_data.loc[mask].iloc[0]
@@ -701,18 +753,16 @@ class MatrixRecommendationGenerator:
         try:
             # 尝试不同的列名组合
             cow_cols = ['母牛号', 'dam_id', 'cow_id']
-            bull_cols = ['原始备选公牛号', '备选公牛号', '公牛号', 'sire_id', 'bull_id']
-            
             # 找到实际的列名
             cow_col = next((col for col in cow_cols if col in self.genetic_defect_data.columns), None)
-            bull_col = next((col for col in bull_cols if col in self.genetic_defect_data.columns), None)
             
-            if not all([cow_col, bull_col]):
+            if not cow_col:
                 return "Safe"
                 
             # 查找数据
-            mask = (self.genetic_defect_data[cow_col].astype(str) == str(cow_id)) & \
-                   (self.genetic_defect_data[bull_col].astype(str) == str(bull_id))
+            mask = (
+                self.genetic_defect_data[cow_col].astype(str) == str(cow_id)
+            ) & self._bull_id_match_mask(self.genetic_defect_data, bull_id)
                    
             if mask.any():
                 row = self.genetic_defect_data.loc[mask].iloc[0]
@@ -745,16 +795,17 @@ class MatrixRecommendationGenerator:
 
         # 找到实际的列名
         cow_cols = ['母牛号', 'dam_id', 'cow_id']
-        bull_cols = ['原始备选公牛号', '备选公牛号', '公牛号', 'sire_id', 'bull_id']
         coeff_cols = ['后代近交系数', '近交系数', 'inbreeding_coefficient']
 
         cow_col = next((col for col in cow_cols if col in self.inbreeding_data.columns), None)
-        bull_col = next((col for col in bull_cols if col in self.inbreeding_data.columns), None)
         coeff_col = next((col for col in coeff_cols if col in self.inbreeding_data.columns), None)
 
-        if cow_col and bull_col and coeff_col:
+        if cow_col and coeff_col:
             for _, row in self.inbreeding_data.iterrows():
-                key = (str(row[cow_col]), str(row[bull_col]))
+                row_bull_id = self._resolve_row_bull_id(row)
+                if not row_bull_id:
+                    continue
+                key = (str(row[cow_col]), row_bull_id)
                 value = row[coeff_col]
                 if pd.notna(value):
                     if isinstance(value, str) and '%' in value:
@@ -772,19 +823,19 @@ class MatrixRecommendationGenerator:
 
         # 找到实际的列名
         cow_cols = ['母牛号', 'dam_id', 'cow_id']
-        bull_cols = ['原始备选公牛号', '备选公牛号', '公牛号', 'sire_id', 'bull_id']
-
         cow_col = next((col for col in cow_cols if col in self.genetic_defect_data.columns), None)
-        bull_col = next((col for col in bull_cols if col in self.genetic_defect_data.columns), None)
 
         defect_genes = ['HH1', 'HH2', 'HH3', 'HH4', 'HH5', 'HH6',
                        'MW', 'BLAD', 'CVM', 'DUMPS', 'Citrullinemia',
                        'Brachyspina', 'Factor XI', 'Mulefoot',
                        'Cholesterol deficiency', 'Chondrodysplasia']
 
-        if cow_col and bull_col:
+        if cow_col:
             for _, row in self.genetic_defect_data.iterrows():
-                key = (str(row[cow_col]), str(row[bull_col]))
+                row_bull_id = self._resolve_row_bull_id(row)
+                if not row_bull_id:
+                    continue
+                key = (str(row[cow_col]), row_bull_id)
 
                 # 检查各种隐性基因
                 for gene in defect_genes:

@@ -18,7 +18,10 @@ import logging
 import pandas as pd
 
 from api.yqn_api_client import YQNApiClient
+from api.hmy_api_client import HMYApiClient
+from core.data.hmy_data_converter import HMYDataConverter
 from core.data.yqn_data_converter import YQNDataConverter
+from config.hmy_access import is_hmy_user_allowed
 from utils.file_manager import FileManager
 from core.data.uploader import upload_and_standardize_cow_data
 
@@ -220,6 +223,76 @@ class DataDownloadWorker(QThread):
             self.error.emit(f"处理失败: {str(e)}")
 
 
+class HMYDataDownloadWorker(QThread):
+    """慧牧云牛群数据下载和标准化线程（不读取配种记录或冻精库存）。"""
+
+    progress = pyqtSignal(int, str)
+    finished = pyqtSignal(Path)
+    error = pyqtSignal(str)
+
+    def __init__(self, api_client, farms, project_path, is_merged=False):
+        super().__init__()
+        self.api_client = api_client
+        self.farms = farms
+        self.project_path = Path(project_path)
+        self.is_merged = is_merged
+
+    def run(self):
+        try:
+            all_api_data = []
+            total_farms = len(self.farms)
+            for index, farm in enumerate(self.farms):
+                pct = 5 + int(index / max(total_farms, 1) * 45)
+                self.progress.emit(pct, f"正在下载 {farm['name']} 牛群数据...")
+                api_data = self.api_client.get_farm_herd(farm["code"])
+                farm["cow_count"] = len(api_data.get("data") or [])
+                all_api_data.append((farm["code"], api_data))
+
+            self.progress.emit(55, "正在合并牛群数据...")
+            if self.is_merged:
+                merged_data = HMYDataConverter.merge_herd_data(all_api_data)
+            else:
+                merged_data = all_api_data[0][1]
+
+            raw_dir = self.project_path / "raw_data"
+            raw_dir.mkdir(parents=True, exist_ok=True)
+            excel_path = raw_dir / "cow_data.xlsx"
+            HMYDataConverter.convert_herd_to_excel(merged_data, excel_path)
+
+            self.progress.emit(65, "正在标准化慧牧云牛群数据...")
+
+            def standardize_progress(*args):
+                if not args:
+                    return
+                value = args[0]
+                message = args[1] if len(args) > 1 else ""
+                try:
+                    numeric_value = float(value)
+                except (TypeError, ValueError):
+                    # 标准化器有少量仅发送文字状态的回调。
+                    self.progress.emit(65, f"标准化: {message or value}")
+                    return
+                self.progress.emit(
+                    65 + int(numeric_value * 0.3),
+                    f"标准化: {message or value}",
+                )
+
+            upload_and_standardize_cow_data(
+                input_files=[excel_path],
+                project_path=self.project_path,
+                progress_callback=standardize_progress,
+                source_system="慧牧云",
+            )
+            FileManager.save_project_metadata(
+                self.project_path, self.farms, data_source="慧牧云"
+            )
+            self.progress.emit(100, "慧牧云牧场项目创建成功")
+            self.finished.emit(excel_path)
+        except Exception as exc:
+            logging.getLogger(__name__).exception("慧牧云数据下载处理失败")
+            self.error.emit(f"处理失败: {exc}")
+
+
 class FarmListItem(QWidget):
     """牧场列表项（带勾选框）"""
 
@@ -268,7 +341,7 @@ class FarmListItem(QWidget):
 
 
 class FarmSelectionPage(QWidget):
-    """伊起牛牧场数据对接页面 - 支持多选"""
+    """牧场数据对接页面，支持伊起牛和慧牧云。"""
 
     project_created = pyqtSignal(Path)  # 项目创建完成信号，携带项目路径
     user_name_fetched = pyqtSignal(str)  # 获取到用户真实姓名
@@ -277,6 +350,13 @@ class FarmSelectionPage(QWidget):
         super().__init__(parent)
         self.yqn_token = yqn_token
         self.username = username  # 登录账号，作为姓名获取失败时的 fallback
+        self.hmy_access_allowed = is_hmy_user_allowed(username)
+        if yqn_token:
+            self.data_source = "伊起牛"
+        elif self.hmy_access_allowed:
+            self.data_source = "慧牧云"
+        else:
+            self.data_source = ""
         self.api_client = None
         self.all_farms = []  # 所有牧场数据
         self.selected_farms = {}  # 已选牧场 {farm_code: farm_data}
@@ -286,12 +366,9 @@ class FarmSelectionPage(QWidget):
 
         self.init_ui()
 
-        if self.yqn_token:
-            self.logger.info(f"FarmSelectionPage: 检测到token，长度={len(self.yqn_token)}")
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(500, self.init_api_client)
-        else:
-            self.logger.warning("FarmSelectionPage: 未检测到token!")
+        from PyQt6.QtCore import QTimer
+        if self.data_source:
+            QTimer.singleShot(500, lambda: self.switch_data_source(self.data_source))
 
     def init_ui(self):
         """初始化UI"""
@@ -304,11 +381,22 @@ class FarmSelectionPage(QWidget):
         header_layout.setSpacing(20)
 
         # 标题
-        title_label = QLabel("🐄 伊起牛牧场数据对接")
+        title_label = QLabel("🐄 牧场数据对接")
         title_font = QFont("微软雅黑", 16, QFont.Weight.Bold)
         title_label.setFont(title_font)
         title_label.setStyleSheet("color: #303133;")
         header_layout.addWidget(title_label)
+
+        self.source_buttons = {}
+        for source in ("伊起牛", "慧牧云"):
+            button = QPushButton(source)
+            button.setCheckable(True)
+            button.setMinimumWidth(90)
+            button.clicked.connect(
+                lambda checked=False, selected=source: self.switch_data_source(selected)
+            )
+            self.source_buttons[source] = button
+            header_layout.addWidget(button)
 
         header_layout.addStretch()
 
@@ -367,6 +455,7 @@ class FarmSelectionPage(QWidget):
 
         # 状态筛选
         status_group = QGroupBox("状态筛选")
+        self.status_filter_widget = status_group
         status_group.setStyleSheet("""
             QGroupBox {
                 font-size: 13px;
@@ -412,6 +501,7 @@ class FarmSelectionPage(QWidget):
 
         # 牧场类型筛选（多选，两列布局）
         type_group = QGroupBox("牧场类型")
+        self.type_filter_widget = type_group
         type_group.setStyleSheet("""
             QGroupBox {
                 font-size: 13px;
@@ -583,8 +673,8 @@ class FarmSelectionPage(QWidget):
         warning_layout.addWidget(warning_title)
 
         warning_items = [
-            "· 牛号将添加牧场站号前缀避免重号",
-            "· 以下功能将被禁用：基因组检测数据、体型外貌数据、个体选配"
+            "· 牛号和母亲号将添加牧场站号前缀避免重号",
+            "· 分析功能将根据当前数据源和已上传数据动态开放"
         ]
         for item in warning_items:
             item_label = QLabel(item)
@@ -672,17 +762,84 @@ class FarmSelectionPage(QWidget):
         bottom_layout.addWidget(self.auto_report_btn)
 
         layout.addLayout(bottom_layout)
-
-        # 如果没有token，显示提示信息
         if not self.yqn_token:
-            self.show_no_token_message()
-
+            self.source_buttons["伊起牛"].setEnabled(False)
+            self.source_buttons["伊起牛"].setToolTip("伊起牛数据源需要伊起牛账号登录")
+        if not self.hmy_access_allowed:
+            self.source_buttons["慧牧云"].setEnabled(False)
+            self.source_buttons["慧牧云"].setToolTip("当前账号未开通慧牧云功能")
+            if not self.yqn_token:
+                self.region_title_label.setText("当前账号没有可用的数据源")
+    # 无伊起牛 token 时保留慧牧云入口。
     def show_no_token_message(self):
         """显示无token提示"""
-        self.search_input.setEnabled(False)
-        self.region_tree.setEnabled(False)
-        self.farm_list.setEnabled(False)
+        self.source_buttons["伊起牛"].setEnabled(False)
 
+    def _update_source_button_styles(self):
+        active = """
+            QPushButton { background:#409eff; color:white; border:1px solid #3a8ee6;
+                          border-radius:4px; padding:7px 18px; font-weight:bold; }
+        """
+        normal = """
+            QPushButton { background:#ffffff; color:#409eff; border:1px solid #409eff;
+                          border-radius:4px; padding:7px 18px; font-weight:bold; }
+            QPushButton:hover { background:#ecf5ff; }
+        """
+        for source, button in self.source_buttons.items():
+            button.setChecked(source == self.data_source)
+            button.setStyleSheet(active if source == self.data_source else normal)
+
+    def switch_data_source(self, source: str):
+        """切换牧场数据来源，不允许跨来源混合选择。"""
+        if source == "伊起牛" and not self.yqn_token:
+            QMessageBox.information(self, "提示", "伊起牛数据源需要使用伊起牛账号登录")
+            return
+        if source == "慧牧云" and not self.hmy_access_allowed:
+            QMessageBox.information(
+                self,
+                "未开通",
+                "当前账号未开通慧牧云功能。",
+            )
+            return
+
+        self.data_source = source
+        self.selected_farms.clear()
+        self.all_farms = []
+        self.farm_list.clear()
+        self.farm_list_items.clear()
+        self.region_tree.clear()
+        self.update_selection_ui()
+        self._update_source_button_styles()
+
+        is_hmy = source == "慧牧云"
+        self.status_filter_widget.setVisible(not is_hmy)
+        self.type_filter_widget.setVisible(not is_hmy)
+        if is_hmy:
+            for checkbox in self.farm_type_checkboxes:
+                checkbox.setChecked(checkbox.property("type_value") is None)
+        else:
+            for checkbox in self.farm_type_checkboxes:
+                checkbox.setChecked(
+                    checkbox.property("type_value") == "社会奶源"
+                )
+
+        try:
+            if is_hmy:
+                self.api_client = HMYApiClient()
+                self.login_user_name = self.username or ""
+                result = self.api_client.get_farm_list()
+                self.all_farms = result.get("data", [])
+                self.build_region_tree()
+                top_item = self.region_tree.topLevelItem(0)
+                if top_item:
+                    target_item = top_item.child(0) or top_item
+                    self.region_tree.setCurrentItem(target_item)
+                    self.on_region_selected(target_item, 0)
+            else:
+                self.init_api_client()
+        except Exception as exc:
+            self.api_client = None
+            QMessageBox.critical(self, "数据源初始化失败", str(exc))
     def init_api_client(self):
         """初始化API客户端并加载牧场列表"""
         self.logger.info("开始初始化伊起牛API客户端")
@@ -989,8 +1146,9 @@ class FarmSelectionPage(QWidget):
 
         if len(farm_list) >= 2:
             info_lines.append("\n⚠️ 多选模式注意：")
-            info_lines.append("• 牛号将添加牧场站号前缀")
-            info_lines.append("• 部分功能将被禁用")
+            info_lines.append("• 牛号和母亲号将添加牧场站号前缀")
+            if self.data_source == "伊起牛":
+                info_lines.append("• 部分功能将被禁用")
 
         QMessageBox.information(self, "预览选中数据", "\n".join(info_lines))
 
@@ -1005,12 +1163,15 @@ class FarmSelectionPage(QWidget):
 
         # 确认对话框
         if is_merged:
+            restriction_text = ""
+            if self.data_source == "伊起牛":
+                restriction_text = "• 基因组检测、体型外貌、个体选配功能将被禁用\n"
             confirm_msg = (
-                f"即将创建合并牧场项目\n\n"
+                f"即将创建{self.data_source}合并牧场项目\n\n"
                 f"包含 {len(farm_list)} 个牧场的数据\n\n"
                 f"⚠️ 注意：\n"
-                f"• 牛号将添加牧场站号前缀\n"
-                f"• 基因组检测、体型外貌、个体选配功能将被禁用\n\n"
+                f"• 牛号和母亲号将添加牧场站号前缀\n"
+                f"{restriction_text}\n"
                 f"是否继续?"
             )
         else:
@@ -1033,6 +1194,10 @@ class FarmSelectionPage(QWidget):
 
     def create_farm_project(self):
         """创建牧场项目"""
+        if self.data_source == "慧牧云" and not self.hmy_access_allowed:
+            QMessageBox.warning(self, "未开通", "当前账号未开通慧牧云功能。")
+            return
+
         farm_list = list(self.selected_farms.values())
         is_merged = len(farm_list) > 1
 
@@ -1053,11 +1218,15 @@ class FarmSelectionPage(QWidget):
             ]
 
             if is_merged:
-                project_path = FileManager.create_merged_project(base_path, farms_info)
+                project_path = FileManager.create_merged_project(
+                    base_path, farms_info, data_source=self.data_source
+                )
             else:
                 project_path = FileManager.create_project(base_path, farms_info[0]['name'])
                 # 单选也保存元数据
-                FileManager.save_project_metadata(project_path, farms_info)
+                FileManager.save_project_metadata(
+                    project_path, farms_info, data_source=self.data_source
+                )
 
             self.logger.info(f"项目文件夹已创建: {project_path}")
 
@@ -1072,7 +1241,12 @@ class FarmSelectionPage(QWidget):
             progress_dialog.show()
 
             # 创建后台工作线程
-            self.worker = DataDownloadWorker(
+            worker_class = (
+                HMYDataDownloadWorker
+                if self.data_source == "慧牧云"
+                else DataDownloadWorker
+            )
+            self.worker = worker_class(
                 self.api_client,
                 farms_info,
                 project_path,
@@ -1113,18 +1287,23 @@ class FarmSelectionPage(QWidget):
         # 构建成功消息
         if is_merged:
             farm_count = len(self.selected_farms)
+            restricted_text = ""
+            if self.data_source == "伊起牛":
+                restricted_text = (
+                    "\n⚠️ 以下功能已禁用:\n"
+                    "• 基因组检测数据上传\n"
+                    "• 体型外貌数据上传\n"
+                    "• 个体选配"
+                )
             success_msg = (
                 f"合并牧场项目已创建成功!\n\n"
                 f"项目位置: {project_path}\n\n"
                 f"已完成:\n"
                 f"✅ {farm_count} 个牧场数据已合并下载\n"
-                f"✅ 牛号已添加牧场前缀\n"
+                f"✅ 牛号和母亲号已添加牧场前缀\n"
                 f"✅ 数据已自动标准化\n"
-                f"✅ 已生成 merged_farms.txt 说明文件\n\n"
-                f"⚠️ 以下功能已禁用:\n"
-                f"• 基因组检测数据上传\n"
-                f"• 体型外貌数据上传\n"
-                f"• 个体选配"
+                f"✅ 已生成 merged_farms.txt 说明文件"
+                f"{restricted_text}"
             )
         else:
             farm = list(self.selected_farms.values())[0]
@@ -1133,12 +1312,20 @@ class FarmSelectionPage(QWidget):
             bull_file = Path(project_path) / "standardized_data" / "processed_bull_data.xlsx"
             bull_ready = bull_file.exists()
 
-            completed_lines = (
-                f"✅ 牛群明细已自动下载\n"
-                f"✅ 配种记录已自动下载\n"
-                f"✅ 冻精库存已自动下载并标准化\n"
-                f"✅ 数据已自动标准化"
-            )
+            if self.data_source == "慧牧云":
+                completed_lines = (
+                    "✅ 牛群明细已自动下载\n"
+                    "✅ 数据已自动标准化\n"
+                    "ℹ️ 配种记录暂不使用\n"
+                    "ℹ️ 选配结果推送暂不可用"
+                )
+            else:
+                completed_lines = (
+                    "✅ 牛群明细已自动下载\n"
+                    "✅ 配种记录已自动下载\n"
+                    "✅ 冻精库存已自动下载并标准化\n"
+                    "✅ 数据已自动标准化"
+                )
             if bull_ready:
                 completed_lines += f"\n✅ 备选公牛已从冻精库存自动生成"
 
@@ -1207,21 +1394,34 @@ class FarmSelectionPage(QWidget):
         farm_list = list(self.selected_farms.values())
         is_merged = len(farm_list) > 1
 
-        confirm_msg = (
-            "即将创建项目并自动生成报告\n\n"
-            "系统将自动执行以下步骤:\n"
-            "1. 下载并标准化牛群数据\n"
-            "2. 在群母牛关键育种数据分析\n"
-            "3. 备选公牛关键育种数据分析\n"
-            "4. 已配公牛关键育种数据分析\n"
-            "5. 母牛群指数排名 (NM$权重)\n"
-            "6. 备选公牛指数排名 (NM$权重)\n"
-            "7. 近交系数及隐性基因分析\n"
-            "8. 生成Excel综合报告\n"
-            "9. 生成PPT汇报材料\n\n"
-            "注意：不会自动进行个体选配\n\n"
-            "整个过程可能需要几分钟，是否继续?"
-        )
+        if self.data_source == "慧牧云":
+            confirm_msg = (
+                "即将创建慧牧云项目并自动生成当前可用报告\n\n"
+                "系统将自动执行:\n"
+                "1. 下载并标准化牛群数据\n"
+                "2. 在群母牛关键育种性状分析\n"
+                "3. 母牛群指数排名 (NM$权重)\n"
+                "4. 生成当前可用的Excel和PPT报告\n\n"
+                "配种记录、已配公牛和推送功能将跳过；"
+                "备选公牛需在项目创建后手动上传。\n\n"
+                "整个过程可能需要几分钟，是否继续?"
+            )
+        else:
+            confirm_msg = (
+                "即将创建项目并自动生成报告\n\n"
+                "系统将自动执行以下步骤:\n"
+                "1. 下载并标准化牛群数据\n"
+                "2. 在群母牛关键育种数据分析\n"
+                "3. 备选公牛关键育种数据分析\n"
+                "4. 已配公牛关键育种数据分析\n"
+                "5. 母牛群指数排名 (NM$权重)\n"
+                "6. 备选公牛指数排名 (NM$权重)\n"
+                "7. 近交系数及隐性基因分析\n"
+                "8. 生成Excel综合报告\n"
+                "9. 生成PPT汇报材料\n\n"
+                "注意：不会自动进行个体选配\n\n"
+                "整个过程可能需要几分钟，是否继续?"
+            )
 
         reply = QMessageBox.question(
             self,
@@ -1235,6 +1435,10 @@ class FarmSelectionPage(QWidget):
 
     def _start_auto_report(self):
         """启动自动报告生成流程"""
+        if self.data_source == "慧牧云" and not self.hmy_access_allowed:
+            QMessageBox.warning(self, "未开通", "当前账号未开通慧牧云功能。")
+            return
+
         farm_list = list(self.selected_farms.values())
         is_merged = len(farm_list) > 1
 
@@ -1254,10 +1458,14 @@ class FarmSelectionPage(QWidget):
             ]
 
             if is_merged:
-                project_path = FileManager.create_merged_project(base_path, farms_info)
+                project_path = FileManager.create_merged_project(
+                    base_path, farms_info, data_source=self.data_source
+                )
             else:
                 project_path = FileManager.create_project(base_path, farms_info[0]['name'])
-                FileManager.save_project_metadata(project_path, farms_info)
+                FileManager.save_project_metadata(
+                    project_path, farms_info, data_source=self.data_source
+                )
 
             self.logger.info(f"项目文件夹已创建: {project_path}")
 
@@ -1284,7 +1492,8 @@ class FarmSelectionPage(QWidget):
                 farms_info,
                 project_path,
                 is_merged,
-                service_staff=getattr(self, 'login_user_name', None) or ''
+                service_staff=getattr(self, 'login_user_name', None) or '',
+                data_source=self.data_source,
             )
 
             # 连接信号

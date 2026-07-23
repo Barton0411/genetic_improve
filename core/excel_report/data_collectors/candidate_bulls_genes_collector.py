@@ -164,6 +164,28 @@ def collect_candidate_bulls_genes_data(analysis_folder: Path, project_folder: Pa
             heifer_count = len(heifers)
             total_count = len(bull_data)
 
+            mother_gene_columns = [
+                f'{gene}(母)'
+                for gene in sorted_genes
+                if f'{gene}(母)' in bull_data.columns
+            ]
+            bull_gene_columns = [
+                f'{gene}(公)'
+                for gene in sorted_genes
+                if f'{gene}(公)' in bull_data.columns
+            ]
+
+            def fully_evaluable_mask(frame):
+                if not mother_gene_columns or not bull_gene_columns:
+                    return pd.Series(False, index=frame.index)
+                mother_known = frame[mother_gene_columns].ne('missing data').all(axis=1)
+                bull_known = frame[bull_gene_columns].ne('missing data').all(axis=1)
+                return mother_known & bull_known
+
+            mature_evaluable_count = int(fully_evaluable_mask(mature_cows).sum())
+            heifer_evaluable_count = int(fully_evaluable_mask(heifers).sum())
+            total_evaluable_count = int(fully_evaluable_mask(bull_data).sum())
+
             # 统计各基因
             gene_summary = []
             total_mature_homozygous = 0
@@ -173,17 +195,51 @@ def collect_candidate_bulls_genes_data(analysis_folder: Path, project_folder: Pa
                 if gene not in bull_data.columns:
                     continue
 
+                mother_gene_col = f'{gene}(母)'
+                bull_gene_col = f'{gene}(公)'
+                mature_gene_evaluable = mature_cows
+                heifer_gene_evaluable = heifers
+                bull_gene_evaluable = bull_data
+                if mother_gene_col in bull_data.columns and bull_gene_col in bull_data.columns:
+                    mature_gene_evaluable = mature_cows[
+                        mature_cows[mother_gene_col].ne('missing data')
+                        & mature_cows[bull_gene_col].ne('missing data')
+                    ]
+                    heifer_gene_evaluable = heifers[
+                        heifers[mother_gene_col].ne('missing data')
+                        & heifers[bull_gene_col].ne('missing data')
+                    ]
+                    bull_gene_evaluable = bull_data[
+                        bull_data[mother_gene_col].ne('missing data')
+                        & bull_data[bull_gene_col].ne('missing data')
+                    ]
+
                 # 成母牛纯合头数
-                mature_homozygous = len(mature_cows[mature_cows[gene] == '高风险'])
-                mature_ratio = mature_homozygous / mature_count if mature_count > 0 else 0
+                mature_homozygous = len(
+                    mature_gene_evaluable[mature_gene_evaluable[gene] == '高风险']
+                )
+                mature_ratio = (
+                    mature_homozygous / len(mature_gene_evaluable)
+                    if len(mature_gene_evaluable) > 0 else 0
+                )
 
                 # 后备牛纯合头数
-                heifer_homozygous = len(heifers[heifers[gene] == '高风险'])
-                heifer_ratio = heifer_homozygous / heifer_count if heifer_count > 0 else 0
+                heifer_homozygous = len(
+                    heifer_gene_evaluable[heifer_gene_evaluable[gene] == '高风险']
+                )
+                heifer_ratio = (
+                    heifer_homozygous / len(heifer_gene_evaluable)
+                    if len(heifer_gene_evaluable) > 0 else 0
+                )
 
                 # 全群纯合头数
-                total_homozygous = len(bull_data[bull_data[gene] == '高风险'])
-                total_ratio = total_homozygous / total_count if total_count > 0 else 0
+                total_homozygous = len(
+                    bull_gene_evaluable[bull_gene_evaluable[gene] == '高风险']
+                )
+                total_ratio = (
+                    total_homozygous / len(bull_gene_evaluable)
+                    if len(bull_gene_evaluable) > 0 else 0
+                )
 
                 gene_summary.append({
                     'gene_name': gene,
@@ -202,17 +258,21 @@ def collect_candidate_bulls_genes_data(analysis_folder: Path, project_folder: Pa
                 total_heifer_homozygous += heifer_homozygous
 
             # 计算任意基因纯合的真实头数（去重）
-            mature_any_homozygous = len(mature_cows[
-                mature_cows[sorted_genes].apply(lambda row: (row == '高风险').any(), axis=1)
-            ]) if len(sorted_genes) > 0 and len(mature_cows) > 0 else 0
+            mature_evaluable = mature_cows[fully_evaluable_mask(mature_cows)]
+            heifer_evaluable = heifers[fully_evaluable_mask(heifers)]
+            total_evaluable = bull_data[fully_evaluable_mask(bull_data)]
 
-            heifer_any_homozygous = len(heifers[
-                heifers[sorted_genes].apply(lambda row: (row == '高风险').any(), axis=1)
-            ]) if len(sorted_genes) > 0 and len(heifers) > 0 else 0
+            mature_any_homozygous = len(mature_evaluable[
+                mature_evaluable[sorted_genes].apply(lambda row: (row == '高风险').any(), axis=1)
+            ]) if len(sorted_genes) > 0 and len(mature_evaluable) > 0 else 0
 
-            total_any_homozygous = len(bull_data[
-                bull_data[sorted_genes].apply(lambda row: (row == '高风险').any(), axis=1)
-            ]) if len(sorted_genes) > 0 and len(bull_data) > 0 else 0
+            heifer_any_homozygous = len(heifer_evaluable[
+                heifer_evaluable[sorted_genes].apply(lambda row: (row == '高风险').any(), axis=1)
+            ]) if len(sorted_genes) > 0 and len(heifer_evaluable) > 0 else 0
+
+            total_any_homozygous = len(total_evaluable[
+                total_evaluable[sorted_genes].apply(lambda row: (row == '高风险').any(), axis=1)
+            ]) if len(sorted_genes) > 0 and len(total_evaluable) > 0 else 0
 
             bulls_data.append({
                 'bull_id': str(bull_id),
@@ -220,14 +280,29 @@ def collect_candidate_bulls_genes_data(analysis_folder: Path, project_folder: Pa
                 'mature_cow_count': mature_count,
                 'heifer_count': heifer_count,
                 'total_cow_count': total_count,
+                'gene_coverage': {
+                    'mature_evaluable': mature_evaluable_count,
+                    'heifer_evaluable': heifer_evaluable_count,
+                    'total_evaluable': total_evaluable_count,
+                    'missing': total_count - total_evaluable_count,
+                },
                 'gene_summary': gene_summary,
                 'total_risk': {
                     'mature_homozygous': mature_any_homozygous,
-                    'mature_ratio': mature_any_homozygous / mature_count if mature_count > 0 else 0,
+                    'mature_ratio': (
+                        mature_any_homozygous / mature_evaluable_count
+                        if mature_evaluable_count > 0 else 0
+                    ),
                     'heifer_homozygous': heifer_any_homozygous,
-                    'heifer_ratio': heifer_any_homozygous / heifer_count if heifer_count > 0 else 0,
+                    'heifer_ratio': (
+                        heifer_any_homozygous / heifer_evaluable_count
+                        if heifer_evaluable_count > 0 else 0
+                    ),
                     'total_homozygous': total_any_homozygous,
-                    'total_ratio': total_any_homozygous / total_count if total_count > 0 else 0
+                    'total_ratio': (
+                        total_any_homozygous / total_evaluable_count
+                        if total_evaluable_count > 0 else 0
+                    )
                 }
             })
 

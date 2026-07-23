@@ -76,7 +76,9 @@ class FileManager:
             raise
 
     @staticmethod
-    def create_merged_project(base_path: Path, farms: List[Dict]) -> Path:
+    def create_merged_project(
+        base_path: Path, farms: List[Dict], data_source: str = "伊起牛"
+    ) -> Path:
         """
         创建合并牧场项目目录
 
@@ -114,7 +116,7 @@ class FileManager:
             FileManager.generate_merged_farms_info(project_path, farms)
 
             # 生成项目元数据
-            FileManager.save_project_metadata(project_path, farms)
+            FileManager.save_project_metadata(project_path, farms, data_source=data_source)
 
             return project_path
         except Exception as e:
@@ -154,7 +156,9 @@ class FileManager:
         info_file.write_text("\n".join(content_lines), encoding='utf-8')
 
     @staticmethod
-    def save_project_metadata(project_path: Path, farms: List[Dict]):
+    def save_project_metadata(
+        project_path: Path, farms: List[Dict], data_source: str = "伊起牛"
+    ):
         """
         保存项目元数据
 
@@ -164,6 +168,7 @@ class FileManager:
         """
         metadata = {
             "is_merged": len(farms) > 1,
+            "data_source": data_source,
             "farms": [
                 {
                     "code": f.get('code', ''),

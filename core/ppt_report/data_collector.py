@@ -476,37 +476,34 @@ class DataCollector:
             return None
 
         try:
-            # 读取基础统计摘要（行1-4, 0-based索引0-3）
-            # 行0: 标题
-            # 行1: 总母牛数
-            # 行2: 有性控推荐
-            # 行3: 有常规推荐
-            # 行4: 无推荐
-
-            basic_stats = {
-                'total_cows': _to_int(df.iloc[1, 1]) or 0,      # 行2列B
-                'has_sexed': _to_int(df.iloc[2, 1]) or 0,       # 行3列B
-                'has_regular': _to_int(df.iloc[3, 1]) or 0,     # 行4列B
-                'no_recommendation': _to_int(df.iloc[4, 1]) or 0  # 行5列B
+            # 该 Sheet 默认以首行作为 DataFrame 表头，因此不能依赖固定
+            # iloc 偏移。按标签定位可兼容摘要前后插入说明行，也避免把
+            # “有性控推荐”误读成总母牛数。
+            stat_labels = {
+                '总母牛数': 'total_cows',
+                '有性控推荐': 'has_sexed',
+                '有常规推荐': 'has_regular',
+                '无推荐': 'no_recommendation',
             }
+            basic_stats = {key: 0 for key in stat_labels.values()}
+            for _, row in df.iterrows():
+                label = str(row.iloc[0]).strip() if not pd.isna(row.iloc[0]) else ''
+                stat_key = stat_labels.get(label)
+                if stat_key:
+                    basic_stats[stat_key] = _to_int(row.iloc[1]) or 0
 
             logger.info(f"基础统计: 总{basic_stats['total_cows']}头, "
                        f"性控{basic_stats['has_sexed']}, "
                        f"常规{basic_stats['has_regular']}, "
                        f"无推荐{basic_stats['no_recommendation']}")
 
-            # 读取分组统计（行7起）
-            # 行6: "按分组统计"标题
-            # 行7: 表头 ['分组', '母牛数', '性控推荐数', '常规推荐数']
-            # 行8-: 分组数据
-
             group_stats = []
-            header_row = 7  # 0-based索引，对应Excel的行8
+            header_rows = df.index[
+                df.iloc[:, 0].astype(str).str.strip().eq('分组')
+            ].tolist()
+            data_start_row = (header_rows[0] + 1) if header_rows else len(df)
 
-            # 从表头下一行开始读取数据
-            data_start_row = header_row + 1
-
-            for i in range(data_start_row, min(data_start_row + 20, len(df))):
+            for i in range(data_start_row, len(df)):
                 group_name = df.iloc[i, 0]
                 if pd.isna(group_name) or str(group_name).strip() == '':
                     break  # 遇到空行停止

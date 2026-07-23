@@ -14,7 +14,13 @@ logger = logging.getLogger(__name__)
 class ExcelReportGenerator:
     """Excel综合报告生成器 v1.3"""
 
-    def __init__(self, project_folder: Path, service_staff: str = None, progress_callback=None):
+    def __init__(
+        self,
+        project_folder: Path,
+        service_staff: str = None,
+        progress_callback=None,
+        farm_name: str = None,
+    ):
         """
         初始化生成器
 
@@ -26,6 +32,7 @@ class ExcelReportGenerator:
         self.project_folder = Path(project_folder)
         self.analysis_folder = self.project_folder / "analysis_results"
         self.service_staff = service_staff
+        self.farm_name = farm_name
         self.progress_callback = progress_callback
 
         # 初始化workbook
@@ -289,7 +296,12 @@ class ExcelReportGenerator:
             future_b = executor.submit(group_b_used_bulls)
             future_c = executor.submit(group_c_candidate_bulls)
             # Group D: 6个独立collector各自提交，不再串行
-            future_farm = executor.submit(collect_farm_info, self.project_folder, self.service_staff)
+            future_farm = executor.submit(
+                collect_farm_info,
+                self.project_folder,
+                self.service_staff,
+                self.farm_name,
+            )
             future_pedigree = executor.submit(collect_pedigree_data, self.analysis_folder)
             future_traits = executor.submit(collect_traits_data, self.analysis_folder, self.project_folder)
             future_cow_idx = executor.submit(collect_cow_index_data, self.analysis_folder, self.project_folder)

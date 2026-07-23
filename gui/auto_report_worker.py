@@ -26,7 +26,15 @@ class AutoReportWorker(QThread):
     parallel_start = pyqtSignal(list)           # 并行任务名称列表
     parallel_end = pyqtSignal()                 # 并行阶段结束
 
-    def __init__(self, api_client, farms, project_path, is_merged=False, service_staff=None):
+    def __init__(
+        self,
+        api_client,
+        farms,
+        project_path,
+        is_merged=False,
+        service_staff=None,
+        data_source="伊起牛",
+    ):
         """
         初始化
 
@@ -43,6 +51,7 @@ class AutoReportWorker(QThread):
         self.project_path = Path(project_path)
         self.is_merged = is_merged
         self.service_staff = service_staff
+        self.data_source = data_source
 
         # 各步骤结果跟踪
         self.results = {
@@ -93,6 +102,9 @@ class AutoReportWorker(QThread):
 
     def _phase_download_and_standardize(self):
         """Phase 1: 数据下载与标准化 (0-30%)"""
+        if self.data_source == "慧牧云":
+            return self._phase_download_and_standardize_hmy()
+
         from core.data.yqn_data_converter import YQNDataConverter
         from core.data.uploader import upload_and_standardize_cow_data
 
@@ -249,6 +261,62 @@ class AutoReportWorker(QThread):
         self.results['success_items'].append("数据下载与标准化")
         self.progress.emit(30, "数据下载与标准化完成")
 
+    def _phase_download_and_standardize_hmy(self):
+        """慧牧云仅下载牛群数据，不请求配种记录和冻精库存。"""
+        from core.data.hmy_data_converter import HMYDataConverter
+        from core.data.uploader import upload_and_standardize_cow_data
+        from utils.file_manager import FileManager
+
+        all_api_data = []
+        total_farms = len(self.farms)
+        for index, farm in enumerate(self.farms):
+            pct = int(index / max(total_farms, 1) * 10)
+            self.progress.emit(pct, f"正在下载 {farm['name']} 牛群数据...")
+            api_data = self.api_client.get_farm_herd(farm["code"])
+            farm["cow_count"] = len(api_data.get("data") or [])
+            all_api_data.append((farm["code"], api_data))
+
+        merged_data = (
+            HMYDataConverter.merge_herd_data(all_api_data)
+            if self.is_merged
+            else all_api_data[0][1]
+        )
+        raw_dir = self.project_path / "raw_data"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        excel_path = raw_dir / "cow_data.xlsx"
+        HMYDataConverter.convert_herd_to_excel(merged_data, excel_path)
+
+        self.progress.emit(12, "正在标准化慧牧云牛群数据...")
+
+        def standardize_progress(*args):
+            if not args:
+                return
+            value = args[0]
+            message = args[1] if len(args) > 1 else ""
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError):
+                self.progress.emit(12, f"标准化牛群: {message or value}")
+                return
+            self.progress.emit(
+                12 + int(numeric_value * 0.18),
+                f"标准化牛群: {message or value}",
+            )
+
+        upload_and_standardize_cow_data(
+            input_files=[excel_path],
+            project_path=self.project_path,
+            progress_callback=standardize_progress,
+            source_system="慧牧云",
+        )
+        FileManager.save_project_metadata(
+            self.project_path, self.farms, data_source="慧牧云"
+        )
+        self.results["success_items"].append("慧牧云牛群数据下载与标准化")
+        self.results["success_items"].append("配种记录不可用，已跳过")
+        self.results["success_items"].append("冻精库存不可用，备选公牛需手动上传")
+        self.progress.emit(30, "慧牧云牛群数据准备完成")
+
     def _phase_analysis(self):
         """Phase 2: 数据分析 (30-75%)
 
@@ -267,30 +335,74 @@ class AutoReportWorker(QThread):
 
         project = str(self.project_path)
 
-        # --- 第1轮: 6个独立任务并行 (30-65%) ---
-        self.progress.emit(30, "开始数据分析（6项并行）...")
+        standardized = self.project_path / "standardized_data"
+        has_bulls = (standardized / "processed_bull_data.xlsx").exists()
+        has_breeding = (standardized / "processed_breeding_data.xlsx").exists()
 
-        # 任务显示名称映射（子进度回调名 → 显示名）
-        task_display_names = [
-            "母牛性状分析", "备选公牛性状分析", "已配公牛性状分析",
-            "公牛指数排名", "已配公牛近交分析", "备选公牛近交分析"
+        task_specs = [
+            (
+                "母牛性状分析",
+                run_cow_traits,
+                (project, None, self._make_sub_progress("母牛性状分析", 30, 65)),
+            )
         ]
+        if has_bulls:
+            task_specs.extend(
+                [
+                    (
+                        "备选公牛性状分析",
+                        run_bull_traits,
+                        (project, None, self._make_sub_progress("备选公牛性状分析", 30, 65)),
+                    ),
+                    (
+                        "公牛指数排名",
+                        run_bull_index,
+                        (project, None, self._make_sub_progress("公牛指数排名", 30, 65)),
+                    ),
+                    (
+                        "备选公牛近交分析",
+                        run_inbreeding_analysis,
+                        (
+                            project,
+                            "candidate",
+                            self._make_sub_progress("备选公牛近交分析", 30, 65),
+                        ),
+                    ),
+                ]
+            )
+        else:
+            self.results["success_items"].append("备选公牛数据未上传，相关分析已跳过")
+
+        if has_breeding:
+            task_specs.extend(
+                [
+                    (
+                        "已配公牛性状分析",
+                        run_mated_bull_traits,
+                        (project, None, self._make_sub_progress("已配公牛性状分析", 30, 65)),
+                    ),
+                    (
+                        "已配公牛近交分析",
+                        run_inbreeding_analysis,
+                        (
+                            project,
+                            "mated",
+                            self._make_sub_progress("已配公牛近交分析", 30, 65),
+                        ),
+                    ),
+                ]
+            )
+        else:
+            self.results["success_items"].append("配种记录不可用，已配公牛分析已跳过")
+
+        task_display_names = [spec[0] for spec in task_specs]
+        self.progress.emit(30, f"开始数据分析（{len(task_specs)}项并行）...")
         self.parallel_start.emit(task_display_names)
 
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        with ThreadPoolExecutor(max_workers=max(1, len(task_specs))) as executor:
             futures = {
-                executor.submit(run_inbreeding_analysis, project, "candidate",
-                                self._make_sub_progress("备选公牛近交分析", 54, 65)): "备选公牛近交分析",
-                executor.submit(run_inbreeding_analysis, project, "mated",
-                                self._make_sub_progress("已配公牛近交分析", 48, 54)): "已配公牛近交分析",
-                executor.submit(run_cow_traits, project, None,
-                                self._make_sub_progress("母牛性状分析", 30, 35)): "母牛性状分析",
-                executor.submit(run_bull_traits, project, None,
-                                self._make_sub_progress("备选公牛性状分析", 35, 40)): "备选公牛性状分析",
-                executor.submit(run_mated_bull_traits, project, None,
-                                self._make_sub_progress("已配公牛性状分析", 40, 44)): "已配公牛性状分析",
-                executor.submit(run_bull_index, project, None,
-                                self._make_sub_progress("公牛指数排名", 44, 48)): "公牛指数排名",
+                executor.submit(function, *args): name
+                for name, function, args in task_specs
             }
 
             for future in as_completed(futures):
@@ -342,8 +454,13 @@ class AutoReportWorker(QThread):
             self.progress.emit(mapped, f"Excel报告: {msg or f'{pct}%'}")
 
         try:
+            if len(self.farms) == 1:
+                farm_name = self.farms[0].get('name', '牧场')
+            else:
+                farm_name = "合并牧场"
             success, msg = run_excel_report(self.project_path, excel_progress,
-                                               service_staff=self.service_staff)
+                                               service_staff=self.service_staff,
+                                               farm_name=farm_name)
             if success:
                 self.results['success_items'].append("Excel综合报告")
                 # 查找生成的Excel文件

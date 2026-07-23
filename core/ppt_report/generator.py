@@ -3,6 +3,9 @@
 """
 
 import logging
+import json
+import re
+import zipfile
 from pathlib import Path
 from typing import Optional, Tuple, Callable
 from datetime import datetime
@@ -145,6 +148,7 @@ class ExcelBasedPPTGenerator:
             # 4.5 清理空数据页面
             self._report_progress(progress_callback, "正在清理空数据页面...", 90)
             self._cleanup_empty_slides()
+            self._cleanup_hmy_optional_sections()
 
             # 5. 保存PPT (90-100%)
             self._report_progress(progress_callback, "正在保存PPT文件...", 90)
@@ -244,6 +248,9 @@ class ExcelBasedPPTGenerator:
             self._report_progress(progress_callback, "正在读取Excel报告数据...", 3)
             data = self.data_collector.collect_all_data()
             self.farm_info = data.get('farm_info_dict', {}) or {}
+            if self.farm_name and self.farm_name != "牧场":
+                self.farm_info["farm_name"] = self.farm_name
+                data["farm_info_dict"] = self.farm_info
             self._report_progress(progress_callback, "✓ 数据读取完成", 12)
 
             self._report_progress(progress_callback, "正在创建PPT...", 12)
@@ -283,18 +290,60 @@ class ExcelBasedPPTGenerator:
     def _save_presentation(self) -> Path:
         """保存PPT文件"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        farm_name = (self.farm_info.get("farm_name") or self.farm_name or "牧场").strip()
-        filename = f"{farm_name}牧场育种分析报告_{timestamp}.pptx"
+        # 调用方传入的牧场名称比项目目录名更可靠。自动报告的临时项目
+        # 目录可能是随机名称，不应覆盖真实牧场名。
+        farm_name = (self.farm_name or self.farm_info.get("farm_name") or "牧场").strip()
+        report_farm_name = farm_name if farm_name.endswith("牧场") else f"{farm_name}牧场"
+        filename = f"{report_farm_name}育种分析报告_{timestamp}.pptx"
 
         # 报告输出到 reports 目录；analysis_results 仅用于中间结果
         self.reports_folder.mkdir(parents=True, exist_ok=True)
         output_path = self.reports_folder / filename
 
         self.prs.save(str(output_path))
+        self._normalize_chart_axis_ids(output_path)
         self.last_output_path = output_path
         logger.info(f"PPT已保存: {output_path}")
 
         return output_path
+
+    @staticmethod
+    def _normalize_chart_axis_ids(pptx_path: Path) -> None:
+        """
+        将模板图表中的负轴 ID 转为合法的 UInt32。
+
+        WPS 生成的部分模板会把轴 ID 保存成带符号的 32 位整数。PowerPoint
+        有时会自动修复，但严格的 OpenXML 读取器会直接拒绝该文件。轴之间
+        通过同一 ID 关联，因此按二进制等价的无符号值统一转换即可。
+        """
+        axis_id_pattern = re.compile(
+            rb'(<c:(?:axId|crossAx)\s+val=")(-\d+)(")'
+        )
+        temp_path = pptx_path.with_suffix(".normalized.pptx")
+        replacement_count = 0
+
+        try:
+            with zipfile.ZipFile(pptx_path, "r") as source_zip:
+                with zipfile.ZipFile(temp_path, "w") as target_zip:
+                    for member in source_zip.infolist():
+                        content = source_zip.read(member.filename)
+                        if member.filename.startswith("ppt/charts/") and member.filename.endswith(".xml"):
+                            def replace_axis_id(match):
+                                nonlocal replacement_count
+                                replacement_count += 1
+                                unsigned_value = int(match.group(2)) & 0xFFFFFFFF
+                                return match.group(1) + str(unsigned_value).encode("ascii") + match.group(3)
+
+                            content = axis_id_pattern.sub(replace_axis_id, content)
+                        target_zip.writestr(member, content)
+
+            temp_path.replace(pptx_path)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
+
+        if replacement_count:
+            logger.info(f"已规范化 {replacement_count} 个图表轴ID")
 
     def _report_progress(self, callback: Optional[Callable], message: str, progress: int):
         """报告进度"""
@@ -337,6 +386,181 @@ class ExcelBasedPPTGenerator:
                 logger.warning(f"删除页面 {idx} 失败: {e}")
 
         logger.info(f"✓ 空数据页面清理完成")
+
+    @staticmethod
+    def _set_shape_text(shape, value: str):
+        """替换文本并尽量保留模板中首个文本 run 的格式。"""
+        text_frame = getattr(shape, "text_frame", None)
+        if text_frame is None or not text_frame.paragraphs:
+            return
+
+        first_paragraph = text_frame.paragraphs[0]
+        if first_paragraph.runs:
+            first_paragraph.runs[0].text = value
+            for run in first_paragraph.runs[1:]:
+                run.text = ""
+        else:
+            first_paragraph.text = value
+        for paragraph in text_frame.paragraphs[1:]:
+            for run in paragraph.runs:
+                run.text = ""
+
+    def _cleanup_hmy_optional_sections(self):
+        """慧牧云报告仅保留实际有数据的章节，并同步目录编号。"""
+        metadata_path = self.project_path / "project_metadata.json"
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if metadata.get("data_source") != "慧牧云":
+            return
+
+        workbook = self._cached_workbook_data_only or self._cached_workbook
+        sheet_names = set(workbook.sheetnames) if workbook is not None else set()
+        section_titles = [
+            "牧场概况",
+            "系谱记录分析",
+            "牛群遗传评估",
+            "配种记录分析",
+            "公牛使用分析",
+            "选配推荐方案",
+            "项目总结建议",
+        ]
+        availability = {
+            "牧场概况": "牧场基础信息" in sheet_names,
+            "系谱记录分析": "系谱识别分析" in sheet_names,
+            "牛群遗传评估": bool(
+                sheet_names
+                & {
+                    "年份汇总与性状进展",
+                    "育种性状明细",
+                    "育种指数分布分析",
+                    "母牛指数排名明细",
+                }
+            ),
+            "配种记录分析": bool(
+                sheet_names
+                & {
+                    "配种记录-隐性基因分析",
+                    "配种记录-近交系数分析",
+                    "配种记录-隐性基因及近交系数明细",
+                }
+            ),
+            "公牛使用分析": bool(
+                sheet_names
+                & {
+                    "已用公牛性状汇总",
+                    "已用公牛性状明细",
+                    "备选公牛排名",
+                    "备选公牛-隐性基因分析",
+                    "备选公牛-近交系数分析",
+                    "备选公牛-明细表",
+                }
+            ),
+            "选配推荐方案": "个体选配推荐结果" in sheet_names,
+            # 当前总结页仍是模板占位内容，避免输出无数据的静态章节。
+            "项目总结建议": False,
+        }
+
+        def slide_texts(slide):
+            return {
+                shape.text.strip()
+                for shape in slide.shapes
+                if getattr(shape, "has_text_frame", False) and shape.text.strip()
+            }
+
+        cover_positions = {}
+        for index, slide in enumerate(self.prs.slides):
+            if index < 2:
+                continue
+            texts = slide_texts(slide)
+            for title in section_titles:
+                if title in texts:
+                    cover_positions[title] = index
+
+        indices_to_remove = set()
+        ordered_positions = sorted(cover_positions.values())
+        for title, start in cover_positions.items():
+            if availability.get(title, False):
+                continue
+            end = next(
+                (position for position in ordered_positions if position > start),
+                len(self.prs.slides),
+            )
+            indices_to_remove.update(range(start, end))
+
+        for index in sorted(indices_to_remove, reverse=True):
+            r_id = self.prs.slides._sldIdLst[index].rId
+            self.prs.part.drop_rel(r_id)
+            del self.prs.slides._sldIdLst[index]
+
+        surviving_titles = []
+        for title in section_titles:
+            if (
+                availability.get(title, False)
+                and title in cover_positions
+                and any(
+                    title in slide_texts(slide)
+                    for slide in list(self.prs.slides)[2:]
+                )
+            ):
+                surviving_titles.append(title)
+        number_by_title = {
+            title: f"{index:02d}"
+            for index, title in enumerate(surviving_titles, start=1)
+        }
+
+        # 更新目录：缺失章节清空，保留章节重新连续编号。
+        if len(self.prs.slides) > 1:
+            toc_slide = self.prs.slides[1]
+            text_shapes = [
+                shape
+                for shape in toc_slide.shapes
+                if getattr(shape, "has_text_frame", False) and shape.text.strip()
+            ]
+            for title in section_titles:
+                title_index = next(
+                    (
+                        index
+                        for index, shape in enumerate(text_shapes)
+                        if shape.text.strip() == title
+                    ),
+                    None,
+                )
+                if title_index is None:
+                    continue
+                number_shape = text_shapes[title_index - 1] if title_index > 0 else None
+                description_shape = (
+                    text_shapes[title_index + 1]
+                    if title_index + 1 < len(text_shapes)
+                    else None
+                )
+                if title in number_by_title:
+                    if number_shape is not None:
+                        self._set_shape_text(number_shape, number_by_title[title])
+                else:
+                    if number_shape is not None:
+                        self._set_shape_text(number_shape, "")
+                    self._set_shape_text(text_shapes[title_index], "")
+                    if description_shape is not None:
+                        self._set_shape_text(description_shape, "")
+
+        # 更新各章节封面的序号。
+        for slide in self.prs.slides:
+            texts = slide_texts(slide)
+            title = next((item for item in surviving_titles if item in texts), None)
+            if not title:
+                continue
+            for shape in slide.shapes:
+                text = getattr(shape, "text", "").strip()
+                if len(text) == 2 and text.isdigit():
+                    self._set_shape_text(shape, number_by_title[title])
+                    break
+
+        logger.info(
+            "慧牧云报告章节已按数据可用性清理: %s",
+            ", ".join(surviving_titles),
+        )
 
     # ==================== 各部分构建方法（占位） ====================
 

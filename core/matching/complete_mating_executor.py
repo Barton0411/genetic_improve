@@ -400,6 +400,30 @@ class CompleteMatingExecutor:
                 except Exception as e:
                     logger.warning(f"读取现有报告失败: {e}，将创建新报告")
 
+            # 当前已孕、已配、干奶或禁配的牛，不能保留历史选配结果。
+            # 累积更新模式会用旧的非空值补回本次空值，因此必须在合并后
+            # 再按最新分组强制清空。
+            if '分组' in final_report.columns:
+                ineligible_mask = final_report['分组'].fillna('').astype(
+                    str
+                ).str.contains('已孕牛|暂不选配牛', regex=True)
+                mating_columns = [
+                    '1选性控', '2选性控', '3选性控', '性控备注',
+                    '1选常规', '2选常规', '3选常规', '常规备注',
+                ]
+                columns_to_clear = [
+                    column for column in mating_columns
+                    if column in final_report.columns
+                ]
+                if columns_to_clear and ineligible_mask.any():
+                    final_report.loc[
+                        ineligible_mask, columns_to_clear
+                    ] = ''
+                    logger.info(
+                        "已按当前繁育状态清空 %s 头暂不选配牛的历史结果",
+                        int(ineligible_mask.sum()),
+                    )
+
             # 确保母牛号保持为字符串格式 + 修掉历史 "241215.0" 这种脏数据
             id_cols_to_clean = ['母牛号', '原始母牛号', '父号', '原始父号']
             for c in id_cols_to_clean:

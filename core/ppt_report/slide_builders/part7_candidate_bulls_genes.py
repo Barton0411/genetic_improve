@@ -4,6 +4,7 @@ Part 7: 备选公牛-隐性基因分析构建器
 """
 
 import logging
+import re
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 
@@ -376,6 +377,40 @@ class Part7CandidateBullsGenesBuilder(BaseSlideBuilder):
                 table.cell(1, 0).text = bull_data['stats']
                 self._format_cell(table.cell(1, 0), font_size=8, alignment=PP_ALIGN.LEFT)
 
+            coverage_match = re.search(
+                r'成母牛(\d+)头 \+ 后备牛(\d+)头 = 全群(\d+)头；'
+                r'隐性基因可评估：成母牛(\d+)头 \+ 后备牛(\d+)头 = '
+                r'全群(\d+)头，缺失(\d+)头',
+                bull_data.get('stats', ''),
+            )
+            if coverage_match:
+                (
+                    adult_total,
+                    heifer_total,
+                    herd_total,
+                    adult_evaluable,
+                    heifer_evaluable,
+                    herd_evaluable,
+                    _,
+                ) = coverage_match.groups()
+                headers = [
+                    '基因',
+                    f'成母牛-纯合\n(可评估{adult_evaluable}/总{adult_total}头)',
+                    '占比',
+                    f'后备牛-纯合\n(可评估{heifer_evaluable}/总{heifer_total}头)',
+                    '占比',
+                    f'全群-纯合\n(可评估{herd_evaluable}/总{herd_total}头)',
+                    '占比',
+                ]
+                for col_idx, header in enumerate(headers):
+                    table.cell(2, col_idx).text = header
+                    self._format_cell(
+                        table.cell(2, col_idx),
+                        font_size=8,
+                        alignment=PP_ALIGN.CENTER,
+                        bold=True,
+                    )
+
             # 行4-19: 16种隐性基因数据
             for i, gene_info in enumerate(bull_data['genes'][:16]):
                 row_idx = 3 + i  # 从第4行开始（索引3）
@@ -467,11 +502,26 @@ class Part7CandidateBullsGenesBuilder(BaseSlideBuilder):
             summary = bull_data.get('summary', {})
             total_count = summary.get('total_count', 0)
             total_ratio = summary.get('total_ratio', '0.0%')
+            stats = bull_data.get('stats', '')
+            missing_match = re.search(r'缺失(\d+)头', stats)
+            missing_count = int(missing_match.group(1)) if missing_match else 0
+            coverage_note = ''
+            if missing_count > 0:
+                coverage_note = (
+                    f"现有母牛父系隐性基因信息缺失{missing_count}头，"
+                    "缺失部分无法判定，需补充后再复核。"
+                )
 
             if total_count > 0:
-                return f"该公牛可能造成全群{total_count}头母牛（{total_ratio}）产生隐性基因纯合后代，建议谨慎使用。"
+                return (
+                    f"在可评估配对中，该公牛可能造成{total_count}头母牛"
+                    f"（{total_ratio}）产生隐性基因纯合后代，建议谨慎使用。"
+                    f"{coverage_note}"
+                )
             else:
-                return "该公牛与牧场母牛群隐性基因匹配良好，无风险。"
+                if coverage_note:
+                    return f"在可评估配对中未发现隐性基因纯合风险。{coverage_note}"
+                return "该公牛与牧场母牛群隐性基因匹配良好，未发现风险。"
         except Exception as e:
             logger.debug(f"    生成分析文本失败: {e}")
             return ""

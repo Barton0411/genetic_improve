@@ -29,7 +29,12 @@ class Part1CoverBuilder(BaseSlideBuilder):
         """
         super().__init__(prs, chart_creator)
         self._farm_info = farm_info or {}
-        self.farm_name = self._farm_info.get('farm_name') or fallback_farm_name
+        explicit_farm_name = (
+            fallback_farm_name
+            if fallback_farm_name and fallback_farm_name != "牧场"
+            else None
+        )
+        self.farm_name = explicit_farm_name or self._farm_info.get('farm_name') or fallback_farm_name
         excel_staff = self._farm_info.get('service_staff', '')
         self.reporter_name = (excel_staff if excel_staff and excel_staff != '未指定' else '') or fallback_reporter
         self.report_date = self._farm_info.get('report_date')
@@ -61,7 +66,12 @@ class Part1CoverBuilder(BaseSlideBuilder):
         title_shape = self._find_shape_by_name(slide, "Title 6")
         info_shape = self._find_shape_by_name(slide, "Text Placeholder 1")
 
-        title_text = f"{self.farm_name}牧场育种分析综合报告"
+        report_farm_name = (
+            self.farm_name
+            if self.farm_name.endswith("牧场")
+            else f"{self.farm_name}牧场"
+        )
+        title_text = f"{report_farm_name}育种分析综合报告"
         if title_shape and title_shape.has_text_frame:
             tf = title_shape.text_frame
             tf.clear()
@@ -223,7 +233,11 @@ class Part1CoverBuilder(BaseSlideBuilder):
 
         # 牧场名称
         p1 = title_frame.paragraphs[0]
-        p1.text = f"{self.farm_name}牧场"
+        p1.text = (
+            self.farm_name
+            if self.farm_name.endswith("牧场")
+            else f"{self.farm_name}牧场"
+        )
         p1.alignment = PP_ALIGN.CENTER
         p1.font.name = FONT_NAME_CN
         p1.font.size = Pt(48)

@@ -11,7 +11,11 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
-def collect_farm_info(project_folder: Path, service_staff: str = None) -> dict:
+def collect_farm_info(
+    project_folder: Path,
+    service_staff: str = None,
+    farm_name: str = None,
+) -> dict:
     """
     收集牧场基础信息
 
@@ -32,7 +36,7 @@ def collect_farm_info(project_folder: Path, service_staff: str = None) -> dict:
         logger.info("收集牧场基础信息...")
 
         # 1. 基本信息
-        basic_info = _collect_basic_info(project_folder, service_staff)
+        basic_info = _collect_basic_info(project_folder, service_staff, farm_name)
 
         # 2. 牛群结构统计
         herd_structure = _collect_herd_structure(project_folder)
@@ -62,7 +66,11 @@ def collect_farm_info(project_folder: Path, service_staff: str = None) -> dict:
         }
 
 
-def _collect_basic_info(project_folder: Path, service_staff: str = None) -> dict:
+def _collect_basic_info(
+    project_folder: Path,
+    service_staff: str = None,
+    farm_name: str = None,
+) -> dict:
     """
     收集基本信息
 
@@ -75,16 +83,19 @@ def _collect_basic_info(project_folder: Path, service_staff: str = None) -> dict
     """
     # 牧场名称（从项目文件夹名称获取，去掉日期后缀）
     # 例如: "ll_2025_10_06_17_13" -> "ll"
-    raw_name = project_folder.name
-    # 尝试分割，取第一部分（假设用下划线或其他分隔符分隔牧场名和日期）
-    farm_name = raw_name.split('_')[0] if '_' in raw_name else raw_name
+    if farm_name and farm_name.strip():
+        resolved_farm_name = farm_name.strip()
+    else:
+        raw_name = project_folder.name
+        # 尝试分割，取第一部分（假设用下划线或其他分隔符分隔牧场名和日期）
+        resolved_farm_name = raw_name.split('_')[0] if '_' in raw_name else raw_name
 
     # 报告生成时间
     report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # 牧场服务人员（保留原始值，显示层决定默认文本）
     return {
-        'farm_name': farm_name,
+        'farm_name': resolved_farm_name,
         'report_time': report_time,
         'service_staff': service_staff or ''
     }

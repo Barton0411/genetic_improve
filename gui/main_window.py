@@ -32,6 +32,7 @@ from core.inbreeding.inbreeding_page import InbreedingPage
 from gui.farm_selection_page import FarmSelectionPage
 warnings.filterwarnings("ignore", category=UserWarning)
 from config.settings import Settings
+from config.hmy_access import is_hmy_user_allowed
 from core.breeding_calc.cow_traits_calc import CowKeyTraitsPage
 from utils.file_manager import FileManager
 from core.data.uploader import (
@@ -377,6 +378,7 @@ class MainWindow(QMainWindow):
             # 合并项目状态
             self.is_merged_project = False
             self.merged_farms = []
+            self.project_data_source = ""
 
             # PPT后台生成状态
             self.ppt_thread = None
@@ -597,9 +599,7 @@ class MainWindow(QMainWindow):
         
         # 修改导航项结构，使用嵌套列表表示父子关系
         nav_items = []
-        # 只有伊起牛账号登录才显示"伊起牛牧场数据对接"
-        if self.login_type == "yqn":
-            nav_items.append(("伊起牛牧场数据对接", "platform", []))
+        nav_items.append(("牧场数据对接", "platform", []))
         nav_items.extend([
             ("育种项目管理", "folder", []),
             ("数据上传", "upload", []),
@@ -1157,6 +1157,14 @@ class MainWindow(QMainWindow):
 
     def select_project_by_path(self, project_path: Path):
         """根据项目路径自动选择项目"""
+        metadata = FileManager.load_project_metadata(project_path)
+        if (
+            metadata.get("data_source") == "慧牧云"
+            and not is_hmy_user_allowed(self.username)
+        ):
+            QMessageBox.warning(self, "未开通", "当前账号未开通慧牧云功能。")
+            return
+
         index = self.file_system_model.index(str(project_path))
         if index.isValid():
             self.file_tree.setCurrentIndex(index)
@@ -1194,6 +1202,14 @@ class MainWindow(QMainWindow):
             return
 
         if self.check_project_structure(project_path):
+            metadata = FileManager.load_project_metadata(project_path)
+            if (
+                metadata.get("data_source") == "慧牧云"
+                and not is_hmy_user_allowed(self.username)
+            ):
+                QMessageBox.warning(self, "未开通", "当前账号未开通慧牧云功能。")
+                return
+
             QMessageBox.information(self, "成功", f"已选择项目：{project_path.name}")
 
             # 项目切换时取消正在进行的PPT生成
@@ -1261,6 +1277,7 @@ class MainWindow(QMainWindow):
         """加载项目元数据，检查是否为合并项目"""
         self.is_merged_project = False
         self.merged_farms = []
+        self.project_data_source = ""
 
         if not self.selected_project_path:
             return
@@ -1268,6 +1285,17 @@ class MainWindow(QMainWindow):
         metadata = FileManager.load_project_metadata(self.selected_project_path)
         self.is_merged_project = metadata.get("is_merged", False)
         self.merged_farms = metadata.get("farms", [])
+        self.project_data_source = metadata.get("data_source", "")
+        if (
+            self.project_data_source == "慧牧云"
+            and not is_hmy_user_allowed(self.username)
+        ):
+            logging.warning("当前账号未开通慧牧云功能，拒绝加载慧牧云项目")
+            self.selected_project_path = None
+            self.is_merged_project = False
+            self.merged_farms = []
+            self.project_data_source = ""
+            return
 
         # 兜底：通过文件夹名称判断（防止元数据缺失）
         if not self.is_merged_project:
@@ -1278,6 +1306,35 @@ class MainWindow(QMainWindow):
 
         if self.is_merged_project:
             logging.info(f"已加载合并项目，包含 {len(self.merged_farms)} 个牧场")
+
+        breeding_file = (
+            self.selected_project_path
+            / "standardized_data"
+            / "processed_breeding_data.xlsx"
+        )
+        if hasattr(self, "mated_bull_btn"):
+            self.mated_bull_btn.setEnabled(breeding_file.exists())
+            self.mated_bull_btn.setToolTip(
+                "" if breeding_file.exists() else "当前项目没有可用的配种记录"
+            )
+        inbreeding_mated_btn = getattr(
+            getattr(self, "inbreeding_page", None), "mated_bull_btn", None
+        )
+        if inbreeding_mated_btn is not None:
+            inbreeding_mated_btn.setEnabled(breeding_file.exists())
+            inbreeding_mated_btn.setToolTip(
+                "" if breeding_file.exists() else "当前项目没有可用的配种记录"
+            )
+        if hasattr(self, "push_result_btn"):
+            self.push_result_btn.setEnabled(False)
+            if self.project_data_source == "慧牧云":
+                self.push_result_btn.setToolTip(
+                    "慧牧云选配列表当前不可用，暂不支持推送"
+                )
+            elif self.login_type != "yqn":
+                self.push_result_btn.setToolTip("仅支持伊起牛账号登录后推送")
+            else:
+                self.push_result_btn.setToolTip("")
 
     def _check_merged_project_restriction(self, feature_name: str) -> bool:
         """
@@ -1290,6 +1347,10 @@ class MainWindow(QMainWindow):
             True 表示允许使用，False 表示被禁用
         """
         if not self.is_merged_project:
+            return True
+
+        # 慧牧云多牧场已通过“牧场编码+牛号/母号”隔离，允许继续个体选配。
+        if self.project_data_source == "慧牧云" and feature_name == "个体选配":
             return True
 
         restricted_features = ["基因组检测数据", "体型外貌数据", "个体选配"]
@@ -1439,7 +1500,7 @@ class MainWindow(QMainWindow):
             text = current_item.text().strip()
 
             # 根据导航文本切换页面
-            if text == "伊起牛牧场数据对接":
+            if text == "牧场数据对接":
                 self.content_stack.setCurrentIndex(0)  # 牧场数据对接
             elif text == "育种项目管理":
                 self.content_stack.setCurrentIndex(1)  # 项目管理
@@ -3899,6 +3960,14 @@ class MainWindow(QMainWindow):
             return
 
         # 检查登录类型
+        if self.project_data_source == "慧牧云":
+            QMessageBox.information(
+                self,
+                "暂不支持推送",
+                "慧牧云选配列表当前不可用，选配结果已保存在本地，暂不支持推送。",
+            )
+            return
+
         if self.login_type != 'yqn' or not self.yqn_token:
             QMessageBox.warning(
                 self, "无法推送",
@@ -4285,9 +4354,18 @@ class MainWindow(QMainWindow):
     def on_mating_completed(self, result: dict):
         """选配完成的处理"""
         if result['success']:
-            # 启用推送按钮
+            # 慧牧云选配列表当前不可用，只保留本地选配结果。
             if hasattr(self, 'push_result_btn'):
-                self.push_result_btn.setEnabled(True)
+                can_push = (
+                    self.project_data_source != "慧牧云"
+                    and self.login_type == "yqn"
+                    and bool(self.yqn_token)
+                )
+                self.push_result_btn.setEnabled(can_push)
+                if self.project_data_source == "慧牧云":
+                    self.push_result_btn.setToolTip(
+                        "慧牧云选配列表当前不可用，暂不支持推送"
+                    )
 
             report_path = result['report_path']
 
@@ -4344,7 +4422,10 @@ class MainWindow(QMainWindow):
                 QPushButton:hover { background-color: #d35400; }
                 QPushButton:disabled { background-color: #bdc3c7; }
             """)
-            if self.login_type != 'yqn':
+            if self.project_data_source == "慧牧云":
+                push_btn.setEnabled(False)
+                push_btn.setToolTip("慧牧云选配列表当前不可用，暂不支持推送")
+            elif self.login_type != 'yqn':
                 push_btn.setEnabled(False)
                 push_btn.setToolTip("仅支持伊起牛账号登录后推送")
 

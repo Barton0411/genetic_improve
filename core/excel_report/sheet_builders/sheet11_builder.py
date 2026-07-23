@@ -196,6 +196,11 @@ class Sheet11Builder(BaseSheetBuilder):
                     value = ""
                 elif isinstance(value, pd.Timestamp):
                     value = value.strftime('%Y-%m-%d')
+                elif (
+                    col_name in ['母牛号', '母亲', '父亲', '外祖父', '外曾外祖父']
+                    or ('选' in col_name and ('性控' in col_name or '常规' in col_name))
+                ):
+                    value = str(value).strip()
                 values.append(value)
 
             self.ws.append(values)
@@ -209,6 +214,12 @@ class Sheet11Builder(BaseSheetBuilder):
                 # 应用格式
                 if col_name in ['胎次', '配次', '月龄', '泌乳天数']:
                     self.style_manager.apply_data_style(cell, alignment='center')
+                elif (
+                    col_name in ['母牛号', '母亲', '父亲', '外祖父', '外曾外祖父']
+                    or ('选' in col_name and ('性控' in col_name or '常规' in col_name))
+                ):
+                    self.style_manager.apply_data_style(cell, alignment='center')
+                    cell.number_format = '@'
                 elif col_name == '母牛指数得分':
                     self.style_manager.apply_data_style(cell, alignment='center')
                     cell.number_format = '0.00'

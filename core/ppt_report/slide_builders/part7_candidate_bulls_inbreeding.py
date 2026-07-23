@@ -139,7 +139,9 @@ class Part7CandidateBullsInbreedingBuilder(BaseSlideBuilder):
 
             # 解析数据（每头公牛12行）
             bulls_data = []
-            data_start_row = 2  # 假设从第2行开始
+            # Sheet 构建器从第1行直接写第一头公牛标题；从第2行开始会
+            # 永久漏掉第一头公牛。
+            data_start_row = 1
             row_idx = data_start_row
 
             while row_idx <= ws.max_row:
@@ -345,55 +347,106 @@ class Part7CandidateBullsInbreedingBuilder(BaseSlideBuilder):
             intervals_data = bull_data.get('intervals', [])
             high_risk_summary = bull_data.get('high_risk_summary', {})
 
-            # 填充4个区间数据（第4-7行）
             from pptx.enum.text import PP_ALIGN
 
+            adult_total = sum(
+                int(interval.get('adult_count', 0) or 0)
+                for interval in intervals_data
+            )
+            heifer_total = sum(
+                int(interval.get('heifer_count', 0) or 0)
+                for interval in intervals_data
+            )
+            herd_total = sum(
+                int(interval.get('total_count', 0) or 0)
+                for interval in intervals_data
+            )
+
+            # 覆盖模板中的示例总数和表头，避免数据行已更新、表头仍显示
+            # 旧牧场口径。
+            table.cell(1, 0).text = (
+                f"在群母牛总数：成母牛{adult_total}头 + "
+                f"后备牛{heifer_total}头 = 全群{herd_total}头"
+            )
+            self._format_cell(
+                table.cell(1, 0),
+                font_size=10,
+                alignment=PP_ALIGN.LEFT,
+            )
+
+            headers = [
+                '近交区间',
+                f'成母牛\n(总{adult_total}头)',
+                '占比',
+                f'后备牛\n(总{heifer_total}头)',
+                '占比',
+                f'全群\n(总{herd_total}头)',
+                '占比',
+                '风险等级',
+            ]
+            for col_idx, header in enumerate(headers):
+                table.cell(2, col_idx).text = header
+                self._format_cell(
+                    table.cell(2, col_idx),
+                    font_size=12,
+                    alignment=PP_ALIGN.CENTER,
+                    bold=True,
+                )
+
+            risk_levels = ['安全🟢', '低风险🟡', '高风险🔴', '极高风险🔴']
+
+            # 填充4个区间数据（第4-7行）
             for i, interval_data in enumerate(intervals_data[:4]):
                 row_idx = 3 + i  # 行4、5、6、7（索引3、4、5、6）
 
                 # 列1: 近交系数区间
-                table.cell(row_idx, 1).text = str(interval_data.get('interval', ''))
-                self._format_cell(table.cell(row_idx, 1), font_size=12, alignment=PP_ALIGN.CENTER)
+                table.cell(row_idx, 0).text = str(interval_data.get('interval', ''))
+                self._format_cell(table.cell(row_idx, 0), font_size=12, alignment=PP_ALIGN.CENTER)
 
                 # 列2-3: 成母牛
-                table.cell(row_idx, 2).text = str(interval_data.get('adult_count', 0))
+                table.cell(row_idx, 1).text = str(interval_data.get('adult_count', 0))
+                self._format_cell(table.cell(row_idx, 1), font_size=12, alignment=PP_ALIGN.CENTER)
+                table.cell(row_idx, 2).text = str(interval_data.get('adult_ratio', '0.0%'))
                 self._format_cell(table.cell(row_idx, 2), font_size=12, alignment=PP_ALIGN.CENTER)
-                table.cell(row_idx, 3).text = str(interval_data.get('adult_ratio', '0.0%'))
-                self._format_cell(table.cell(row_idx, 3), font_size=12, alignment=PP_ALIGN.CENTER)
 
                 # 列4-5: 后备牛
-                table.cell(row_idx, 4).text = str(interval_data.get('heifer_count', 0))
+                table.cell(row_idx, 3).text = str(interval_data.get('heifer_count', 0))
+                self._format_cell(table.cell(row_idx, 3), font_size=12, alignment=PP_ALIGN.CENTER)
+                table.cell(row_idx, 4).text = str(interval_data.get('heifer_ratio', '0.0%'))
                 self._format_cell(table.cell(row_idx, 4), font_size=12, alignment=PP_ALIGN.CENTER)
-                table.cell(row_idx, 5).text = str(interval_data.get('heifer_ratio', '0.0%'))
-                self._format_cell(table.cell(row_idx, 5), font_size=12, alignment=PP_ALIGN.CENTER)
 
                 # 列6-7: 全群
-                table.cell(row_idx, 6).text = str(interval_data.get('total_count', 0))
+                table.cell(row_idx, 5).text = str(interval_data.get('total_count', 0))
+                self._format_cell(table.cell(row_idx, 5), font_size=12, alignment=PP_ALIGN.CENTER)
+                table.cell(row_idx, 6).text = str(interval_data.get('total_ratio', '0.0%'))
                 self._format_cell(table.cell(row_idx, 6), font_size=12, alignment=PP_ALIGN.CENTER)
-                table.cell(row_idx, 7).text = str(interval_data.get('total_ratio', '0.0%'))
+
+                table.cell(row_idx, 7).text = risk_levels[i]
                 self._format_cell(table.cell(row_idx, 7), font_size=12, alignment=PP_ALIGN.CENTER)
 
             # 填充高风险小计（第8行，索引7）
-            table.cell(7, 1).text = high_risk_summary.get('label', '小计（高风险：>6.25%）')
+            table.cell(7, 0).text = high_risk_summary.get('label', '小计（高风险：>6.25%）')
+            self._format_cell(table.cell(7, 0), font_size=12, alignment=PP_ALIGN.CENTER, bold=True)
+
+            table.cell(7, 1).text = str(high_risk_summary.get('adult_count', 0))
             self._format_cell(table.cell(7, 1), font_size=12, alignment=PP_ALIGN.CENTER, bold=True)
 
-            table.cell(7, 2).text = str(high_risk_summary.get('adult_count', 0))
+            table.cell(7, 2).text = str(high_risk_summary.get('adult_ratio', '0.0%'))
             self._format_cell(table.cell(7, 2), font_size=12, alignment=PP_ALIGN.CENTER, bold=True)
 
-            table.cell(7, 3).text = str(high_risk_summary.get('adult_ratio', '0.0%'))
+            table.cell(7, 3).text = str(high_risk_summary.get('heifer_count', 0))
             self._format_cell(table.cell(7, 3), font_size=12, alignment=PP_ALIGN.CENTER, bold=True)
 
-            table.cell(7, 4).text = str(high_risk_summary.get('heifer_count', 0))
+            table.cell(7, 4).text = str(high_risk_summary.get('heifer_ratio', '0.0%'))
             self._format_cell(table.cell(7, 4), font_size=12, alignment=PP_ALIGN.CENTER, bold=True)
 
-            table.cell(7, 5).text = str(high_risk_summary.get('heifer_ratio', '0.0%'))
+            table.cell(7, 5).text = str(high_risk_summary.get('total_count', 0))
             self._format_cell(table.cell(7, 5), font_size=12, alignment=PP_ALIGN.CENTER, bold=True)
 
-            table.cell(7, 6).text = str(high_risk_summary.get('total_count', 0))
+            table.cell(7, 6).text = str(high_risk_summary.get('total_ratio', '0.0%'))
             self._format_cell(table.cell(7, 6), font_size=12, alignment=PP_ALIGN.CENTER, bold=True)
 
-            table.cell(7, 7).text = str(high_risk_summary.get('total_ratio', '0.0%'))
-            self._format_cell(table.cell(7, 7), font_size=12, alignment=PP_ALIGN.CENTER, bold=True)
+            table.cell(7, 7).text = ''
 
             logger.info(f"      表格数据填充: 4个区间 + 高风险小计")
 
@@ -534,7 +587,7 @@ class Part7CandidateBullsInbreedingBuilder(BaseSlideBuilder):
             # 评估整体风险水平
             if total_high_risk_ratio < 0.05:  # <5%
                 parts.append(f"该公牛与牧场母牛群的近交风险较低，高风险（>6.25%）近交占比仅{total_high_risk_ratio*100:.1f}%，")
-                parts.append("适合大范围使用。")
+                parts.append("仍需在个体选配时排除高风险组合。")
             elif total_high_risk_ratio < 0.15:  # 5%-15%
                 parts.append(f"该公牛与牧场母牛群存在一定近交风险，高风险（>6.25%）近交占比为{total_high_risk_ratio*100:.1f}%，")
                 parts.append("建议在使用时注意避开高风险母牛。")

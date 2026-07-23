@@ -34,8 +34,18 @@ def collect_mating_data(analysis_folder) -> dict:
     try:
         logger.info("开始收集个体选配数据...")
 
-        # 读取选配结果
-        df = pd.read_excel(mating_file, sheet_name="选配结果")
+        # 牛号、系谱号和推荐公牛号必须按文本读取，避免 Excel 报告中出现
+        # 科学计数法、尾随 .0 或丢失前导零。
+        id_columns = [
+            '母牛号', '母亲', '父亲', '外祖父', '外曾外祖父',
+            '1选性控', '2选性控', '3选性控',
+            '1选常规', '2选常规', '3选常规',
+        ]
+        df = pd.read_excel(
+            mating_file,
+            sheet_name="选配结果",
+            dtype={column: str for column in id_columns},
+        )
         logger.info(f"读取到 {len(df)} 条选配记录")
 
         # 收集统计摘要
