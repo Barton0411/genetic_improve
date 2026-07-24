@@ -8,6 +8,7 @@ from pathlib import Path
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+FARM_COLUMNS = ['牧场编号', '牧场名称']
 
 
 def _calculate_dynamic_distribution(df: pd.DataFrame, score_column: str, step: int) -> pd.DataFrame:
@@ -90,6 +91,45 @@ def _calculate_dynamic_distribution(df: pd.DataFrame, score_column: str, step: i
     return pd.DataFrame(distribution_data)
 
 
+def _calculate_year_summary(
+    df: pd.DataFrame,
+    year_groups: list[str],
+    score_columns: list[str],
+    total_label: str,
+) -> pd.DataFrame:
+    rows = []
+    for year_group in year_groups:
+        year_df = df[df['year_group'] == year_group]
+        if year_df.empty:
+            continue
+
+        row_data = {'出生年份': year_group, '头数': len(year_df)}
+        for score_col in score_columns:
+            trait_name = score_col.replace('_score', '')
+            avg_value = year_df[score_col].mean()
+            row_data[f'平均{trait_name}'] = (
+                round(avg_value, 2) if pd.notna(avg_value) else None
+            )
+        rows.append(row_data)
+
+    total_row = {'出生年份': total_label, '头数': len(df)}
+    for score_col in score_columns:
+        trait_name = score_col.replace('_score', '')
+        avg_value = df[score_col].mean()
+        total_row[f'平均{trait_name}'] = (
+            round(avg_value, 2) if pd.notna(avg_value) else None
+        )
+    rows.append(total_row)
+    return pd.DataFrame(rows)
+
+
+def _with_farm_columns(frame: pd.DataFrame, farm_code: str, farm_name: str) -> pd.DataFrame:
+    result = frame.copy()
+    result.insert(0, '牧场名称', farm_name)
+    result.insert(0, '牧场编号', farm_code)
+    return result
+
+
 def generate_key_traits_analysis_result(project_path: Path) -> bool:
     """
     基于processed_cow_data_key_traits_final.xlsx生成关键育种性状分析结果
@@ -111,6 +151,10 @@ def generate_key_traits_analysis_result(project_path: Path) -> bool:
             return False
 
         df = pd.read_excel(final_file)
+        from core.data.processor import add_farm_lineage_columns
+        df = add_farm_lineage_columns(
+            df, project_path, animal_id_column='cow_id'
+        )
 
         # 只保留母牛（排除公牛）
         df_all = df[df['sex'] == '母'].copy()
@@ -157,65 +201,12 @@ def generate_key_traits_analysis_result(project_path: Path) -> bool:
             f'{reference_year}年'
         ]
 
-        # === 生成在群母牛年份汇总表（主表） ===
-        result_present = []
-        for year_group in year_groups:
-            year_df = df_present[df_present['year_group'] == year_group]
-            if len(year_df) == 0:
-                continue
-
-            row_data = {'出生年份': year_group, '头数': len(year_df)}
-            for score_col in score_columns:
-                trait_name = score_col.replace('_score', '')
-                avg_value = year_df[score_col].mean()
-                if pd.notna(avg_value):
-                    row_data[f'平均{trait_name}'] = round(avg_value, 2)
-                else:
-                    row_data[f'平均{trait_name}'] = None
-            result_present.append(row_data)
-
-        # 添加在群母牛总计行
-        total_row_present = {'出生年份': '在群母牛总计', '头数': len(df_present)}
-        for score_col in score_columns:
-            trait_name = score_col.replace('_score', '')
-            avg_value = df_present[score_col].mean()
-            if pd.notna(avg_value):
-                total_row_present[f'平均{trait_name}'] = round(avg_value, 2)
-            else:
-                total_row_present[f'平均{trait_name}'] = None
-        result_present.append(total_row_present)
-
-        # === 生成全部母牛年份汇总表 ===
-        result_all = []
-        for year_group in year_groups:
-            year_df = df_all[df_all['year_group'] == year_group]
-            if len(year_df) == 0:
-                continue
-
-            row_data = {'出生年份': year_group, '头数': len(year_df)}
-            for score_col in score_columns:
-                trait_name = score_col.replace('_score', '')
-                avg_value = year_df[score_col].mean()
-                if pd.notna(avg_value):
-                    row_data[f'平均{trait_name}'] = round(avg_value, 2)
-                else:
-                    row_data[f'平均{trait_name}'] = None
-            result_all.append(row_data)
-
-        # 添加全部母牛总计行
-        total_row_all = {'出生年份': '全部母牛总计', '头数': len(df_all)}
-        for score_col in score_columns:
-            trait_name = score_col.replace('_score', '')
-            avg_value = df_all[score_col].mean()
-            if pd.notna(avg_value):
-                total_row_all[f'平均{trait_name}'] = round(avg_value, 2)
-            else:
-                total_row_all[f'平均{trait_name}'] = None
-        result_all.append(total_row_all)
-
-        # 创建结果DataFrame
-        result_df_present = pd.DataFrame(result_present)
-        result_df_all = pd.DataFrame(result_all)
+        result_df_present = _calculate_year_summary(
+            df_present, year_groups, score_columns, '在群母牛总计'
+        )
+        result_df_all = _calculate_year_summary(
+            df_all, year_groups, score_columns, '全部母牛总计'
+        )
 
         # === 生成NM$分布统计（步长300，以0为基准） ===
         nm_distribution_present = _calculate_dynamic_distribution(df_present, 'NM$_score', step=300)
@@ -235,6 +226,90 @@ def generate_key_traits_analysis_result(project_path: Path) -> bool:
             nm_distribution_all.to_excel(writer, sheet_name='全部母牛NM$分布', index=False)
             tpi_distribution_present.to_excel(writer, sheet_name='在群母牛TPI分布', index=False)
             tpi_distribution_all.to_excel(writer, sheet_name='全部母牛TPI分布', index=False)
+
+            if all(column in df_all.columns for column in FARM_COLUMNS):
+                farm_keys = (
+                    df_all[FARM_COLUMNS]
+                    .fillna('')
+                    .astype(str)
+                    .drop_duplicates()
+                )
+                farm_keys = farm_keys[farm_keys['牧场编号'].str.strip() != '']
+                if len(farm_keys) > 1:
+                    farm_present_years = []
+                    farm_all_years = []
+                    farm_present_nm = []
+                    farm_all_nm = []
+                    farm_present_tpi = []
+                    farm_all_tpi = []
+
+                    for _, farm in farm_keys.iterrows():
+                        farm_code = farm['牧场编号'].strip()
+                        farm_name = farm['牧场名称'].strip()
+                        all_subset = df_all[
+                            df_all['牧场编号'].astype(str).str.strip() == farm_code
+                        ]
+                        present_subset = df_present[
+                            df_present['牧场编号'].astype(str).str.strip() == farm_code
+                        ]
+
+                        farm_present_years.append(_with_farm_columns(
+                            _calculate_year_summary(
+                                present_subset, year_groups, score_columns, '在群母牛总计'
+                            ),
+                            farm_code,
+                            farm_name,
+                        ))
+                        farm_all_years.append(_with_farm_columns(
+                            _calculate_year_summary(
+                                all_subset, year_groups, score_columns, '全部母牛总计'
+                            ),
+                            farm_code,
+                            farm_name,
+                        ))
+                        farm_present_nm.append(_with_farm_columns(
+                            _calculate_dynamic_distribution(
+                                present_subset, 'NM$_score', step=300
+                            ),
+                            farm_code,
+                            farm_name,
+                        ))
+                        farm_all_nm.append(_with_farm_columns(
+                            _calculate_dynamic_distribution(all_subset, 'NM$_score', step=300),
+                            farm_code,
+                            farm_name,
+                        ))
+                        farm_present_tpi.append(_with_farm_columns(
+                            _calculate_dynamic_distribution(
+                                present_subset, 'TPI_score', step=500
+                            ),
+                            farm_code,
+                            farm_name,
+                        ))
+                        farm_all_tpi.append(_with_farm_columns(
+                            _calculate_dynamic_distribution(all_subset, 'TPI_score', step=500),
+                            farm_code,
+                            farm_name,
+                        ))
+
+                    pd.concat(farm_present_years, ignore_index=True).to_excel(
+                        writer, sheet_name='分牧场在群年份汇总', index=False
+                    )
+                    pd.concat(farm_all_years, ignore_index=True).to_excel(
+                        writer, sheet_name='分牧场全部年份汇总', index=False
+                    )
+                    pd.concat(farm_present_nm, ignore_index=True).to_excel(
+                        writer, sheet_name='分牧场在群NM$分布', index=False
+                    )
+                    pd.concat(farm_all_nm, ignore_index=True).to_excel(
+                        writer, sheet_name='分牧场全部NM$分布', index=False
+                    )
+                    pd.concat(farm_present_tpi, ignore_index=True).to_excel(
+                        writer, sheet_name='分牧场在群TPI分布', index=False
+                    )
+                    pd.concat(farm_all_tpi, ignore_index=True).to_excel(
+                        writer, sheet_name='分牧场全部TPI分布', index=False
+                    )
 
         logger.info(f"✓ 关键育种性状分析结果已保存: {output_file}")
         logger.info(f"  - 在群母牛: {len(df_present)}头")

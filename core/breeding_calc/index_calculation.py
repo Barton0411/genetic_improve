@@ -61,13 +61,18 @@ class IndexCalculation(BaseCowCalculation):
                 app_data = Path.home() / 'Library' / 'Application Support' / 'genetic_improve'
             weights_path = app_data / "index_weights"
         else:
-            # 开发环境，使用原来的路径
-            current_dir = Path(__file__).resolve().parent  # core/breeding_calc
-            while current_dir.name != 'genetic_improve':
-                current_dir = current_dir.parent
-            
-            # genetic_projects是genetic_improve的同级目录
-            weights_path = current_dir.parent / "genetic_projects" / "index_weights"
+            # 开发环境不能依赖仓库目录必须命名为 genetic_improve；
+            # Git worktree 或目录改名后，按固定层级定位项目根目录。
+            project_root = Path(__file__).resolve().parents[2]
+            if project_root.parent.name == ".worktrees":
+                workspace_root = project_root.parent.parent
+            else:
+                workspace_root = project_root.parent
+
+            # genetic_projects 是维护仓库所在工作区的同级数据目录。
+            weights_path = (
+                workspace_root / "genetic_projects" / "index_weights"
+            )
         
         try:
             weights_path.mkdir(parents=True, exist_ok=True)

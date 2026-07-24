@@ -183,6 +183,8 @@ class FileManager:
         metadata_file = project_path / "project_metadata.json"
         with open(metadata_file, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
+        if len(farms) > 1:
+            FileManager.generate_merged_farms_info(project_path, farms)
 
     @staticmethod
     def load_project_metadata(project_path: Path) -> Dict:

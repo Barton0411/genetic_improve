@@ -2915,6 +2915,10 @@ class InbreedingPage(QWidget):
                 self.progress_dialog.update_info(f"读取配种记录文件: {breeding_file.name}")
             
             df = pd.read_excel(breeding_file, dtype={'耳号': str, '父号': str, '冻精编号': str})
+            from core.data.processor import add_farm_lineage_columns
+            df = add_farm_lineage_columns(
+                df, project_path, animal_id_column='耳号'
+            )
 
             # 育种分析仅针对奶牛母牛：按母牛品种过滤配种记录（配种记录本身无品种列，
             # 需借助母牛档案 processed_cow_data 的 breed/sex 建立奶牛母牛白名单）
@@ -3002,6 +3006,8 @@ class InbreedingPage(QWidget):
                 
                 # 记录结果
                 result_dict = {
+                    '牧场编号': row.get('牧场编号', ''),
+                    '牧场名称': row.get('牧场名称', ''),
                     '母牛号': cow_id,
                     '配种日期': breeding_date,
                     '父号': sire_id,
@@ -3044,6 +3050,10 @@ class InbreedingPage(QWidget):
                 self.progress_dialog.update_info(f"读取备选公牛数据文件: {bull_file.name}")
             
             cow_df = pd.read_excel(cow_file)
+            from core.data.processor import add_farm_lineage_columns
+            cow_df = add_farm_lineage_columns(
+                cow_df, project_path, animal_id_column='cow_id'
+            )
             bull_df = pd.read_excel(bull_file)
 
             # 育种分析仅针对奶牛母牛：排除公牛与肉牛品种
@@ -3155,6 +3165,8 @@ class InbreedingPage(QWidget):
                     
                     # 记录结果
                     result_dict = {
+                        '牧场编号': cow_row.get('牧场编号', ''),
+                        '牧场名称': cow_row.get('牧场名称', ''),
                         '母牛号': cow_id,
                         '父号': sire_id,
                         '原始父号': original_sire_id if original_sire_id != sire_id else '',
@@ -3208,6 +3220,8 @@ class InbreedingPage(QWidget):
             for gene in self.defect_genes:
                 if result[gene] == '高风险':
                     abnormal_records.append({
+                        '牧场编号': result.get('牧场编号', ''),
+                        '牧场名称': result.get('牧场名称', ''),
                         '母牛号': result['母牛号'],
                         '父号': result['父号'],
                         '公牛号': result.get('配种公牛号', result.get('备选公牛号')),
@@ -3225,6 +3239,8 @@ class InbreedingPage(QWidget):
                     inbreeding_value = float(inbreeding_str.strip('%')) / 100
                     if inbreeding_value > 0.0625:  # 近交系数 > 6.25%
                         abnormal_records.append({
+                            '牧场编号': result.get('牧场编号', ''),
+                            '牧场名称': result.get('牧场名称', ''),
                             '母牛号': result['母牛号'],
                             '父号': result['父号'],
                             '公牛号': result.get('配种公牛号', result.get('备选公牛号')),
@@ -3484,6 +3500,10 @@ class InbreedingPage(QWidget):
             return results
 
         cow_df = pd.read_excel(cow_file, dtype={'cow_id': str})
+        from core.data.processor import add_farm_lineage_columns
+        cow_df = add_farm_lineage_columns(
+            cow_df, project_path, animal_id_column='cow_id'
+        )
         # 仅分析奶牛母牛（排除公牛与肉牛品种）
         cow_df = filter_dairy_cows(cow_df, log_prefix="母牛近交分析：")
 
@@ -3545,6 +3565,8 @@ class InbreedingPage(QWidget):
                 f_val, contrib, paths = 0.0, {}, {}
 
             result = {
+                '牧场编号': row_dict.get('牧场编号', ''),
+                '牧场名称': row_dict.get('牧场名称', ''),
                 '母牛号': cow_id,
                 '父号': sire_id,
                 '原始父号': original_sire if original_sire != sire_id else '',
@@ -3592,6 +3614,8 @@ class InbreedingPage(QWidget):
             for gene in self.defect_genes:
                 if result.get(gene) == '仅母牛父亲携带':
                     abnormal_records.append({
+                        '牧场编号': result.get('牧场编号', ''),
+                        '牧场名称': result.get('牧场名称', ''),
                         '母牛号': result['母牛号'],
                         '父号': result['父号'],
                         '公牛号': '',
@@ -3606,6 +3630,8 @@ class InbreedingPage(QWidget):
                 v = float(str(inbreeding_str).strip('%')) / 100
                 if v > 0.0625:  # 6.25%
                     abnormal_records.append({
+                        '牧场编号': result.get('牧场编号', ''),
+                        '牧场名称': result.get('牧场名称', ''),
                         '母牛号': result['母牛号'],
                         '父号': result['父号'],
                         '公牛号': '',
@@ -4069,6 +4095,36 @@ class InbreedingPage(QWidget):
                 # 导出统计表
                 if not self.stats_model.df.empty:
                     self.stats_model.df.to_excel(writer, sheet_name='统计表', index=False)
+
+                if not self.abnormal_model.df.empty:
+                    abnormal_source = self.abnormal_model.df.copy()
+                    farm_columns = ['牧场编号', '牧场名称', '异常类型']
+                    if all(column in abnormal_source.columns for column in farm_columns):
+                        abnormal_source['牧场编号'] = (
+                            abnormal_source['牧场编号']
+                            .fillna('')
+                            .astype(str)
+                            .str.strip()
+                        )
+                        abnormal_source['牧场名称'] = (
+                            abnormal_source['牧场名称']
+                            .fillna('')
+                            .astype(str)
+                            .str.strip()
+                        )
+                        abnormal_source = abnormal_source[
+                            abnormal_source['牧场编号'] != ''
+                        ]
+                        if abnormal_source['牧场编号'].nunique() > 1:
+                            farm_stats = (
+                                abnormal_source.groupby(farm_columns, dropna=False)
+                                .size()
+                                .reset_index(name='数量')
+                                .sort_values(['牧场编号', '异常类型'])
+                            )
+                            farm_stats.to_excel(
+                                writer, sheet_name='分牧场统计表', index=False
+                            )
 
             if auto_save:
                 # 弹出自定义对话框，提供打开文件选项

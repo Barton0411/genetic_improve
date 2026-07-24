@@ -1,5 +1,6 @@
 # core/data/processor.py
 import re
+import json
 import pandas as pd
 from pathlib import Path
 import numpy as np
@@ -20,6 +21,82 @@ BREED_CORRECTIONS = {
 
 # 允许的品种代码集合，包括单字母和双字母
 ALLOWED_BREED_CODES = set(BREED_CORRECTIONS.values()) | {'H', 'J', 'B', 'W', 'X', 'A', 'M', 'G'}
+
+FARM_CODE_COLUMN = "牧场编号"
+FARM_NAME_COLUMN = "牧场名称"
+
+
+def _normalize_farm_code(value) -> str:
+    """将牧场编号稳定为文本，避免 Excel 数值推断产生 .0。"""
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    if text.lower() in {"", "nan", "none", "null"}:
+        return ""
+    if re.fullmatch(r"\d+\.0", text):
+        return text[:-2]
+    return text
+
+
+def _load_project_farms(project_path: Path) -> list[dict]:
+    metadata_file = Path(project_path) / "project_metadata.json"
+    if not metadata_file.exists():
+        return []
+    try:
+        metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return []
+
+    farms = []
+    for farm in metadata.get("farms", []):
+        code = _normalize_farm_code(farm.get("code"))
+        name = str(farm.get("name") or "").strip()
+        if code or name:
+            farms.append({"code": code, "name": name})
+    return farms
+
+
+def add_farm_lineage_columns(
+    df: pd.DataFrame,
+    project_path: Path,
+    animal_id_column: str,
+) -> pd.DataFrame:
+    """补齐牧场编号、牧场名称，并把两列放在末尾以保持原列位置兼容。"""
+    result = df.copy()
+    farms = _load_project_farms(project_path)
+    name_by_code = {farm["code"]: farm["name"] for farm in farms if farm["code"]}
+
+    if FARM_CODE_COLUMN not in result.columns:
+        result[FARM_CODE_COLUMN] = ""
+    result[FARM_CODE_COLUMN] = result[FARM_CODE_COLUMN].map(_normalize_farm_code)
+
+    if farms:
+        missing_code = result[FARM_CODE_COLUMN].eq("")
+        if len(farms) == 1:
+            result.loc[missing_code, FARM_CODE_COLUMN] = farms[0]["code"]
+        elif animal_id_column in result.columns:
+            animal_ids = result[animal_id_column].fillna("").astype(str).str.strip()
+            for farm in sorted(farms, key=lambda item: len(item["code"]), reverse=True):
+                code = farm["code"]
+                if not code:
+                    continue
+                mask = result[FARM_CODE_COLUMN].eq("") & animal_ids.str.startswith(code)
+                result.loc[mask, FARM_CODE_COLUMN] = code
+
+    if FARM_NAME_COLUMN not in result.columns:
+        result[FARM_NAME_COLUMN] = ""
+    result[FARM_NAME_COLUMN] = (
+        result[FARM_NAME_COLUMN].fillna("").astype(str).str.strip()
+    )
+    mapped_names = result[FARM_CODE_COLUMN].map(name_by_code).fillna("")
+    missing_name = result[FARM_NAME_COLUMN].eq("")
+    result.loc[missing_name, FARM_NAME_COLUMN] = mapped_names[missing_name]
+    if len(farms) == 1:
+        result.loc[result[FARM_NAME_COLUMN].eq(""), FARM_NAME_COLUMN] = farms[0]["name"]
+
+    lineage_columns = [FARM_CODE_COLUMN, FARM_NAME_COLUMN]
+    other_columns = [column for column in result.columns if column not in lineage_columns]
+    return result[other_columns + lineage_columns]
 
 
 # 标准基因组检测数据列名
@@ -994,6 +1071,8 @@ def preprocess_cow_data(cow_df, progress_callback=None, source_system: str = "�
             "milk_305": ["305奶量", "305ME"],  # 伊起牛+慧牧云"305奶量"、DC305"305ME"
             "DIM": ["泌乳天数"],
             "repro_status": ["繁育状态", "繁育代号"],  # 伊起牛+慧牧云"繁育状态"、DC305"繁育代号"
+            FARM_CODE_COLUMN: [FARM_CODE_COLUMN, "farmCode", "farm_code"],
+            FARM_NAME_COLUMN: [FARM_NAME_COLUMN, "farmName", "farm_name"],
         }
 
         # 替换表头中的中文列名为英文列名
@@ -1132,7 +1211,7 @@ def preprocess_cow_data(cow_df, progress_callback=None, source_system: str = "�
             "cow_id", "breed", "sex", "sire", "dam", "mgs", "mgd", "mmgs",
             "lac", "calving_date", "birth_date", "birth_date_dam", "birth_date_mgd", "age",
             "services_time", "DIM", "peak_milk", "milk_305", "repro_status",
-            "group", "是否在场"
+            "group", "是否在场", FARM_CODE_COLUMN, FARM_NAME_COLUMN
         ]
 
         # 先添加dam相关的派生列（移到前面，在调整列顺序之前）
@@ -1483,7 +1562,8 @@ def process_cow_data_file(input_file: Path, project_path: Path, progress_callbac
         # 根据数据来源系统选择dtype配置
         if source_system == "慧牧云":
             dtype_config = {
-                '耳号': str, '父号': str, '母号': str, '外祖父': str, '外曾外祖父': str
+                '耳号': str, '父号': str, '母号': str, '外祖父': str,
+                '外曾外祖父': str, FARM_CODE_COLUMN: str
             }
         elif source_system == "优源-DC305":
             dtype_config = {
@@ -1491,7 +1571,9 @@ def process_cow_data_file(input_file: Path, project_path: Path, progress_callbac
             }
         else:  # 默认伊起牛
             dtype_config = {
-                '耳号': str, '父亲号': str, '母亲号': str, '外祖父': str, '外曾外祖父': str, '祖父': str, '与配冻精编号': str
+                '耳号': str, '父亲号': str, '母亲号': str, '外祖父': str,
+                '外曾外祖父': str, '祖父': str, '与配冻精编号': str,
+                FARM_CODE_COLUMN: str
             }
 
         df = pd.read_excel(input_file, dtype=dtype_config)
@@ -1510,6 +1592,9 @@ def process_cow_data_file(input_file: Path, project_path: Path, progress_callbac
         print("[DEBUG-FILE-5] 开始预处理母牛数据...")
         logging.info("开始预处理母牛数据...")
         df_cleaned = preprocess_cow_data(df, progress_callback, source_system)
+        df_cleaned = add_farm_lineage_columns(
+            df_cleaned, project_path, animal_id_column="cow_id"
+        )
         print(f"[DEBUG-FILE-6] 成功预处理母牛数据，处理后数据形状: {df_cleaned.shape}")
         logging.info(f"成功预处理母牛数据，处理后数据形状: {df_cleaned.shape}")
     except Exception as e:
@@ -1530,7 +1615,7 @@ def process_cow_data_file(input_file: Path, project_path: Path, progress_callbac
 
     # 确保所有ID列保持为字符串类型（保持原始格式）
     print("[DEBUG-FILE-7.1] 确保ID列保持原始字符串格式")
-    id_columns = ['cow_id', 'dam', 'sire', 'mgs', 'mgd', 'mmgs']
+    id_columns = ['cow_id', 'dam', 'sire', 'mgs', 'mgd', 'mmgs', FARM_CODE_COLUMN]
     for col in id_columns:
         if col in df_cleaned.columns:
             # 先转为字符串
@@ -1895,10 +1980,16 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
 
     try:
         if input_file.suffix.lower() == '.csv':
-            df_raw = pd.read_csv(input_file, dtype={'耳号': str, '母牛号': str, '冻精编号': str})
+            df_raw = pd.read_csv(
+                input_file,
+                dtype={'耳号': str, '母牛号': str, '冻精编号': str, FARM_CODE_COLUMN: str},
+            )
         else:
             # 🔧 关键修复：先读取，然后立即转换日期列为字符串
-            df_raw = pd.read_excel(input_file, dtype={'耳号': str, '母牛号': str, '冻精编号': str})
+            df_raw = pd.read_excel(
+                input_file,
+                dtype={'耳号': str, '母牛号': str, '冻精编号': str, FARM_CODE_COLUMN: str},
+            )
         print(f"  ✓ 读取成功，原始数据形状: {df_raw.shape}")
         print(f"  ✓ 包含列: {', '.join(df_raw.columns)}")
 
@@ -1943,7 +2034,9 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
         '耳号': ['耳号', '牛号', '母牛号', '母牛耳号', 'cow_id'],
         '配种日期': ['配种日期', '配种时间', '授精日期', '授精时间', '事件日期', '日期'],  # 慧牧云"事件日期"、DC305"日期"
         '冻精编号': ['冻精编号', '冻精号', '公牛号', '精液号', '备注'],  # 慧牧云"冻精号"、DC305"备注"
-        '冻精类型': ['冻精类型', '精液类型', '类型', '是否性控']  # 慧牧云"是否性控"（需值转换）
+        '冻精类型': ['冻精类型', '精液类型', '类型', '是否性控'],  # 慧牧云"是否性控"（需值转换）
+        FARM_CODE_COLUMN: [FARM_CODE_COLUMN, 'farmCode', 'farm_code'],
+        FARM_NAME_COLUMN: [FARM_NAME_COLUMN, 'farmName', 'farm_name'],
     }
 
     # 检测是否存在"是否性控"列（慧牧云特有）
@@ -2190,16 +2283,56 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
         print(f"  - 未提供母牛数据，父号列设为空")
         df_cleaned['父号'] = ''
 
+    # ========== 第10.5步: 补齐牧场来源 ==========
+    if cow_df is not None and not cow_df.empty and 'cow_id' in cow_df.columns:
+        cow_lookup_columns = [
+            column
+            for column in ['cow_id', FARM_CODE_COLUMN, FARM_NAME_COLUMN]
+            if column in cow_df.columns
+        ]
+        if len(cow_lookup_columns) > 1:
+            cow_lineage = (
+                cow_df[cow_lookup_columns]
+                .drop_duplicates(subset=['cow_id'], keep='first')
+                .set_index('cow_id')
+            )
+            ear_ids = df_cleaned['耳号'].fillna('').astype(str)
+            if FARM_CODE_COLUMN in cow_lineage.columns:
+                mapped_codes = ear_ids.map(cow_lineage[FARM_CODE_COLUMN])
+                if FARM_CODE_COLUMN not in df_cleaned.columns:
+                    df_cleaned[FARM_CODE_COLUMN] = mapped_codes
+                else:
+                    missing = df_cleaned[FARM_CODE_COLUMN].isna() | (
+                        df_cleaned[FARM_CODE_COLUMN].astype(str).str.strip() == ''
+                    )
+                    df_cleaned.loc[missing, FARM_CODE_COLUMN] = mapped_codes[missing]
+            if FARM_NAME_COLUMN in cow_lineage.columns:
+                mapped_names = ear_ids.map(cow_lineage[FARM_NAME_COLUMN])
+                if FARM_NAME_COLUMN not in df_cleaned.columns:
+                    df_cleaned[FARM_NAME_COLUMN] = mapped_names
+                else:
+                    missing = df_cleaned[FARM_NAME_COLUMN].isna() | (
+                        df_cleaned[FARM_NAME_COLUMN].astype(str).str.strip() == ''
+                    )
+                    df_cleaned.loc[missing, FARM_NAME_COLUMN] = mapped_names[missing]
+
+    df_cleaned = add_farm_lineage_columns(
+        df_cleaned, project_path, animal_id_column='耳号'
+    )
+
     # ========== 第11步: 重新排列列顺序 ==========
     print(f"\n【步骤11】重新排列列顺序")
-    columns_order = ['耳号', '父号', '冻精编号', '配种日期', '冻精类型']
+    columns_order = [
+        '耳号', '父号', '冻精编号', '配种日期', '冻精类型',
+        FARM_CODE_COLUMN, FARM_NAME_COLUMN,
+    ]
     df_final = df_cleaned[columns_order].copy()
     print(f"  ✓ 列顺序: {' | '.join(columns_order)}")
 
     # ========== 第12步: 保存文件 ==========
     print(f"\n【步骤12】保存标准化文件")
     # 强制ID列为字符串类型，避免xlsx读出后被pandas推断为float（"241215" → 241215.0）
-    id_cols = ['耳号', '父号', '冻精编号']
+    id_cols = ['耳号', '父号', '冻精编号', FARM_CODE_COLUMN]
     for col in id_cols:
         if col in df_final.columns:
             df_final[col] = df_final[col].astype(str).replace({'nan': '', 'None': ''})

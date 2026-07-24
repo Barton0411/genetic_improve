@@ -15,6 +15,8 @@ class Sheet4DetailBuilder(BaseSheetBuilder):
 
     # 基础列名中英文映射
     COLUMN_MAPPING = {
+        '牧场编号': '牧场编号',
+        '牧场名称': '牧场名称',
         'cow_id': '耳号',
         'breed': '品种',
         'sex': '性别',
@@ -82,6 +84,7 @@ class Sheet4DetailBuilder(BaseSheetBuilder):
 
             # 定义基础列（固定顺序）
             base_columns = [
+                '牧场编号', '牧场名称',
                 'cow_id', 'breed', 'sex', 'sire', 'dam', 'mgs', 'mgd', 'mmgs',
                 'lac', 'calving_date', 'birth_date', 'birth_date_dam', 'birth_date_mgd',
                 'age', 'services_time', 'DIM', 'peak_milk', 'milk_305',
@@ -99,12 +102,16 @@ class Sheet4DetailBuilder(BaseSheetBuilder):
             # 获取ranking列
             ranking_columns = ['ranking'] if 'ranking' in df.columns else []
 
-            # 组合列顺序: cow_id, *_index, ranking, 基础列（去掉cow_id）, 性状列
-            display_columns = ['cow_id'] + index_columns + ranking_columns
+            # 组合列顺序: 牧场来源、cow_id、*_index、ranking、其余基础列、性状列
+            display_columns = [
+                column
+                for column in ['牧场编号', '牧场名称', 'cow_id']
+                if column in df.columns
+            ] + index_columns + ranking_columns
 
-            # 添加基础列（排除已有的cow_id）
+            # 添加尚未包含的基础列
             for col in base_columns:
-                if col != 'cow_id' and col in df.columns and col not in display_columns:
+                if col in df.columns and col not in display_columns:
                     display_columns.append(col)
 
             # 添加性状列

@@ -40,6 +40,19 @@ class Sheet1ABuilder(BaseSheetBuilder):
             # 使用pandas读取Excel文件（更快更简单）
             logger.info(f"读取原始数据文件: {Path(raw_file_path).name}")
             df = pd.read_excel(raw_file_path)
+            from core.data.processor import add_farm_lineage_columns
+            df = add_farm_lineage_columns(
+                df,
+                Path(raw_file_path).parents[1],
+                animal_id_column='耳号',
+            )
+            lineage_columns = [
+                column for column in ['牧场编号', '牧场名称'] if column in df.columns
+            ]
+            other_columns = [
+                column for column in df.columns if column not in lineage_columns
+            ]
+            df = df[lineage_columns + other_columns]
 
             total_rows = len(df)
             total_cols = len(df.columns)

@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 
 # 英文列名到中文列名的映射（对应原始cow_data.xlsx的列名）
 COLUMN_NAME_MAPPING = {
+    '牧场编号': '牧场编号',
+    '牧场名称': '牧场名称',
     'cow_id': '耳号',
     'breed': '品种',
     'sex': '性别',
@@ -62,6 +64,7 @@ class Sheet2DetailBuilder(BaseSheetBuilder):
 
             # 只保留指定的列
             required_columns = [
+                '牧场编号', '牧场名称',
                 'cow_id', 'breed', 'sex', 'sire', 'dam', 'mgs', 'mgd', 'mmgs',
                 'lac', 'calving_date', 'birth_date', 'birth_date_dam', 'birth_date_mgd',
                 'age', 'services_time', 'DIM', 'peak_milk', 'milk_305', 'repro_status',

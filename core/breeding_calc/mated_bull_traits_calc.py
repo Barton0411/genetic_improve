@@ -227,6 +227,12 @@ class MatedBullKeyTraitsPage(QWidget):
                 return
             
             breeding_df = pd.read_excel(breeding_data_path)
+            from core.data.processor import add_farm_lineage_columns
+            breeding_df = add_farm_lineage_columns(
+                breeding_df,
+                main_window.selected_project_path,
+                animal_id_column='耳号',
+            )
             breeding_df['配种年份'] = pd.to_datetime(breeding_df['配种日期']).dt.year
             print(f"读取到 {len(breeding_df)} 条配种记录")
 

@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QDialog, QListWidget, QProgressDialog, QGroupBox, QFrame,
     QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QHeaderView, QButtonGroup, QRadioButton, QListWidgetItem,
-    QAbstractItemView
+    QAbstractItemView, QComboBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QColor, QBrush
@@ -24,6 +24,45 @@ from core.data.yqn_data_converter import YQNDataConverter
 from config.hmy_access import is_hmy_user_allowed
 from utils.file_manager import FileManager
 from core.data.uploader import upload_and_standardize_cow_data
+
+
+HMY_CLASSIFICATION_OPTIONS = (
+    ("大区", "area"),
+    ("有机(HP)", "organic_hp"),
+    ("热应激区域", "heat_stress"),
+    ("牛源模式", "source_mode"),
+    ("A2", "a2"),
+    ("DHA", "dha"),
+)
+
+
+def _category_name(value) -> str:
+    """把缺失分类统一归入“其他”组。"""
+    normalized = str(value or "").strip()
+    return normalized or "其他"
+
+
+def _group_sort_key(name: str):
+    """“其他”固定排在正常分类之后。"""
+    if name == "是":
+        return (0, name)
+    if name == "否":
+        return (1, name)
+    if name == "其他":
+        return (3, name)
+    return (2, name)
+
+
+def group_hmy_farms(farms: list, field: str) -> dict:
+    """按慧牧云指定分类维度组织牧场。"""
+    groups = {}
+    for farm in farms:
+        group_name = _category_name(farm.get(field))
+        groups.setdefault(group_name, []).append(farm)
+    return {
+        name: groups[name]
+        for name in sorted(groups, key=_group_sort_key)
+    }
 
 
 class DataDownloadWorker(QThread):
@@ -315,7 +354,7 @@ class FarmListItem(QWidget):
 
         # 站号
         code_label = QLabel(str(self.farm_data.get('farmCode', '')))
-        code_label.setFixedWidth(60)
+        code_label.setFixedWidth(90)
         code_label.setStyleSheet("font-size: 12px; color: #606266;")
         layout.addWidget(code_label)
 
@@ -361,6 +400,7 @@ class FarmSelectionPage(QWidget):
         self.all_farms = []  # 所有牧场数据
         self.selected_farms = {}  # 已选牧场 {farm_code: farm_data}
         self.current_region = None  # 当前选中的区域
+        self.current_group_farms = []  # 当前分组或搜索结果中的牧场
         self.farm_list_items = {}  # farm_code -> FarmListItem
         self.logger = logging.getLogger(__name__)
 
@@ -571,6 +611,39 @@ class FarmSelectionPage(QWidget):
         type_group.setLayout(type_layout)
         left_layout.addWidget(type_group)
 
+        # 慧牧云分类方式
+        classification_group = QGroupBox("分类方式")
+        self.classification_widget = classification_group
+        classification_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 13px;
+                font-weight: bold;
+                border: 1px solid #e4e7ed;
+                border-radius: 4px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+        """)
+        classification_layout = QVBoxLayout(classification_group)
+        classification_layout.setContentsMargins(10, 10, 10, 10)
+        self.classification_combo = QComboBox()
+        for label, field in HMY_CLASSIFICATION_OPTIONS:
+            self.classification_combo.addItem(label, field)
+        self.classification_combo.setStyleSheet(
+            "font-size: 12px; padding: 4px 8px;"
+        )
+        self.classification_combo.currentIndexChanged.connect(
+            self.on_hmy_classification_changed
+        )
+        classification_layout.addWidget(self.classification_combo)
+        left_layout.addWidget(classification_group)
+        classification_group.setVisible(False)
+
         # 区域树
         self.tree_group = QGroupBox("大区/区域")
         self.tree_group.setStyleSheet("""
@@ -629,6 +702,28 @@ class FarmSelectionPage(QWidget):
         list_header.addWidget(self.region_title_label)
 
         list_header.addStretch()
+
+        self.select_group_btn = QPushButton("全选当前分组")
+        self.select_group_btn.setEnabled(False)
+        self.select_group_btn.setToolTip("选择当前大区、区域或分类中的全部牧场")
+        self.select_group_btn.setStyleSheet(
+            "font-size: 12px; padding: 4px 10px;"
+        )
+        self.select_group_btn.clicked.connect(
+            lambda: self.set_current_group_checked(True)
+        )
+        list_header.addWidget(self.select_group_btn)
+
+        self.deselect_group_btn = QPushButton("取消当前分组")
+        self.deselect_group_btn.setEnabled(False)
+        self.deselect_group_btn.setToolTip("取消当前大区、区域或分类中的全部牧场")
+        self.deselect_group_btn.setStyleSheet(
+            "font-size: 12px; padding: 4px 10px;"
+        )
+        self.deselect_group_btn.clicked.connect(
+            lambda: self.set_current_group_checked(False)
+        )
+        list_header.addWidget(self.deselect_group_btn)
 
         self.selected_count_label = QLabel("已选: 0个")
         self.selected_count_label.setStyleSheet("font-size: 13px; color: #409eff; font-weight: bold;")
@@ -805,23 +900,31 @@ class FarmSelectionPage(QWidget):
         self.data_source = source
         self.selected_farms.clear()
         self.all_farms = []
+        self.current_group_farms = []
         self.farm_list.clear()
         self.farm_list_items.clear()
         self.region_tree.clear()
+        self.select_group_btn.setEnabled(False)
+        self.deselect_group_btn.setEnabled(False)
         self.update_selection_ui()
         self._update_source_button_styles()
 
         is_hmy = source == "慧牧云"
         self.status_filter_widget.setVisible(not is_hmy)
         self.type_filter_widget.setVisible(not is_hmy)
+        self.classification_widget.setVisible(is_hmy)
         if is_hmy:
             for checkbox in self.farm_type_checkboxes:
+                checkbox.blockSignals(True)
                 checkbox.setChecked(checkbox.property("type_value") is None)
+                checkbox.blockSignals(False)
         else:
             for checkbox in self.farm_type_checkboxes:
+                checkbox.blockSignals(True)
                 checkbox.setChecked(
                     checkbox.property("type_value") == "社会奶源"
                 )
+                checkbox.blockSignals(False)
 
         try:
             if is_hmy:
@@ -830,11 +933,7 @@ class FarmSelectionPage(QWidget):
                 result = self.api_client.get_farm_list()
                 self.all_farms = result.get("data", [])
                 self.build_region_tree()
-                top_item = self.region_tree.topLevelItem(0)
-                if top_item:
-                    target_item = top_item.child(0) or top_item
-                    self.region_tree.setCurrentItem(target_item)
-                    self.on_region_selected(target_item, 0)
+                self.select_first_region_group()
             else:
                 self.init_api_client()
         except Exception as exc:
@@ -879,6 +978,7 @@ class FarmSelectionPage(QWidget):
             if self.all_farms:
                 # 构建区域树
                 self.build_region_tree()
+                self.select_first_region_group()
             else:
                 self.logger.warning("⚠️ 牧场列表为空!")
                 QMessageBox.warning(
@@ -934,6 +1034,34 @@ class FarmSelectionPage(QWidget):
 
             filtered_farms.append(farm)
 
+        if self.data_source == "慧牧云":
+            classification_label = self.classification_combo.currentText()
+            classification_field = self.classification_combo.currentData()
+            grouped_farms = group_hmy_farms(
+                filtered_farms,
+                classification_field,
+            )
+            for group_name, farms in grouped_farms.items():
+                group_item = QTreeWidgetItem(
+                    [f"{group_name} ({len(farms)}个)"]
+                )
+                group_item.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    {
+                        "type": "hmy_group",
+                        "name": group_name,
+                        "classification": classification_label,
+                        "farms": farms,
+                    },
+                )
+                self.region_tree.addTopLevelItem(group_item)
+
+            self.tree_group.setTitle(
+                f"{classification_label} (共{len(filtered_farms)}个)"
+            )
+            return
+
         # 检查是否有大区/区域信息
         # 字段说明: area=大区, region=区域
         has_region_info = any(
@@ -945,8 +1073,8 @@ class FarmSelectionPage(QWidget):
             # 按大区和区域组织数据
             big_areas = {}
             for farm in filtered_farms:
-                big_area = farm.get('area') or '未分类'
-                area = farm.get('region') or '未分类'
+                big_area = _category_name(farm.get('area'))
+                area = _category_name(farm.get('region'))
 
                 if big_area not in big_areas:
                     big_areas[big_area] = {}
@@ -955,12 +1083,23 @@ class FarmSelectionPage(QWidget):
                 big_areas[big_area][area].append(farm)
 
             # 构建树
-            for big_area, areas in sorted(big_areas.items()):
+            for big_area in sorted(big_areas, key=_group_sort_key):
+                areas = big_areas[big_area]
                 big_area_item = QTreeWidgetItem([big_area])
-                big_area_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "big_area", "name": big_area})
+                big_area_farms = [
+                    farm
+                    for area_farms in areas.values()
+                    for farm in area_farms
+                ]
+                big_area_item.setData(0, Qt.ItemDataRole.UserRole, {
+                    "type": "big_area",
+                    "name": big_area,
+                    "farms": big_area_farms
+                })
 
                 total_farms = 0
-                for area, farms in sorted(areas.items()):
+                for area in sorted(areas, key=_group_sort_key):
+                    farms = areas[area]
                     area_item = QTreeWidgetItem([f"{area} ({len(farms)}个)"])
                     area_item.setData(0, Qt.ItemDataRole.UserRole, {
                         "type": "area",
@@ -990,6 +1129,24 @@ class FarmSelectionPage(QWidget):
         # 更新标题显示合计数
         self.tree_group.setTitle(f"大区/区域 (共{len(filtered_farms)}个)")
 
+    def select_first_region_group(self):
+        """显示第一个分组，避免数据加载后右侧保持空白。"""
+        first_item = self.region_tree.topLevelItem(0)
+        if not first_item:
+            self.current_group_farms = []
+            self.select_group_btn.setEnabled(False)
+            self.deselect_group_btn.setEnabled(False)
+            return
+        self.region_tree.setCurrentItem(first_item)
+        self.on_region_selected(first_item, 0)
+
+    def on_hmy_classification_changed(self, _index=None):
+        """切换慧牧云分类维度并显示第一个分组。"""
+        if self.data_source != "慧牧云" or not self.all_farms:
+            return
+        self.build_region_tree()
+        self.select_first_region_group()
+
     def get_current_status_filter(self) -> str:
         """获取当前状态筛选值"""
         checked_btn = self.status_group.checkedButton()
@@ -1000,9 +1157,7 @@ class FarmSelectionPage(QWidget):
     def on_status_changed(self, button=None):
         """状态筛选变化"""
         self.build_region_tree()
-        # 清空右侧列表
-        self.farm_list.clear()
-        self.farm_list_items.clear()
+        self.select_first_region_group()
 
     def _select_all_farm_types(self):
         """全选所有牧场类型"""
@@ -1035,11 +1190,22 @@ class FarmSelectionPage(QWidget):
         if not data:
             return
 
-        if data.get("type") == "area":
+        if data.get("type") in {"area", "big_area", "hmy_group"}:
             farms = data.get("farms", [])
             area_name = data.get("name", "")
-            self.region_title_label.setText(f"{area_name} ({len(farms)}个牧场)")
+            classification = data.get("classification")
+            if classification:
+                title = f"{classification}：{area_name}"
+            else:
+                title = area_name
+            self.region_title_label.setText(
+                f"{title} ({len(farms)}个牧场)"
+            )
             self.current_region = area_name
+            self.current_group_farms = list(farms)
+            has_farms = bool(farms)
+            self.select_group_btn.setEnabled(has_farms)
+            self.deselect_group_btn.setEnabled(has_farms)
             self.populate_farm_list(farms)
 
     def populate_farm_list(self, farms: list):
@@ -1084,6 +1250,24 @@ class FarmSelectionPage(QWidget):
 
         self.update_selection_ui()
 
+    def set_current_group_checked(self, checked: bool):
+        """批量选择或取消当前大区、区域、分类或搜索结果。"""
+        for farm in self.current_group_farms:
+            farm_code = str(farm.get("farmCode", "")).strip()
+            if not farm_code:
+                continue
+            if checked:
+                self.selected_farms[farm_code] = farm
+            else:
+                self.selected_farms.pop(farm_code, None)
+
+        for farm_code, farm_widget in self.farm_list_items.items():
+            farm_widget.checkbox.blockSignals(True)
+            farm_widget.set_checked(farm_code in self.selected_farms)
+            farm_widget.checkbox.blockSignals(False)
+
+        self.update_selection_ui()
+
     def update_selection_ui(self):
         """更新选择相关的UI"""
         count = len(self.selected_farms)
@@ -1109,6 +1293,9 @@ class FarmSelectionPage(QWidget):
             else:
                 self.farm_list.clear()
                 self.farm_list_items.clear()
+                self.current_group_farms = []
+                self.select_group_btn.setEnabled(False)
+                self.deselect_group_btn.setEnabled(False)
                 self.region_title_label.setText("请选择区域")
             return
 
@@ -1121,6 +1308,10 @@ class FarmSelectionPage(QWidget):
                 matched_farms.append(farm)
 
         self.region_title_label.setText(f"搜索结果 ({len(matched_farms)}个)")
+        self.current_group_farms = matched_farms
+        has_matches = bool(matched_farms)
+        self.select_group_btn.setEnabled(has_matches)
+        self.deselect_group_btn.setEnabled(has_matches)
         self.populate_farm_list(matched_farms)
 
     def _do_search(self):

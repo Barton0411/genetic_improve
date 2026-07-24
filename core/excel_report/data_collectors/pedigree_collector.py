@@ -82,6 +82,12 @@ def collect_pedigree_data(analysis_folder: Path) -> dict:
 
         # 读取原始明细数据文件
         detail_source_df = pd.read_excel(detail_file)
+        from core.data.processor import add_farm_lineage_columns
+        detail_source_df = add_farm_lineage_columns(
+            detail_source_df,
+            analysis_folder.parent,
+            animal_id_column='cow_id',
+        )
         # 确保sex列正确填充（处理全NaN的情况，母牛数据默认为'母'）
         if 'sex' in detail_source_df.columns:
             if detail_source_df['sex'].isna().all():

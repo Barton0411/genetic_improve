@@ -21,6 +21,7 @@ class YQNDataConverter:
         'insemDate': '配种日期',
         'frozenSpermNum': '冻精编号',
         'frozenSpermType': '冻精类型',
+        'farmCode': '牧场编号',
     }
 
     # 冻精类型值转换
@@ -31,7 +32,9 @@ class YQNDataConverter:
     }
 
     # 配种记录输出列顺序
-    BREEDING_OUTPUT_COLUMNS = ['耳号', '配种日期', '冻精编号', '冻精类型']
+    BREEDING_OUTPUT_COLUMNS = [
+        '耳号', '配种日期', '冻精编号', '冻精类型', '牧场编号'
+    ]
 
     # 字段映射: API字段名 → 标准字段名
     # 支持多个别名应对API字段变化
@@ -365,8 +368,9 @@ class YQNDataConverter:
         merged_records = []
         for farm_code, api_data in all_api_data:
             records = api_data.get("data", [])
+            records = [dict(record, farmCode=str(farm_code).strip()) for record in records]
             # 添加牧场前缀
-            prefixed_records = YQNDataConverter._add_farm_prefix(records.copy(), farm_code)
+            prefixed_records = YQNDataConverter._add_farm_prefix(records, farm_code)
             merged_records.extend(prefixed_records)
             logger.info(f"合并牧场 {farm_code}：{len(records)} 条记录")
 
@@ -422,7 +426,7 @@ class YQNDataConverter:
             ).fillna(df['冻精类型'])
 
         # ID字段转字符串并清洗
-        for col in ['耳号', '冻精编号']:
+        for col in ['耳号', '冻精编号', '牧场编号']:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
                 df[col] = df[col].replace(['nan', 'None', 'null'], '')
@@ -517,15 +521,19 @@ class YQNDataConverter:
             else:
                 records = []
 
-            if add_prefix and farm_code:
-                for record in records:
+            normalized_records = []
+            for source_record in records:
+                record = dict(source_record)
+                record['farmCode'] = str(farm_code or '').strip()
+                if add_prefix and farm_code:
                     ear_num = record.get('earNum')
                     if ear_num:
                         val = str(ear_num).strip()
                         if val and val.lower() not in ['nan', 'none', 'null', '']:
                             record['earNum'] = f"{farm_code}{val}"
+                normalized_records.append(record)
 
-            merged.extend(records)
+            merged.extend(normalized_records)
             logger.info(f"合并牧场 {farm_code} 配种记录: {len(records)} 条")
 
         logger.info(f"配种记录合并完成，总计 {len(merged)} 条")

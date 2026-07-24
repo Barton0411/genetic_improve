@@ -164,6 +164,10 @@ def run_mated_bull_traits(project_path, selected_traits=None, progress_cb=None):
 
     try:
         breeding_df = pd.read_excel(breeding_data_path, dtype={'耳号': str, '父号': str, '冻精编号': str})
+        from core.data.processor import add_farm_lineage_columns
+        breeding_df = add_farm_lineage_columns(
+            breeding_df, project_path, animal_id_column='耳号'
+        )
         breeding_df['配种年份'] = pd.to_datetime(breeding_df['配种日期']).dt.year
     except Exception as e:
         return False, f"读取配种记录失败：{str(e)}"
@@ -356,6 +360,9 @@ def run_inbreeding_analysis(project_path, analysis_type, progress_cb=None):
                 abnormal_df.to_excel(writer, sheet_name='异常明细表', index=False)
             if not stats_df.empty:
                 stats_df.to_excel(writer, sheet_name='统计表', index=False)
+            farm_stats_df = _build_farm_abnormal_stats(abnormal_df)
+            if not farm_stats_df.empty:
+                farm_stats_df.to_excel(writer, sheet_name='分牧场统计表', index=False)
 
         emit_progress(100, "近交分析完成")
         db_conn.close()
@@ -511,6 +518,10 @@ def _analyze_mated_pairs(project_path, bull_genes, pedigree_db, progress_cb=None
     results = []
     breeding_file = project_path / "standardized_data" / "processed_breeding_data.xlsx"
     df = pd.read_excel(breeding_file, dtype={'耳号': str, '父号': str, '冻精编号': str})
+    from core.data.processor import add_farm_lineage_columns
+    df = add_farm_lineage_columns(
+        df, project_path, animal_id_column='耳号'
+    )
 
     missing_gene_default = {gene: 'missing data' for gene in DEFECT_GENES}
 
@@ -530,6 +541,8 @@ def _analyze_mated_pairs(project_path, bull_genes, pedigree_db, progress_cb=None
         gene_results = _analyze_gene_safety(sire_genes, bull_genes_data)
 
         result_dict = {
+            '牧场编号': row.get('牧场编号', ''),
+            '牧场名称': row.get('牧场名称', ''),
             '母牛号': cow_id,
             '配种日期': breeding_date,
             '父号': sire_id,
@@ -556,6 +569,10 @@ def _analyze_candidate_pairs(project_path, bull_genes, pedigree_db, progress_cb=
     bull_file = project_path / "standardized_data" / "processed_bull_data.xlsx"
 
     cow_df = pd.read_excel(cow_file)
+    from core.data.processor import add_farm_lineage_columns
+    cow_df = add_farm_lineage_columns(
+        cow_df, project_path, animal_id_column='cow_id'
+    )
     bull_df = pd.read_excel(bull_file)
 
     cow_df = cow_df[cow_df['是否在场'] == '是']
@@ -575,6 +592,8 @@ def _analyze_candidate_pairs(project_path, bull_genes, pedigree_db, progress_cb=
             gene_results = _analyze_gene_safety(cow_genes, candidate_genes)
 
             result_dict = {
+                '牧场编号': cow_row.get('牧场编号', ''),
+                '牧场名称': cow_row.get('牧场名称', ''),
                 '母牛号': cow_id,
                 '父号': sire_id,
                 '原始父号': original_sire_id if original_sire_id != sire_id else '',
@@ -666,6 +685,8 @@ def _collect_abnormal_pairs(results):
         for gene in DEFECT_GENES:
             if result.get(gene) == '高风险':
                 abnormal_records.append({
+                    '牧场编号': result.get('牧场编号', ''),
+                    '牧场名称': result.get('牧场名称', ''),
                     '母牛号': result['母牛号'],
                     '父号': result['父号'],
                     '公牛号': result.get('配种公牛号', result.get('备选公牛号')),
@@ -680,6 +701,8 @@ def _collect_abnormal_pairs(results):
                 inbreeding_value = float(inbreeding_str.strip('%')) / 100
                 if inbreeding_value > 0.0625:
                     abnormal_records.append({
+                        '牧场编号': result.get('牧场编号', ''),
+                        '牧场名称': result.get('牧场名称', ''),
                         '母牛号': result['母牛号'],
                         '父号': result['父号'],
                         '公牛号': result.get('配种公牛号', result.get('备选公牛号')),
@@ -702,6 +725,24 @@ def _collect_abnormal_pairs(results):
 
     stats_df = pd.DataFrame(stats_records)
     return abnormal_df, stats_df
+
+
+def _build_farm_abnormal_stats(abnormal_df):
+    required = ['牧场编号', '牧场名称', '异常类型']
+    if abnormal_df.empty or not all(column in abnormal_df.columns for column in required):
+        return pd.DataFrame()
+    source = abnormal_df.copy()
+    source['牧场编号'] = source['牧场编号'].fillna('').astype(str).str.strip()
+    source['牧场名称'] = source['牧场名称'].fillna('').astype(str).str.strip()
+    source = source[source['牧场编号'] != '']
+    if source['牧场编号'].nunique() <= 1:
+        return pd.DataFrame()
+    return (
+        source.groupby(required, dropna=False)
+        .size()
+        .reset_index(name='数量')
+        .sort_values(['牧场编号', '异常类型'])
+    )
 
 
 def _upload_missing_bulls(missing_bulls, source):

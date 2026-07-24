@@ -19,6 +19,7 @@ class TraitsCalculation(BaseCowCalculation):
         self.output_prefix = "processed_cow_data_key_traits"
         self.required_columns = ['cow_id', 'birth_date', 'birth_date_dam', 'birth_date_mgd']
         self.yearly_filename = "sire_traits_mean_by_cow_birth_year.xlsx"  # 新的年度数据文件名
+        self.yearly_by_farm_filename = "sire_traits_mean_by_cow_birth_year_by_farm.xlsx"
 
     def process_data(self, main_window, selected_traits: list, progress_callback=None, task_info_callback=None) -> Tuple[bool, str]:
         """执行关键性状计算的核心逻辑"""
@@ -48,6 +49,10 @@ class TraitsCalculation(BaseCowCalculation):
             cow_df = self.read_data(project_path, "processed_cow_data.xlsx")
             if cow_df is None:
                 return False, "读取母牛数据失败"
+            from core.data.processor import add_farm_lineage_columns
+            cow_df = add_farm_lineage_columns(
+                cow_df, project_path, animal_id_column='cow_id'
+            )
 
             # 育种分析仅针对奶牛品种，排除肉牛品种（西门塔尔、安格斯等）。
             # 这是性状派生文件（detail/scores/final）的统一过滤点，
@@ -128,6 +133,11 @@ class TraitsCalculation(BaseCowCalculation):
             # 优化：直接传DataFrame，避免临时文件读写
             if not self.process_yearly_data_from_df(cow_df, yearly_output_path, selected_traits):
                 return False, "处理年度数据失败"
+            yearly_by_farm_path = output_dir / self.yearly_by_farm_filename
+            if not self.process_yearly_data_by_farm_from_df(
+                cow_df, yearly_by_farm_path, selected_traits
+            ):
+                return False, "处理分牧场年度数据失败"
 
             # 6. 填充预估值
             print("6. 填充缺失公牛的预估值...")
@@ -433,6 +443,94 @@ class TraitsCalculation(BaseCowCalculation):
             import traceback
             print(f"处理年度数据失败: {e}")
             print(f"详细错误信息: {traceback.format_exc()}")
+            return False
+
+    def process_yearly_data_by_farm_from_df(
+        self,
+        df: pd.DataFrame,
+        output_path: Path,
+        selected_traits: list,
+    ) -> bool:
+        """生成独立的分牧场年度父系性状文件，不改变计算用的年度文件结构。"""
+        try:
+            farm_columns = ['牧场编号', '牧场名称']
+            if not all(column in df.columns for column in farm_columns):
+                return True
+
+            source = df.copy()
+            source['牧场编号'] = source['牧场编号'].fillna('').astype(str).str.strip()
+            source['牧场名称'] = source['牧场名称'].fillna('').astype(str).str.strip()
+            farm_keys = source[farm_columns].drop_duplicates()
+            farm_keys = farm_keys[farm_keys['牧场编号'] != '']
+            if len(farm_keys) <= 1:
+                return True
+
+            source['birth_year'] = pd.to_numeric(source['birth_year'], errors='coerce')
+            source = source.dropna(subset=['birth_year'])
+            current_year = datetime.datetime.now().year
+            source = source[
+                (source['birth_year'] >= 1900)
+                & (source['birth_year'] <= current_year + 10)
+            ]
+            if source.empty:
+                return False
+
+            min_year = int(source['birth_year'].min())
+            max_year = int(source['birth_year'].max())
+            traits = list(selected_traits)
+            for required_trait in ['NM$', 'TPI']:
+                if required_trait not in traits:
+                    traits.append(required_trait)
+            default_values = self.get_default_values(traits)
+
+            results = {trait: [] for trait in traits}
+            for _, farm in farm_keys.iterrows():
+                farm_code = farm['牧场编号']
+                farm_name = farm['牧场名称']
+                farm_df = source[source['牧场编号'] == farm_code]
+
+                for trait in traits:
+                    trait_col = f'sire_{trait}'
+                    if trait_col not in farm_df.columns:
+                        yearly = pd.DataFrame({'birth_year': range(min_year, max_year + 1)})
+                        yearly['mean'] = default_values[trait]
+                        yearly['count'] = 0
+                        yearly['interpolated'] = True
+                    else:
+                        if 'sire_identified' in farm_df.columns:
+                            identified = farm_df[farm_df['sire_identified'] == True]
+                        else:
+                            identified = farm_df[farm_df[trait_col].notna()]
+
+                        if identified.empty:
+                            yearly = pd.DataFrame({'birth_year': range(min_year, max_year + 1)})
+                            yearly['mean'] = default_values[trait]
+                            yearly['count'] = 0
+                            yearly['interpolated'] = True
+                        else:
+                            yearly_means = identified.groupby('birth_year').agg(
+                                count=(trait_col, 'count'),
+                                mean=(trait_col, 'mean'),
+                            ).reset_index()
+                            yearly = self.process_trait_yearly_data(
+                                yearly_means,
+                                min_year,
+                                max_year,
+                                default_values[trait],
+                            )
+
+                    yearly.insert(0, '牧场名称', farm_name)
+                    yearly.insert(0, '牧场编号', farm_code)
+                    results[trait].append(yearly)
+
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                for trait, frames in results.items():
+                    pd.concat(frames, ignore_index=True).to_excel(
+                        writer, sheet_name=trait, index=False
+                    )
+            return True
+        except Exception as e:
+            print(f"处理分牧场年度数据失败: {e}")
             return False
 
     def process_trait_yearly_data(self, yearly_data: pd.DataFrame, min_year: int,

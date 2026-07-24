@@ -69,7 +69,10 @@ def collect_bull_usage_summary_data(analysis_folder: Path) -> dict:
         logger.info(f"✓ 合并后数据: {len(merged_df)} 条")
 
         # 定义固定列（非性状列）
-        fixed_columns = ['耳号', '父号', '冻精编号', '配种日期', '冻精类型', '配种年份']
+        fixed_columns = [
+            '耳号', '父号', '冻精编号', '配种日期', '冻精类型',
+            '牧场编号', '牧场名称', '配种年份'
+        ]
 
         # 动态识别性状列
         if traits_df is not None and not traits_df.empty:
@@ -149,7 +152,10 @@ def _merge_breeding_and_traits(breeding_df: pd.DataFrame, traits_df: pd.DataFram
     merge_key = '冻精编号'
 
     # 识别性状列（traits_df中除了固定列的其他列）
-    fixed_cols_in_traits = ['耳号', '父号', '冻精编号', '配种日期', '冻精类型', '配种年份']
+    fixed_cols_in_traits = [
+        '耳号', '父号', '冻精编号', '配种日期', '冻精类型',
+        '牧场编号', '牧场名称', '配种年份'
+    ]
     trait_cols = [col for col in traits_df.columns if col not in fixed_cols_in_traits]
 
     # 只取traits_df中的冻精编号和性状列
@@ -337,7 +343,10 @@ def _prepare_breeding_detail(df: pd.DataFrame, trait_columns: list) -> pd.DataFr
         按配种年份和日期排序
     """
     # 选择需要的列
-    detail_columns = ['耳号', '配种日期', '冻精编号', '冻精类型', '配种年份'] + trait_columns
+    detail_columns = [
+        '牧场编号', '牧场名称', '耳号', '配种日期',
+        '冻精编号', '冻精类型', '配种年份'
+    ] + trait_columns
 
     # 确保所有列都存在
     available_columns = [col for col in detail_columns if col in df.columns]

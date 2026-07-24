@@ -55,6 +55,10 @@ def collect_traits_data(analysis_folder: Path, project_folder: Path) -> dict:
         detail_df = None
         if detail_file.exists():
             detail_df = pd.read_excel(detail_file)
+            from core.data.processor import add_farm_lineage_columns
+            detail_df = add_farm_lineage_columns(
+                detail_df, project_folder, animal_id_column='cow_id'
+            )
             logger.info(f"✓ 读取育种性状明细数据: {len(detail_df)}行")
             # 确保 sex 列存在且正确填充（母牛数据默认为'母'）
             if 'sex' not in detail_df.columns:

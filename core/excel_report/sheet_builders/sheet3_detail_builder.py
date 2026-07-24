@@ -15,6 +15,8 @@ class Sheet3DetailBuilder(BaseSheetBuilder):
 
     # 基础列名中英文映射
     COLUMN_MAPPING = {
+        '牧场编号': '牧场编号',
+        '牧场名称': '牧场名称',
         'cow_id': '耳号',
         'breed': '品种',
         'sex': '性别',
@@ -71,6 +73,7 @@ class Sheet3DetailBuilder(BaseSheetBuilder):
 
             # 定义基础列（固定顺序）
             base_columns = [
+                '牧场编号', '牧场名称',
                 'cow_id', 'breed', 'sex', 'sire', 'dam', 'mgs', 'mgd', 'mmgs',
                 'lac', 'calving_date', 'birth_date', 'birth_date_dam', 'birth_date_mgd',
                 'age', 'services_time', 'DIM', 'peak_milk', 'milk_305',

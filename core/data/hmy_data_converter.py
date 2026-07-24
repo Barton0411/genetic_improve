@@ -50,6 +50,7 @@ class HMYDataConverter:
         prefixed = []
         for source in records:
             record = dict(source)
+            record["farmCode"] = str(farm_code).strip()
             for field in cls.FIELDS_NEED_PREFIX:
                 value = record.get(field)
                 if cls._is_valid_id(value):

@@ -16,6 +16,14 @@ class HMYApiClient:
     """通过自有认证服务访问慧牧云牛群数据。"""
 
     DEFAULT_PROXY_BASE_URL = "https://api.genepop.com"
+    CLASSIFICATION_FIELDS = (
+        "area",
+        "organic_hp",
+        "heat_stress",
+        "source_mode",
+        "a2",
+        "dha",
+    )
 
     def __init__(
         self,
@@ -120,18 +128,37 @@ class HMYApiClient:
 
     def get_farm_list(self) -> dict:
         """读取随应用发布的慧牧云牧场编码表。"""
-        path = Path(__file__).resolve().parent.parent / "config" / "hmy_farms.json"
-        with path.open("r", encoding="utf-8") as file:
+        config_dir = Path(__file__).resolve().parent.parent / "config"
+        with (config_dir / "hmy_farms.json").open(
+            "r", encoding="utf-8"
+        ) as file:
             farms = json.load(file)
+
+        classifications = {}
+        try:
+            with (config_dir / "hmy_farm_classifications.json").open(
+                "r", encoding="utf-8"
+            ) as file:
+                payload = json.load(file)
+            classifications = payload.get("farms") or {}
+        except (OSError, ValueError, TypeError):
+            classifications = {}
 
         normalized = []
         for farm in farms:
+            farm_code = str(farm.get("farmCode", "")).strip()
+            classification = classifications.get(farm_code) or {}
+            category_values = {
+                field: str(classification.get(field) or "其他").strip()
+                or "其他"
+                for field in self.CLASSIFICATION_FIELDS
+            }
             normalized.append(
                 {
-                    "farmCode": str(farm.get("farmCode", "")).strip(),
+                    "farmCode": farm_code,
                     "name": str(farm.get("name", "")).strip(),
-                    "area": "慧牧云",
-                    "region": "全部牧场",
+                    **category_values,
+                    "region": "",
                     "farmType": None,
                     "isAvailable": 1,
                 }

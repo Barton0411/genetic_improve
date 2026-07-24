@@ -9,6 +9,47 @@ from pathlib import Path
 from config.breed_constants import is_dairy_breed
 
 logger = logging.getLogger(__name__)
+FARM_COLUMNS = ['牧场编号', '牧场名称']
+
+
+def _build_pedigree_summary(df: pd.DataFrame, labels: list[str]) -> pd.DataFrame:
+    result_list = []
+    for status in ['是', '否', '总计']:
+        group_df = df if status == '总计' else df[df['是否在场'] == status]
+
+        for year_group in labels:
+            year_df = group_df[group_df['birth_year_group'] == year_group]
+            if year_df.empty:
+                continue
+
+            total_count = len(year_df)
+            sire_count = year_df['sire_identified'].sum()
+            mgs_count = year_df['mgs_identified'].sum()
+            mmgs_count = year_df['mmgs_identified'].sum()
+            result_list.append({
+                '是否在场': status,
+                'birth_year_group': year_group,
+                '头数': total_count,
+                '父号可识别头数': int(sire_count),
+                '父号识别率': f'{sire_count / total_count:.2%}',
+                '外祖父可识别头数': int(mgs_count),
+                '外祖父识别率': f'{mgs_count / total_count:.2%}',
+                '外曾外祖父可识别头数': int(mmgs_count),
+                '外曾外祖父识别率': f'{mmgs_count / total_count:.2%}',
+            })
+
+    result_df = pd.DataFrame(result_list)
+    if result_df.empty:
+        return result_df
+
+    status_order = {'是': 1, '否': 2, '总计': 3}
+    year_order = {year_label: i + 1 for i, year_label in enumerate(labels)}
+    result_df['status_sort'] = result_df['是否在场'].map(status_order)
+    result_df['year_sort'] = result_df['birth_year_group'].map(year_order)
+    return (
+        result_df.sort_values(['status_sort', 'year_sort'])
+        .drop(['status_sort', 'year_sort'], axis=1)
+    )
 
 
 def generate_pedigree_analysis_result(project_path: Path) -> bool:
@@ -32,6 +73,10 @@ def generate_pedigree_analysis_result(project_path: Path) -> bool:
             return False
 
         df = pd.read_excel(detail_file)
+        from core.data.processor import add_farm_lineage_columns
+        df = add_farm_lineage_columns(
+            df, project_path, animal_id_column='cow_id'
+        )
 
         # 处理 sex 字段：空值默认为 '母'
         if 'sex' in df.columns:
@@ -63,55 +108,7 @@ def generate_pedigree_analysis_result(project_path: Path) -> bool:
             labels=labels
         )
 
-        # 按是否在场和年份分组统计
-        result_list = []
-
-        for status in ['是', '否', '总计']:
-            if status == '总计':
-                group_df = df
-            else:
-                group_df = df[df['是否在场'] == status]
-
-            # 使用动态生成的年份标签
-            for year_group in labels:
-                year_df = group_df[group_df['birth_year_group'] == year_group]
-
-                if len(year_df) == 0:
-                    continue
-
-                total_count = len(year_df)
-                sire_count = year_df['sire_identified'].sum()
-                mgs_count = year_df['mgs_identified'].sum()
-                mmgs_count = year_df['mmgs_identified'].sum()
-
-                sire_rate = sire_count / total_count if total_count > 0 else 0
-                mgs_rate = mgs_count / total_count if total_count > 0 else 0
-                mmgs_rate = mmgs_count / total_count if total_count > 0 else 0
-
-                result_list.append({
-                    '是否在场': status,
-                    'birth_year_group': year_group,
-                    '头数': total_count,
-                    '父号可识别头数': int(sire_count),
-                    '父号识别率': f'{sire_rate:.2%}',
-                    '外祖父可识别头数': int(mgs_count),
-                    '外祖父识别率': f'{mgs_rate:.2%}',
-                    '外曾外祖父可识别头数': int(mmgs_count),
-                    '外曾外祖父识别率': f'{mmgs_rate:.2%}'
-                })
-
-        # 创建结果DataFrame
-        result_df = pd.DataFrame(result_list)
-
-        # 按是否在场和年份排序
-        status_order = {'是': 1, '否': 2, '总计': 3}
-        # 动态创建年份排序映射
-        year_order = {year_label: i+1 for i, year_label in enumerate(labels)}
-
-        result_df['status_sort'] = result_df['是否在场'].map(status_order)
-        result_df['year_sort'] = result_df['birth_year_group'].map(year_order)
-        result_df = result_df.sort_values(['status_sort', 'year_sort'])
-        result_df = result_df.drop(['status_sort', 'year_sort'], axis=1)
+        result_df = _build_pedigree_summary(df, labels)
 
         # 保存结果
         output_file = project_path / "analysis_results" / "系谱识别分析结果.xlsx"
@@ -121,7 +118,33 @@ def generate_pedigree_analysis_result(project_path: Path) -> bool:
         if 'cow_id' in result_df.columns:
             result_df['cow_id'] = result_df['cow_id'].astype(str)
 
-        result_df.to_excel(output_file, index=False)
+        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+            result_df.to_excel(writer, sheet_name='Sheet1', index=False)
+
+            if all(column in df.columns for column in FARM_COLUMNS):
+                farm_keys = (
+                    df[FARM_COLUMNS]
+                    .fillna('')
+                    .astype(str)
+                    .drop_duplicates()
+                )
+                farm_keys = farm_keys[farm_keys['牧场编号'].str.strip() != '']
+                if len(farm_keys) > 1:
+                    farm_results = []
+                    for _, farm in farm_keys.iterrows():
+                        farm_code = farm['牧场编号'].strip()
+                        farm_name = farm['牧场名称'].strip()
+                        farm_df = df[
+                            df['牧场编号'].astype(str).str.strip() == farm_code
+                        ]
+                        farm_result = _build_pedigree_summary(farm_df, labels)
+                        farm_result.insert(0, '牧场名称', farm_name)
+                        farm_result.insert(0, '牧场编号', farm_code)
+                        farm_results.append(farm_result)
+
+                    pd.concat(farm_results, ignore_index=True).to_excel(
+                        writer, sheet_name='分牧场汇总', index=False
+                    )
 
         logger.info(f"✓ 系谱识别分析结果已保存: {output_file}")
         logger.info(f"  - 总头数: {len(df)}头")

@@ -46,6 +46,10 @@ def collect_breeding_detail_data(analysis_folder: Path, cache=None) -> dict:
             df = cache.get_excel(latest_file)
         else:
             df = pd.read_excel(latest_file)
+        from core.data.processor import add_farm_lineage_columns
+        df = add_farm_lineage_columns(
+            df, analysis_folder.parent, animal_id_column='母牛号'
+        )
 
         logger.info(f"成功读取配种记录明细数据: {len(df)}行, {len(df.columns)}列")
 

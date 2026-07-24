@@ -78,6 +78,12 @@ def collect_cow_index_data(analysis_folder: Path, project_folder: Path = None) -
             df_merged['是否在场'] = '是'
             df_merged['sex'] = '母'
 
+        if project_folder:
+            from core.data.processor import add_farm_lineage_columns
+            df_merged = add_farm_lineage_columns(
+                df_merged, project_folder, animal_id_column='cow_id'
+            )
+
         # 自动识别指数列
         # 优先级:
         # 1. 任何以_index结尾的列（如测试_index、NM_index等）
