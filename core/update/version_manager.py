@@ -244,6 +244,10 @@ class VersionManager:
             if hasattr(dialog, 'user_chose_exit') and dialog.user_chose_exit:
                 logger.info("强制更新对话框：用户选择退出程序")
                 return True  # 返回True表示需要退出程序
+
+            if hasattr(dialog, 'should_exit_for_update') and dialog.should_exit_for_update:
+                logger.info("macOS 独立更新助手已启动，主程序即将退出")
+                return True
             
             # 强制更新对话框的其他处理结果：
             # - 如果用户完成更新，对话框会处理重启

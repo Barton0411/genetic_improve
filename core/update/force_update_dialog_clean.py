@@ -97,6 +97,7 @@ class ForceUpdateDialog(QDialog):
         self.app_info = app_info
         self.download_thread = None
         self.user_chose_exit = False  # 用户是否选择退出程序
+        self.should_exit_for_update = False
         self.setupUI()
         
     def setupUI(self):
@@ -500,7 +501,7 @@ class ForceUpdateDialog(QDialog):
     def _create_footer(self, layout):
         """创建简洁的底部说明"""
         # 简洁的说明文字
-        note_label = QLabel("更新过程中请勿关闭程序")
+        note_label = QLabel("下载完成后程序会自动关闭、安装并重新打开")
         note_label.setStyleSheet(f"""
             color: {'#777' if self._is_dark_mode else '#999'};
             font-size: 12px;
@@ -668,28 +669,8 @@ class ForceUpdateDialog(QDialog):
         """下载完成处理"""
         
         if success:
-            self.status_label.setText("下载完成！文件已保存到Downloads文件夹")
-            
-            # 显示重要提示
-            from PyQt6.QtWidgets import QMessageBox
-            msg = QMessageBox(self)
-            msg.setWindowTitle("⚠️ 重要提示")
-            msg.setText(f"""新版本已下载完成！
-
-文件位置：Downloads文件夹
-文件名：{self.downloaded_file_path.name if hasattr(self, 'downloaded_file_path') else '伊利奶牛选配.dmg'}
-
-如果自动安装失败，请：
-1. 打开Downloads文件夹找到下载的DMG文件
-2. 双击DMG文件打开
-3. 将应用拖拽到Applications文件夹替换旧版本
-
-⚠️ 必须安装新版本才能继续使用应用！""")
-            msg.setIcon(QMessageBox.Icon.Warning)
-            msg.exec()
-            
-            # 延迟一秒然后开始实际更新
-            QTimer.singleShot(1000, self._execute_update)
+            self.status_label.setText("下载完成，正在准备自动安装...")
+            QTimer.singleShot(300, self._execute_update)
             
         else:
             self._show_error(f"下载失败: {message}")
@@ -817,25 +798,39 @@ class ForceUpdateDialog(QDialog):
             
             self.status_label.setText(f"正在复制应用程序 {app_name}...")
             
-            # 目标路径
-            target_app = f"/Applications/{app_name}"
-            
-            # macOS最佳实践：直接显示手动安装指导，不进行自动安装
-            logger.info("macOS平台采用手动安装方式，避免权限和应用包问题")
-            self._show_manual_install_guide(app_source, target_app)
-            return
-            
-            # 用户手动安装后，DMG保持挂载状态以便用户操作
-            # 不自动卸载DMG，让用户完成安装后自行处理
-            self.status_label.setText("请按照指导完成手动安装")
-            
-            # 显示安全验证指导（如果用户需要）
-            self._show_security_guide()
+            from .macos_updater import launch_macos_update, resolve_target_app
+
+            target_app = resolve_target_app(
+                self.app_info.get('app_root', ''),
+                app_name,
+            )
+            support_dir = (
+                Path(self.app_info['user_data_dir'])
+                / 'updater'
+            )
+
+            logger.info(
+                "启动独立 macOS 更新助手: source=%s, target=%s",
+                app_source,
+                target_app,
+            )
+            launch_macos_update(
+                source_app=app_source,
+                target_app=str(target_app),
+                main_pid=int(self.app_info.get('pid', os.getpid())),
+                mount_point=mount_point,
+                support_dir=str(support_dir),
+            )
+
+            self.status_label.setText("准备完成，程序即将自动关闭并安装新版本...")
+            self.should_exit_for_update = True
+            self.accept()
             
         except subprocess.CalledProcessError as e:
             self._show_error(f"安装失败: {e}")
         except Exception as e:
-            self._show_error(f"安装出错: {e}")
+            logger.error("自动安装准备失败: %s", e, exc_info=True)
+            self._show_error(f"自动安装准备失败: {e}")
     
     def _install_windows_exe(self):
         """安装Windows EXE包"""

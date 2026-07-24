@@ -362,6 +362,7 @@ jobs:
         APP_NAME="伊利奶牛选配"
         DMG_NAME="伊利奶牛选配_v${VERSION}_mac"
         DMG_PATH="${DMG_NAME}.dmg"
+        DMG_STAGE="dmg_stage"
         
         # 创建DMG背景图片目录（如果需要）
         mkdir -p dmg_resources
@@ -376,6 +377,16 @@ jobs:
         3. 首次运行可能需要右键点击选择"打开"
         EOF
         
+        # DMG 只放应用本体。dist/ 同时包含 PyInstaller 的 COLLECT 目录，
+        # 直接以 dist/ 制盘会在安装窗口里多出一个同名文件夹。
+        rm -rf "$DMG_STAGE"
+        mkdir -p "$DMG_STAGE"
+        cp -R "dist/${APP_NAME}.app" "$DMG_STAGE/"
+
+        ENTRY_COUNT=$(find "$DMG_STAGE" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')
+        test "$ENTRY_COUNT" = "1"
+        test -d "$DMG_STAGE/${APP_NAME}.app"
+
         # 使用create-dmg创建美观的DMG
         create-dmg \
           --volname "伊利奶牛选配" \
@@ -390,7 +401,7 @@ jobs:
           --hdiutil-quiet \
           --no-internet-enable \
           "$DMG_PATH" \
-          "dist/" || {
+          "$DMG_STAGE/" || {
             # 如果create-dmg失败，使用简单方法
             echo "create-dmg failed, using simple method"
             

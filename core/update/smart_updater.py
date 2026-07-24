@@ -32,13 +32,17 @@ class PathDetector:
         # 获取当前程序的绝对路径
         if getattr(sys, 'frozen', False):
             # PyInstaller 打包后的程序
-            if self.platform == 'darwin' and sys.executable.endswith('.app/Contents/MacOS/GeneticImprove'):
-                # macOS app bundle
-                app_root = Path(sys.executable).parents[2]  # 到 .app 目录
-                executable_path = Path(sys.executable)
+            executable_path = Path(sys.executable)
+            if self.platform == 'darwin':
+                # macOS 可执行文件名会随产品名称变化，按 .app 包结构识别，
+                # 不再依赖旧的 GeneticImprove 英文文件名。
+                app_bundle = next(
+                    (parent for parent in executable_path.parents if parent.suffix == '.app'),
+                    None
+                )
+                app_root = app_bundle if app_bundle else executable_path.parent
             else:
                 # Windows exe 或 Linux
-                executable_path = Path(sys.executable)
                 app_root = executable_path.parent
         else:
             # 开发环境
