@@ -11,23 +11,27 @@ import unittest
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import requests
 from fastapi.testclient import TestClient
 
+from api.api_client import APIClient, _sanitize_for_log
 from api.hmy_api_client import HMYApiClient
 from api.hmy_proxy import (
     HMYProxyClient,
     HMYProxyConfigError,
     is_hmy_user_allowed,
 )
+from api.yqn_auth_bridge import YQNAuthError, verify_yqn_access_token
 
 TEST_CIPHER_MATERIAL = "0123456789abcdef"
 TEST_JWT_MATERIAL = "test-jwt-signing-value"
 TEST_DB_MATERIAL = "test-db-value"
 TEST_CLIENT_CREDENTIAL = "test-jwt-value"
+TEST_YQN_CREDENTIAL = "test-yqn-value"
 
 
 class FakeResponse:
@@ -106,6 +110,47 @@ class HMYProxyClientTests(unittest.TestCase):
         self.assertFalse(is_hmy_user_allowed("not-allowed"))
 
 
+class YQNAuthBridgeTests(unittest.TestCase):
+    def test_verifies_token_and_uses_upstream_username(self):
+        session = FakeSession(
+            [
+                FakeResponse(
+                    {
+                        "code": 200,
+                        "user": {"userName": "10075345", "nickName": "测试"},
+                    }
+                )
+            ]
+        )
+
+        username = verify_yqn_access_token(
+            TEST_YQN_CREDENTIAL,
+            base_url="https://yqn.example.test",
+            session=session,
+        )
+
+        self.assertEqual(username, "10075345")
+        url, request = session.calls[0]
+        self.assertEqual(url, "https://yqn.example.test/system/user/getInfo")
+        self.assertEqual(
+            request["headers"]["Authorization"],
+            f"Bearer {TEST_YQN_CREDENTIAL}",
+        )
+        self.assertFalse(session.trust_env)
+
+    def test_rejects_invalid_upstream_identity_response(self):
+        session = FakeSession(
+            [FakeResponse({"code": 200, "user": {"nickName": "测试"}})]
+        )
+
+        with self.assertRaises(YQNAuthError):
+            verify_yqn_access_token(
+                TEST_YQN_CREDENTIAL,
+                base_url="https://yqn.example.test",
+                session=session,
+            )
+
+
 class HMYDesktopClientTests(unittest.TestCase):
     def test_desktop_prefers_current_in_memory_login_token(self):
         with patch("api.api_client.get_api_client") as get_api_client:
@@ -175,6 +220,114 @@ class HMYDesktopClientTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "未开通慧牧云功能"):
             client.get_farm_herd("farm-1")
+
+    def test_yqn_exchange_establishes_current_software_session(self):
+        client = APIClient.__new__(APIClient)
+        client.token = None
+        client.user_info = None
+        client._make_request = MagicMock(
+            return_value=(
+                True,
+                {
+                    "success": True,
+                    "message": "慧牧云登录授权成功",
+                    "data": {
+                        "token": TEST_CLIENT_CREDENTIAL,
+                        "user_id": "10075345",
+                    },
+                },
+            )
+        )
+
+        with patch(
+            "auth.token_manager.get_token_manager"
+        ) as get_token_manager:
+            success, token, _ = client.exchange_yqn_token(
+                TEST_YQN_CREDENTIAL
+            )
+
+        self.assertTrue(success)
+        self.assertEqual(token, TEST_CLIENT_CREDENTIAL)
+        self.assertEqual(client.token, TEST_CLIENT_CREDENTIAL)
+        self.assertEqual(client.user_info["user_id"], "10075345")
+        get_token_manager.return_value.save_token.assert_called_once_with(
+            TEST_CLIENT_CREDENTIAL,
+            "10075345",
+        )
+        _, endpoint = client._make_request.call_args.args[:2]
+        self.assertEqual(endpoint, "/api/auth/yqn/exchange")
+
+    def test_api_logging_hides_all_login_credentials(self):
+        sanitized = _sanitize_for_log(
+            {
+                "password": "plain-password",
+                "data": {"token": "software-token"},
+                "Authorization": "Bearer yqn-token",
+            }
+        )
+
+        self.assertEqual(sanitized["password"], "***")
+        self.assertEqual(sanitized["data"]["token"], "***")
+        self.assertEqual(sanitized["Authorization"], "***")
+
+
+class YQNLoginHMYIntegrationTests(unittest.TestCase):
+    def test_successful_yqn_login_exchanges_hmy_session(self):
+        from gui.login_dialog import LoginDialog
+
+        response = MagicMock()
+        response.json.return_value = {
+            "code": 200,
+            "msg": "ok",
+            "data": {"access_token": TEST_YQN_CREDENTIAL},
+        }
+        session = MagicMock()
+        session.post.return_value = response
+        software_client = MagicMock()
+        software_client.exchange_yqn_token.return_value = (
+            True,
+            TEST_CLIENT_CREDENTIAL,
+            "ok",
+        )
+        token_manager = MagicMock()
+        dialog = SimpleNamespace(
+            YQN_API_PROD="https://yqn.example.test",
+            yqn_token=None,
+            username=None,
+            login_type=None,
+            remember_password_checkbox=MagicMock(),
+            _save_credentials=MagicMock(),
+            _clear_saved_credentials=MagicMock(),
+            accept=MagicMock(),
+            show_login_form=MagicMock(),
+            password_input=MagicMock(),
+        )
+        dialog.remember_password_checkbox.isChecked.return_value = False
+
+        with (
+            patch("gui.login_dialog.requests.Session", return_value=session),
+            patch(
+                "api.api_client.get_api_client",
+                return_value=software_client,
+            ),
+            patch("api.hmy_proxy.is_hmy_user_allowed", return_value=True),
+            patch(
+                "auth.token_manager.get_token_manager",
+                return_value=token_manager,
+            ),
+        ):
+            LoginDialog.process_yqn_login(
+                dialog,
+                "10075345",
+                "not-a-real-password",
+            )
+
+        software_client.clear_token.assert_called_once_with()
+        token_manager.clear_token.assert_called_once_with()
+        software_client.exchange_yqn_token.assert_called_once_with(
+            TEST_YQN_CREDENTIAL
+        )
+        dialog.accept.assert_called_once_with()
 
 
 class LocalHMYProxyHandler(BaseHTTPRequestHandler):
@@ -378,6 +531,59 @@ class HMYAuthRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), expected)
+
+    def test_yqn_exchange_returns_software_token_for_whitelisted_user(self):
+        with patch.object(
+            self.auth_api,
+            "verify_yqn_access_token",
+            return_value="10075345",
+        ):
+            response = self.client.post(
+                "/api/auth/yqn/exchange",
+                headers={
+                    "Authorization": f"Bearer {TEST_YQN_CREDENTIAL}"
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["data"]["user_id"], "10075345")
+        self.assertTrue(payload["data"]["token"])
+        self.assertNotEqual(
+            payload["data"]["token"],
+            TEST_YQN_CREDENTIAL,
+        )
+
+    def test_yqn_exchange_rejects_non_whitelisted_user(self):
+        with patch.object(
+            self.auth_api,
+            "verify_yqn_access_token",
+            return_value="not-allowed",
+        ):
+            response = self.client.post(
+                "/api/auth/yqn/exchange",
+                headers={
+                    "Authorization": f"Bearer {TEST_YQN_CREDENTIAL}"
+                },
+            )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_yqn_exchange_rejects_invalid_yqn_token(self):
+        with patch.object(
+            self.auth_api,
+            "verify_yqn_access_token",
+            side_effect=self.auth_api.YQNAuthError("invalid"),
+        ):
+            response = self.client.post(
+                "/api/auth/yqn/exchange",
+                headers={
+                    "Authorization": f"Bearer {TEST_YQN_CREDENTIAL}"
+                },
+            )
+
+        self.assertEqual(response.status_code, 401)
 
 
 if __name__ == "__main__":

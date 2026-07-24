@@ -15,6 +15,7 @@ def lazy_import():
 def main():
     # 设置日志记录
     import logging
+    from logging.handlers import RotatingFileHandler
     from pathlib import Path
 
     # 项目根目录
@@ -39,7 +40,12 @@ def main():
             level=logging.DEBUG,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler(log_file, encoding='utf-8'),
+                RotatingFileHandler(
+                    log_file,
+                    maxBytes=20 * 1024 * 1024,
+                    backupCount=5,
+                    encoding='utf-8',
+                ),
                 logging.StreamHandler()
             ]
         )

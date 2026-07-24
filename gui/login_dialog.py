@@ -417,6 +417,31 @@ class LoginDialog(QDialog):
                 self.login_type = "yqn"
                 logging.info("伊起牛登录成功")
 
+                # 慧牧云代理使用本软件 JWT。对白名单账号，用刚核验通过的
+                # 伊起牛会话向服务端安全换票，避免依赖旧的本地令牌缓存。
+                try:
+                    from api.api_client import get_api_client
+                    from api.hmy_proxy import is_hmy_user_allowed
+                    from auth.token_manager import get_token_manager
+
+                    software_client = get_api_client()
+                    software_client.clear_token()
+                    get_token_manager().clear_token()
+                    if is_hmy_user_allowed(username):
+                        exchange_success, _, exchange_message = (
+                            software_client.exchange_yqn_token(self.yqn_token)
+                        )
+                        if not exchange_success:
+                            logging.warning(
+                                "慧牧云登录授权未建立: %s",
+                                exchange_message,
+                            )
+                except Exception as exc:
+                    logging.warning(
+                        "慧牧云登录授权处理失败: %s",
+                        type(exc).__name__,
+                    )
+
                 # 保存或清除凭据
                 if self.remember_password_checkbox.isChecked():
                     self._save_credentials(username, password)

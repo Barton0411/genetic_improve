@@ -74,17 +74,13 @@ class YQNApiClient:
                 result = response.json()
                 self.logger.info(f"result keys: {list(result.keys()) if isinstance(result, dict) else 'not dict'}")
 
-                # 如果是get_user_info，打印data内容
+                # getInfo 只记录结构摘要，不记录完整用户资料。
                 if endpoint == "/system/user/getInfo":
-                    import json
-                    self.logger.info(f"=== get_user_info 响应前500字符 ===")
-                    self.logger.info(response_text[:500])
-                    data = result.get("data", {})
-                    self.logger.info(f"data类型: {type(data)}")
-                    if isinstance(data, dict):
-                        self.logger.info(f"data keys: {list(data.keys())}")
-                        farms = data.get("farms", [])
-                        self.logger.info(f"farms: {type(farms)}, 长度={len(farms) if farms else 0}")
+                    farms = result.get("farms", [])
+                    self.logger.info(
+                        "get_user_info 响应结构有效，牧场数量=%s",
+                        len(farms) if isinstance(farms, list) else 0,
+                    )
 
                 # 检查API返回的业务状态码（200=通用成功，0=部分接口成功码）
                 if result.get("code") not in (0, 200):

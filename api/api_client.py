@@ -13,6 +13,26 @@ import platform
 
 logger = logging.getLogger(__name__)
 
+
+def _sanitize_for_log(value: Any) -> Any:
+    """递归隐藏请求和响应中的凭据字段。"""
+    if isinstance(value, dict):
+        sanitized = {}
+        for key, item in value.items():
+            normalized_key = str(key).lower().replace("-", "_")
+            if any(
+                marker in normalized_key
+                for marker in ("password", "token", "authorization", "secret")
+            ):
+                sanitized[key] = "***"
+            else:
+                sanitized[key] = _sanitize_for_log(item)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_for_log(item) for item in value]
+    return value
+
+
 class APIClient:
     """API客户端类"""
 
@@ -160,16 +180,14 @@ class APIClient:
         logger.debug(f"SSL verification: {self.verify_ssl}")
         logger.debug(f"Timeout: {self.timeout}s")
         if data:
-            # 不记录密码等敏感信息
-            safe_data = {k: '***' if 'password' in k.lower() else v for k, v in data.items()}
-            logger.debug(f"Request data: {safe_data}")
+            logger.debug(f"Request data: {_sanitize_for_log(data)}")
 
         try:
             # 合并请求头
             req_headers = self.session.headers.copy()
             if headers:
                 req_headers.update(headers)
-            logger.debug(f"Request headers: {req_headers}")
+            logger.debug(f"Request headers: {_sanitize_for_log(req_headers)}")
 
             # 发送请求（使用SSL验证配置）
             logger.info(f"Sending {method} request...")
@@ -188,7 +206,7 @@ class APIClient:
 
             # 解析JSON响应
             result = response.json()
-            logger.debug(f"Response data: {result}")
+            logger.debug(f"Response data: {_sanitize_for_log(result)}")
 
             return True, result
 
@@ -267,6 +285,47 @@ class APIClient:
             return True, token, response.get('message', '登录成功')
         else:
             return False, None, response.get('message', '登录失败')
+
+    def exchange_yqn_token(
+        self,
+        yqn_token: str,
+    ) -> Tuple[bool, Optional[str], str]:
+        """用已核验的伊起牛登录会话换取本软件 JWT。"""
+        normalized_token = str(yqn_token or "").strip()
+        if not normalized_token:
+            return False, None, "伊起牛登录状态无效"
+
+        success, response = self._make_request(
+            "POST",
+            "/api/auth/yqn/exchange",
+            headers={"Authorization": f"Bearer {normalized_token}"},
+        )
+        if not success or not response.get("success"):
+            return (
+                False,
+                None,
+                response.get("message", "慧牧云登录授权失败"),
+            )
+
+        response_data = response.get("data") or {}
+        token = response_data.get("token")
+        username = response_data.get("user_id")
+        if not token or not username:
+            return False, None, "慧牧云登录授权响应不完整"
+
+        self.token = token
+        self.user_info = {"user_id": username, "name": None}
+
+        try:
+            from auth.token_manager import get_token_manager
+
+            if not get_token_manager().save_token(token, str(username)):
+                logger.warning("慧牧云软件令牌未能写入本地缓存")
+        except Exception as exc:
+            logger.warning("慧牧云软件令牌缓存失败: %s", type(exc).__name__)
+
+        logger.info("慧牧云软件登录会话已建立")
+        return True, token, response.get("message", "慧牧云登录授权成功")
 
     def register(self, employee_id: str, password: str, invite_code: str, name: str) -> Tuple[bool, str]:
         """

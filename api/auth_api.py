@@ -21,6 +21,7 @@ try:
         HMYProxyUpstreamError,
         is_hmy_user_allowed,
     )
+    from .yqn_auth_bridge import YQNAuthError, verify_yqn_access_token
 except ImportError:
     # 生产 systemd 在 api 目录内以 ``uvicorn auth_api:app`` 启动。
     from hmy_proxy import (
@@ -29,6 +30,7 @@ except ImportError:
         HMYProxyUpstreamError,
         is_hmy_user_allowed,
     )
+    from yqn_auth_bridge import YQNAuthError, verify_yqn_access_token
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -321,6 +323,40 @@ async def get_profile(current_user: str = Depends(verify_token)):
             message=f"获取用户信息失败: {str(e)}",
             timestamp=int(datetime.utcnow().timestamp())
         )
+
+
+@app.post("/api/auth/yqn/exchange")
+def exchange_yqn_token(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """核验伊起牛登录令牌，并为慧牧云代理签发本软件 JWT。"""
+    try:
+        username = verify_yqn_access_token(credentials.credentials)
+    except YQNAuthError as exc:
+        logger.warning("伊起牛登录令牌换票失败")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="伊起牛登录状态已失效",
+        ) from exc
+
+    if not is_hmy_user_allowed(username):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="当前账号未开通慧牧云功能",
+        )
+
+    token = create_access_token(username)
+    logger.info("伊起牛登录令牌换票成功: user=%s", username)
+    return APIResponse(
+        success=True,
+        message="慧牧云登录授权成功",
+        data={
+            "token": token,
+            "user_id": username,
+            "expires_in": JWT_EXPIRE_HOURS * 3600,
+        },
+        timestamp=int(datetime.utcnow().timestamp()),
+    )
 
 
 @app.get("/api/auth/hmy/cows")
