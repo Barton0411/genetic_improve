@@ -7,12 +7,19 @@ import os
 import sys
 import subprocess
 import tempfile
+import shlex
 from pathlib import Path
 
 # 服务器配置
-SERVER_HOST = "39.96.189.27"
-SERVER_USER = "ecs-user"
-SSH_KEY = "~/Downloads/genetic_improvement.pem"
+SERVER_HOST = os.getenv("GENETIC_SERVER_HOST", "genepop-prod")
+SERVER_USER = os.getenv("GENETIC_SERVER_USER", "ecs-user")
+SSH_KEY = os.getenv("GENETIC_SSH_KEY")
+
+
+def _ssh_key_option() -> str:
+    if not SSH_KEY:
+        return ""
+    return f"-i {shlex.quote(os.path.expanduser(SSH_KEY))} "
 
 def run_local_command(command, description=None):
     """执行本地命令"""
@@ -36,7 +43,10 @@ def run_ssh_command(command, description=None):
     if description:
         print(f"🔧 {description}")
 
-    ssh_command = f'ssh -i {SSH_KEY} {SERVER_USER}@{SERVER_HOST} "{command}"'
+    target = shlex.quote(f"{SERVER_USER}@{SERVER_HOST}")
+    ssh_command = (
+        f"ssh {_ssh_key_option()}{target} {shlex.quote(command)}"
+    )
 
     try:
         result = subprocess.run(ssh_command, shell=True, capture_output=True, text=True)
@@ -57,7 +67,10 @@ def copy_file_to_server(local_path, remote_path, description=None):
     if description:
         print(f"📋 {description}")
 
-    scp_command = f'scp -i {SSH_KEY} "{local_path}" {SERVER_USER}@{SERVER_HOST}:{remote_path}'
+    target = shlex.quote(f"{SERVER_USER}@{SERVER_HOST}:{remote_path}")
+    scp_command = (
+        f"scp {_ssh_key_option()}{shlex.quote(str(local_path))} {target}"
+    )
 
     try:
         result = subprocess.run(scp_command, shell=True, capture_output=True, text=True)
@@ -100,15 +113,24 @@ def deploy_auth_api():
         return False
 
     # 5. 创建环境变量文件
-    env_content = '''# 数据库配置
+    db_password = os.getenv("DB_PASSWORD")
+    jwt_secret = os.getenv("JWT_SECRET")
+    if not db_password or not jwt_secret:
+        print("❌ 请先从安全凭据存储加载 DB_PASSWORD 和 JWT_SECRET")
+        return False
+    if any(char in db_password + jwt_secret for char in "\r\n"):
+        print("❌ 环境变量中不能包含换行符")
+        return False
+
+    env_content = f'''# 数据库配置
 DB_HOST=defectgene-new.mysql.polardb.rds.aliyuncs.com
 DB_PORT=3306
 DB_USER=defect_genetic_checking
-DB_PASSWORD=\${DB_PASSWORD:-"请设置环境变量"}
+DB_PASSWORD={shlex.quote(db_password)}
 DB_NAME=bull_library
 
 # JWT配置
-JWT_SECRET=genetic-improve-api-secret-key-production-2025
+JWT_SECRET={shlex.quote(jwt_secret)}
 JWT_ALGORITHM=HS256
 
 # 服务配置

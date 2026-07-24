@@ -40,12 +40,14 @@ DB_PORT = int(os.getenv('DB_PORT', '3306'))
 DB_USER = os.getenv('DB_USER', 'defect_genetic_checking')
 DB_PASSWORD = os.getenv('DB_PASSWORD')  # 必须从环境变量获取
 DB_NAME = os.getenv('DB_NAME', 'bull_library')
-JWT_SECRET = os.getenv('JWT_SECRET', 'genetic-improve-api-secret-key')
+JWT_SECRET = os.getenv('JWT_SECRET')
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRE_HOURS = 24
 
 if not DB_PASSWORD:
     raise ValueError("DB_PASSWORD environment variable is required")
+if not JWT_SECRET:
+    raise ValueError("JWT_SECRET environment variable is required")
 
 # 数据库连接
 import urllib.parse

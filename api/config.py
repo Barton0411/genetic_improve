@@ -5,10 +5,13 @@ API统一配置文件
 
 import os
 
-# JWT配置 - 所有API必须使用相同的密钥
-JWT_SECRET = os.getenv('JWT_SECRET', 'genetic-improve-api-secret-key')
+# JWT配置 - 所有API必须使用相同的密钥，禁止源码默认值
+JWT_SECRET = os.getenv('JWT_SECRET')
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRE_HOURS = 24
+
+if not JWT_SECRET:
+    raise ValueError("JWT_SECRET environment variable is required")
 
 # 数据库配置
 DB_HOST = os.getenv('DB_HOST', 'defectgene-new.mysql.polardb.rds.aliyuncs.com')

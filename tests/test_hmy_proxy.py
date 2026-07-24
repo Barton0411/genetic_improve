@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
+import sys
+import tempfile
+import threading
 import unittest
 from datetime import date
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
 import requests
@@ -100,6 +107,30 @@ class HMYProxyClientTests(unittest.TestCase):
 
 
 class HMYDesktopClientTests(unittest.TestCase):
+    def test_desktop_prefers_current_in_memory_login_token(self):
+        with patch("api.api_client.get_api_client") as get_api_client:
+            get_api_client.return_value.token = TEST_CLIENT_CREDENTIAL
+            with patch(
+                "auth.token_manager.get_token_manager",
+                side_effect=AssertionError("不应读取本地令牌缓存"),
+            ):
+                token = HMYApiClient._load_auth_token()
+
+        self.assertEqual(token, TEST_CLIENT_CREDENTIAL)
+
+    def test_desktop_restores_persisted_token_after_restart(self):
+        with (
+            patch("api.api_client.get_api_client") as get_api_client,
+            patch("auth.token_manager.get_token_manager") as get_token_manager,
+        ):
+            get_api_client.return_value.token = None
+            get_token_manager.return_value.get_token.return_value = (
+                TEST_CLIENT_CREDENTIAL
+            )
+            token = HMYApiClient._load_auth_token()
+
+        self.assertEqual(token, TEST_CLIENT_CREDENTIAL)
+
     def test_desktop_uses_jwt_proxy_and_merges_pages(self):
         material = TEST_CLIENT_CREDENTIAL
         session = FakeSession(
@@ -144,6 +175,156 @@ class HMYDesktopClientTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "未开通慧牧云功能"):
             client.get_farm_herd("farm-1")
+
+
+class LocalHMYProxyHandler(BaseHTTPRequestHandler):
+    calls = []
+
+    def do_GET(self):
+        request = urlsplit(self.path)
+        query = parse_qs(request.query)
+        page_num = int(query["pageNum"][0])
+        self.__class__.calls.append(
+            {
+                "path": request.path,
+                "authorization": self.headers.get("Authorization"),
+                "page_num": page_num,
+            }
+        )
+        pages = {
+            1: [
+                {"cow_id": "cow-1", "milk_index": "12.34"},
+                {"cow_id": "cow-2", "milk_index": "-0.25"},
+            ],
+            2: [{"cow_id": "cow-3", "milk_index": "0.00"}],
+        }
+        payload = json.dumps(
+            {"code": 200, "count": 3, "data": pages.get(page_num, [])}
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, format, *args):
+        return
+
+
+class HMYDesktopHTTPIntegrationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        LocalHMYProxyHandler.calls = []
+        cls.server = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            LocalHMYProxyHandler,
+        )
+        cls.thread = threading.Thread(
+            target=cls.server.serve_forever,
+            daemon=True,
+        )
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join(timeout=5)
+
+    def test_current_login_token_reaches_real_http_proxy_without_data_shift(self):
+        from api.api_client import get_api_client
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"HOME": temp_dir}):
+                api_client = get_api_client()
+                previous_token = api_client.token
+                api_client.token = TEST_CLIENT_CREDENTIAL
+                try:
+                    client = HMYApiClient(
+                        proxy_base_url=(
+                            f"http://127.0.0.1:{self.server.server_address[1]}"
+                        )
+                    )
+                    payload = client.get_farm_herd(
+                        "farm-1",
+                        page_size=2,
+                    )
+                finally:
+                    api_client.token = previous_token
+
+        self.assertEqual(payload["count"], 3)
+        self.assertEqual(
+            [row["cow_id"] for row in payload["data"]],
+            ["cow-1", "cow-2", "cow-3"],
+        )
+        self.assertEqual(
+            [row["milk_index"] for row in payload["data"]],
+            ["12.34", "-0.25", "0.00"],
+        )
+        self.assertEqual(
+            [call["page_num"] for call in LocalHMYProxyHandler.calls],
+            [1, 2],
+        )
+        self.assertTrue(
+            all(
+                call["path"] == "/api/auth/hmy/cows"
+                and call["authorization"]
+                == f"Bearer {TEST_CLIENT_CREDENTIAL}"
+                for call in LocalHMYProxyHandler.calls
+            )
+        )
+
+
+class TokenManagerMacPackagingTests(unittest.TestCase):
+    def test_frozen_mac_persists_generated_local_encryption_key(self):
+        from auth.token_manager import TokenManager
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = TokenManager()
+            manager.data_dir = Path(temp_dir)
+            manager.token_file = manager.data_dir / "token_cache.json"
+
+            with (
+                patch("platform.system", return_value="Darwin"),
+                patch.object(sys, "frozen", True, create=True),
+            ):
+                self.assertTrue(
+                    manager.save_token(TEST_CLIENT_CREDENTIAL, "10075345")
+                )
+                reloaded_manager = TokenManager()
+                reloaded_manager.data_dir = manager.data_dir
+                reloaded_manager.token_file = manager.token_file
+                restored_token = reloaded_manager.get_token()
+
+            self.assertEqual(restored_token, TEST_CLIENT_CREDENTIAL)
+            key_file = manager.data_dir / ".token_key"
+            self.assertTrue(key_file.exists())
+            self.assertEqual(key_file.stat().st_mode & 0o777, 0o600)
+
+    def test_upgrade_recovers_after_unreadable_legacy_token_cache(self):
+        from auth.token_manager import TokenManager
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = TokenManager()
+            manager.data_dir = Path(temp_dir)
+            manager.token_file = manager.data_dir / "token_cache.json"
+            manager.token_file.write_text(
+                json.dumps({"encrypted_token": "legacy-unreadable-cache"}),
+                encoding="utf-8",
+            )
+
+            with (
+                patch("platform.system", return_value="Darwin"),
+                patch.object(sys, "frozen", True, create=True),
+            ):
+                self.assertIsNone(manager.get_token())
+                self.assertTrue(
+                    manager.save_token(TEST_CLIENT_CREDENTIAL, "10075345")
+                )
+                self.assertEqual(
+                    manager.get_token(),
+                    TEST_CLIENT_CREDENTIAL,
+                )
 
 
 class HMYAuthRouteTests(unittest.TestCase):

@@ -80,15 +80,17 @@ class TokenManager:
             except Exception as e:
                 logger.warning(f"无法保存密钥到系统密钥环: {e}")
 
-            # 降级到本地文件
-            try:
-                with open(key_file, 'wb') as f:
-                    f.write(base64.b64encode(key))
-                # 设置文件权限（仅所有者可读写）
-                os.chmod(key_file, 0o600)
-                logger.info("密钥已保存到本地文件")
-            except Exception as e:
-                logger.error(f"无法保存密钥到本地文件: {e}")
+        # 本地文件是打包版 macOS 的主存储，也是其他平台的降级存储。
+        # 必须始终写入，否则同一进程内再次读取时会生成不同密钥，
+        # 导致刚保存的登录令牌立即无法解密。
+        try:
+            with open(key_file, 'wb') as f:
+                f.write(base64.b64encode(key))
+            # 设置文件权限（仅所有者可读写）
+            os.chmod(key_file, 0o600)
+            logger.info("密钥已保存到本地文件")
+        except Exception as e:
+            logger.error(f"无法保存密钥到本地文件: {e}")
 
         return key
 

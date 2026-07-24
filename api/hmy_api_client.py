@@ -41,7 +41,16 @@ class HMYApiClient:
 
     @staticmethod
     def _load_auth_token() -> Optional[str]:
-        """从软件现有令牌管理器读取登录 JWT。"""
+        """优先复用当前登录会话，必要时再从本地令牌缓存恢复 JWT。"""
+        try:
+            from api.api_client import get_api_client
+
+            token = get_api_client().token
+            if token:
+                return token
+        except Exception:
+            pass
+
         try:
             from auth.token_manager import get_token_manager
 

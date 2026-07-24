@@ -6,6 +6,14 @@ set -e  # 遇到错误立即退出
 
 echo "==================== 认证API服务部署脚本 ===================="
 
+# 敏感值只从调用环境读取，不写入脚本或 Git 历史。
+: "${DB_PASSWORD:?请先通过安全凭据存储设置 DB_PASSWORD}"
+: "${JWT_SECRET:?请先通过安全凭据存储设置 JWT_SECRET}"
+if [[ "${DB_PASSWORD}${JWT_SECRET}" == *$'\n'* || "${DB_PASSWORD}${JWT_SECRET}" == *$'\r'* ]]; then
+    echo "错误：敏感环境变量不能包含换行符"
+    exit 1
+fi
+
 # 配置变量
 SERVICE_NAME="genetic-auth-api"
 SERVICE_PORT="8081"
@@ -37,16 +45,16 @@ echo "  - requirements.txt (可选，用于安装依赖)"
 
 # 3. 设置环境变量
 echo "🔧 配置环境变量..."
-cat > "${SERVICE_DIR}/.env" << 'EOF'
+cat > "${SERVICE_DIR}/.env" << EOF
 # 数据库配置 - 从hardcoded迁移而来
 DB_HOST=defectgene-new.mysql.polardb.rds.aliyuncs.com
 DB_PORT=3306
 DB_USER=defect_genetic_checking
-DB_PASSWORD=\${DB_PASSWORD:-"请设置环境变量"}
+DB_PASSWORD=${DB_PASSWORD}
 DB_NAME=bull_library
 
 # JWT配置
-JWT_SECRET=genetic-improve-api-secret-key-production-2025
+JWT_SECRET=${JWT_SECRET}
 JWT_ALGORITHM=HS256
 
 # 服务配置

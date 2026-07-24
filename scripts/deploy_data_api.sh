@@ -8,7 +8,18 @@ echo "==================== 部署数据API服务 ===================="
 # 检查环境变量
 if [ -z "$DB_PASSWORD" ]; then
     echo "错误：请设置环境变量 DB_PASSWORD"
-    echo "export DB_PASSWORD='your_actual_password'"
+    echo "请从安全凭据存储加载 DB_PASSWORD 后重试"
+    exit 1
+fi
+
+if [ -z "$JWT_SECRET" ]; then
+    echo "错误：请设置环境变量 JWT_SECRET"
+    echo "请从安全凭据存储加载 JWT_SECRET 后重试"
+    exit 1
+fi
+
+if [[ "${DB_PASSWORD}${JWT_SECRET}" == *$'\n'* || "${DB_PASSWORD}${JWT_SECRET}" == *$'\r'* || "${DB_PASSWORD}${JWT_SECRET}" == *'"'* ]]; then
+    echo "错误：敏感环境变量包含 systemd Environment 不支持的字符"
     exit 1
 fi
 
@@ -35,7 +46,7 @@ Environment="DB_PORT=3306"
 Environment="DB_USER=defect_genetic_checking"
 Environment="DB_PASSWORD=$DB_PASSWORD"
 Environment="DB_NAME=bull_library"
-Environment="JWT_SECRET=genetic-improve-api-secret-key-production-2025"
+Environment="JWT_SECRET=$JWT_SECRET"
 ExecStart=/usr/bin/python3 /home/ecs-user/api/data_api.py
 Restart=always
 RestartSec=10
