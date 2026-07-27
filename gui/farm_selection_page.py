@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QDialog, QListWidget, QProgressDialog, QGroupBox, QFrame,
     QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QHeaderView, QButtonGroup, QRadioButton, QListWidgetItem,
-    QAbstractItemView, QComboBox
+    QAbstractItemView, QComboBox, QInputDialog
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QColor, QBrush
@@ -71,7 +71,14 @@ class DataDownloadWorker(QThread):
     finished = pyqtSignal(Path)  # Excel文件路径
     error = pyqtSignal(str)  # 错误消息
 
-    def __init__(self, api_client, farms, project_path, is_merged=False):
+    def __init__(
+        self,
+        api_client,
+        farms,
+        project_path,
+        is_merged=False,
+        local_farms=None,
+    ):
         """
         初始化下载工作线程
 
@@ -86,6 +93,7 @@ class DataDownloadWorker(QThread):
         self.farms = farms
         self.project_path = project_path
         self.is_merged = is_merged
+        self.local_farms = local_farms or []
         self.logger = logging.getLogger(__name__)
 
     def run(self):
@@ -108,6 +116,16 @@ class DataDownloadWorker(QThread):
 
                 all_api_data.append((farm_code, api_data))
                 self.logger.info(f"下载牧场 {farm_code} 数据完成: {cow_count} 头")
+                if cow_count:
+                    farm_raw_dir = (
+                        self.project_path
+                        / "raw_data"
+                        / "farms"
+                        / str(farm_code)
+                    )
+                    YQNDataConverter.convert_herd_to_excel(
+                        api_data, farm_raw_dir / "cow_data.xlsx"
+                    )
 
             # 步骤2: 合并数据（如果是多选模式）
             self.progress.emit(25, "正在合并数据...")
@@ -148,10 +166,23 @@ class DataDownloadWorker(QThread):
                     data = breeding_data.get("data", {})
                     count = len(data.get("rows", [])) if isinstance(data, dict) else 0
                     self.logger.info(f"下载牧场 {farm_code} 配种记录完成: {count} 条")
+                    if count:
+                        farm_raw_dir = (
+                            self.project_path
+                            / "raw_data"
+                            / "farms"
+                            / str(farm_code)
+                        )
+                        YQNDataConverter.convert_breeding_records_to_excel(
+                            breeding_data,
+                            farm_raw_dir / "breeding_records.xlsx",
+                        )
 
                 # 合并配种记录（多牧场时加站号前缀）
                 self.progress.emit(42, "正在转换配种记录...")
-                merged_breeding = YQNDataConverter.merge_breeding_records(all_breeding_data)
+                merged_breeding = YQNDataConverter.merge_breeding_records(
+                    all_breeding_data, force_prefix=self.is_merged
+                )
 
                 if merged_breeding:
                     # 构建合并后的 api_data 格式供转换方法使用
@@ -251,7 +282,21 @@ class DataDownloadWorker(QThread):
                 self.logger.warning(f"冻精库存下载/标准化失败（不影响主流程）: {e}")
                 self.progress.emit(95, f"冻精库存处理失败: {str(e)[:50]}，继续处理...")
 
-            self.progress.emit(95, "全部标准化完成")
+            self.progress.emit(98, "正在合并本地补充牧场...")
+            from core.data.composite_farm_manager import (
+                finalize_composite_project,
+            )
+
+            finalize_composite_project(
+                self.project_path,
+                self.farms,
+                self.local_farms,
+                data_source="伊起牛",
+                ids_are_prefixed=self.is_merged,
+                progress_callback=lambda pct, msg: self.progress.emit(
+                    98 + int(pct * 0.02), msg
+                ),
+            )
 
             # 步骤5: 完成
             self.progress.emit(100, "牧场项目创建成功!")
@@ -269,12 +314,20 @@ class HMYDataDownloadWorker(QThread):
     finished = pyqtSignal(Path)
     error = pyqtSignal(str)
 
-    def __init__(self, api_client, farms, project_path, is_merged=False):
+    def __init__(
+        self,
+        api_client,
+        farms,
+        project_path,
+        is_merged=False,
+        local_farms=None,
+    ):
         super().__init__()
         self.api_client = api_client
         self.farms = farms
         self.project_path = Path(project_path)
         self.is_merged = is_merged
+        self.local_farms = local_farms or []
 
     def run(self):
         try:
@@ -286,6 +339,16 @@ class HMYDataDownloadWorker(QThread):
                 api_data = self.api_client.get_farm_herd(farm["code"])
                 farm["cow_count"] = len(api_data.get("data") or [])
                 all_api_data.append((farm["code"], api_data))
+                if farm["cow_count"]:
+                    farm_raw_dir = (
+                        self.project_path
+                        / "raw_data"
+                        / "farms"
+                        / str(farm["code"])
+                    )
+                    HMYDataConverter.convert_herd_to_excel(
+                        api_data, farm_raw_dir / "cow_data.xlsx"
+                    )
 
             self.progress.emit(55, "正在合并牛群数据...")
             if self.is_merged:
@@ -322,8 +385,20 @@ class HMYDataDownloadWorker(QThread):
                 progress_callback=standardize_progress,
                 source_system="慧牧云",
             )
-            FileManager.save_project_metadata(
-                self.project_path, self.farms, data_source="慧牧云"
+            self.progress.emit(95, "正在合并本地补充牧场...")
+            from core.data.composite_farm_manager import (
+                finalize_composite_project,
+            )
+
+            finalize_composite_project(
+                self.project_path,
+                self.farms,
+                self.local_farms,
+                data_source="慧牧云",
+                ids_are_prefixed=self.is_merged,
+                progress_callback=lambda pct, msg: self.progress.emit(
+                    95 + int(pct * 0.05), msg
+                ),
             )
             self.progress.emit(100, "慧牧云牧场项目创建成功")
             self.finished.emit(excel_path)
@@ -379,6 +454,80 @@ class FarmListItem(QWidget):
         self.checkbox.setChecked(checked)
 
 
+class LocalFarmListItem(QWidget):
+    """本地补充牧场列表项。"""
+
+    checked_changed = pyqtSignal(str, bool)
+    view_requested = pyqtSignal(str)
+    reupload_requested = pyqtSignal(str)
+    remove_requested = pyqtSignal(str)
+
+    def __init__(self, farm_data: dict, parent=None):
+        super().__init__(parent)
+        self.farm_data = farm_data
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(10)
+
+        self.checkbox = QCheckBox()
+        self.checkbox.stateChanged.connect(
+            lambda state: self.checked_changed.emit(
+                str(self.farm_data.get("farmCode", "")),
+                state == Qt.CheckState.Checked.value,
+            )
+        )
+        layout.addWidget(self.checkbox)
+
+        code = str(self.farm_data.get("farmCode", ""))
+        code_label = QLabel(code)
+        code_label.setFixedWidth(90)
+        code_label.setStyleSheet("font-size: 12px; color: #606266;")
+        layout.addWidget(code_label)
+
+        name_label = QLabel(str(self.farm_data.get("name", "")))
+        name_label.setStyleSheet("font-size: 13px; color: #303133;")
+        layout.addWidget(name_label, 1)
+
+        source_label = QLabel(
+            f"本地·{self.farm_data.get('source_system', '')} "
+            f"({self.farm_data.get('cow_count', 0)}头)"
+        )
+        source_label.setStyleSheet("font-size: 11px; color: #909399;")
+        layout.addWidget(source_label)
+
+        button_style = """
+            QPushButton {
+                padding: 3px 6px; color: #606266; background: white;
+                border: 1px solid #dcdfe6; border-radius: 3px;
+            }
+            QPushButton:hover { background: #f5f7fa; }
+        """
+        view_button = QPushButton("详情")
+        view_button.setFixedWidth(48)
+        view_button.setStyleSheet(button_style)
+        view_button.clicked.connect(lambda: self.view_requested.emit(code))
+        layout.addWidget(view_button)
+
+        reupload_button = QPushButton("重传")
+        reupload_button.setFixedWidth(48)
+        reupload_button.setStyleSheet(button_style)
+        reupload_button.clicked.connect(
+            lambda: self.reupload_requested.emit(code)
+        )
+        layout.addWidget(reupload_button)
+
+        remove_button = QPushButton("移除")
+        remove_button.setFixedWidth(48)
+        remove_button.setStyleSheet(button_style)
+        remove_button.clicked.connect(
+            lambda: self.remove_requested.emit(code)
+        )
+        layout.addWidget(remove_button)
+
+    def set_checked(self, checked: bool):
+        self.checkbox.setChecked(checked)
+
+
 class FarmSelectionPage(QWidget):
     """牧场数据对接页面，支持伊起牛和慧牧云。"""
 
@@ -399,6 +548,8 @@ class FarmSelectionPage(QWidget):
         self.api_client = None
         self.all_farms = []  # 所有牧场数据
         self.selected_farms = {}  # 已选牧场 {farm_code: farm_data}
+        self.local_farms = {}  # 本地补充牧场 {farm_code: farm_data}
+        self.local_farm_list_items = {}
         self.current_region = None  # 当前选中的区域
         self.current_group_farms = []  # 当前分组或搜索结果中的牧场
         self.farm_list_items = {}  # farm_code -> FarmListItem
@@ -703,6 +854,26 @@ class FarmSelectionPage(QWidget):
 
         list_header.addStretch()
 
+        self.add_local_farm_btn = QPushButton("添加本地牧场")
+        self.add_local_farm_btn.setToolTip(
+            "为当前伊起牛或慧牧云接口项目补充接口中没有的牧场"
+        )
+        self.add_local_farm_btn.setStyleSheet(
+            """
+            QPushButton {
+                padding: 6px 12px; color: #67c23a; background: white;
+                border: 1px solid #67c23a; border-radius: 4px;
+                font-size: 12px; font-weight: bold;
+            }
+            QPushButton:hover { background: #f0f9eb; }
+            QPushButton:disabled {
+                color: #c0c4cc; border-color: #dcdfe6;
+            }
+            """
+        )
+        self.add_local_farm_btn.clicked.connect(self.on_add_local_farm)
+        list_header.addWidget(self.add_local_farm_btn)
+
         self.select_group_btn = QPushButton("全选当前分组")
         self.select_group_btn.setEnabled(False)
         self.select_group_btn.setToolTip("选择当前大区、区域或分类中的全部牧场")
@@ -748,6 +919,27 @@ class FarmSelectionPage(QWidget):
         """)
         self.farm_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         right_layout.addWidget(self.farm_list, 1)
+
+        self.local_farm_group = QGroupBox("本地补充牧场")
+        local_layout = QVBoxLayout(self.local_farm_group)
+        local_layout.setContentsMargins(5, 8, 5, 5)
+        self.local_farm_list = QListWidget()
+        self.local_farm_list.setSelectionMode(
+            QAbstractItemView.SelectionMode.NoSelection
+        )
+        self.local_farm_list.setMaximumHeight(150)
+        self.local_farm_list.setStyleSheet(
+            """
+            QListWidget {
+                border: 1px solid #d9ecff; border-radius: 4px;
+                background: #f8fbff;
+            }
+            QListWidget::item { border-bottom: 1px solid #edf5ff; }
+            """
+        )
+        local_layout.addWidget(self.local_farm_list)
+        self.local_farm_group.setVisible(False)
+        right_layout.addWidget(self.local_farm_group)
 
         # 多选警告提示（初始隐藏）
         self.warning_frame = QFrame()
@@ -886,6 +1078,9 @@ class FarmSelectionPage(QWidget):
 
     def switch_data_source(self, source: str):
         """切换牧场数据来源，不允许跨来源混合选择。"""
+        if source == self.data_source and self.api_client is not None:
+            self._update_source_button_styles()
+            return
         if source == "伊起牛" and not self.yqn_token:
             QMessageBox.information(self, "提示", "伊起牛数据源需要使用伊起牛账号登录")
             return
@@ -897,6 +1092,20 @@ class FarmSelectionPage(QWidget):
             )
             return
 
+        if self.selected_farms or self.local_farms:
+            reply = QMessageBox.question(
+                self,
+                "确认切换数据源",
+                "切换接口数据源会清空当前勾选和已暂存的本地补充牧场，"
+                "是否继续？",
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                self._update_source_button_styles()
+                return
+
+        self._clear_local_farms()
         self.data_source = source
         self.selected_farms.clear()
         self.all_farms = []
@@ -939,6 +1148,213 @@ class FarmSelectionPage(QWidget):
         except Exception as exc:
             self.api_client = None
             QMessageBox.critical(self, "数据源初始化失败", str(exc))
+
+    def on_add_local_farm(self):
+        """为当前接口项目添加一个本地补充牧场。"""
+        if not self.data_source or self.api_client is None:
+            QMessageBox.warning(
+                self, "数据源不可用", "请先选择可用的接口数据源"
+            )
+            return
+
+        source_system, accepted = QInputDialog.getItem(
+            self,
+            "选择牧场数据源",
+            "请选择本地补充文件的数据来源：",
+            ["伊起牛", "优源-DC305", "慧牧云"],
+            0,
+            False,
+        )
+        if not accepted:
+            return
+
+        from gui.local_farm_dialog import LocalFarmUploadDialog
+        from core.data.composite_farm_manager import cleanup_local_farm
+
+        dialog = LocalFarmUploadDialog(source_system, self)
+        if (
+            dialog.exec() != QDialog.DialogCode.Accepted
+            or not dialog.result_farm
+        ):
+            return
+
+        farm = dialog.result_farm
+        farm_code = str(farm.get("farmCode", "")).strip()
+        interface_codes = {
+            str(item.get("farmCode", "")).strip()
+            for item in self.all_farms
+        }
+        if farm_code in interface_codes:
+            cleanup_local_farm(farm)
+            QMessageBox.warning(
+                self,
+                "牧场编号重复",
+                "该牧场编号已存在于当前接口牧场清单中，"
+                "不能同时作为本地补充牧场添加。",
+            )
+            return
+        if farm_code in self.local_farms:
+            cleanup_local_farm(farm)
+            QMessageBox.warning(
+                self,
+                "牧场编号重复",
+                "已经添加过相同牧场编号的本地补充牧场。",
+            )
+            return
+
+        self.local_farms[farm_code] = farm
+        self.selected_farms[farm_code] = farm
+        self._refresh_local_farm_list()
+        self.update_selection_ui()
+
+    def _refresh_local_farm_list(self):
+        self.local_farm_list.clear()
+        self.local_farm_list_items.clear()
+        for farm_code, farm in self.local_farms.items():
+            item = QListWidgetItem(self.local_farm_list)
+            item.setSizeHint(QSize(0, 40))
+            widget = LocalFarmListItem(farm)
+            widget.checked_changed.connect(self._on_local_farm_checked)
+            widget.view_requested.connect(self._show_local_farm_summary)
+            widget.reupload_requested.connect(self._reupload_local_farm)
+            widget.remove_requested.connect(self._remove_local_farm)
+            widget.set_checked(farm_code in self.selected_farms)
+            self.local_farm_list.setItemWidget(item, widget)
+            self.local_farm_list_items[farm_code] = widget
+        self.local_farm_group.setVisible(bool(self.local_farms))
+
+    def _on_local_farm_checked(self, farm_code: str, checked: bool):
+        if checked:
+            farm = self.local_farms.get(farm_code)
+            if farm:
+                self.selected_farms[farm_code] = farm
+        else:
+            self.selected_farms.pop(farm_code, None)
+        self.update_selection_ui()
+
+    def _remove_local_farm(self, farm_code: str):
+        from core.data.composite_farm_manager import cleanup_local_farm
+
+        farm = self.local_farms.pop(farm_code, None)
+        self.selected_farms.pop(farm_code, None)
+        if farm:
+            cleanup_local_farm(farm)
+        self._refresh_local_farm_list()
+        self.update_selection_ui()
+
+    def _show_local_farm_summary(self, farm_code: str):
+        farm = self.local_farms.get(farm_code)
+        if not farm:
+            return
+        breeding_text = (
+            f"{farm.get('breeding_count', 0)} 条"
+            if farm.get("has_breeding_records")
+            else "未上传"
+        )
+        QMessageBox.information(
+            self,
+            "本地补充牧场详情",
+            f"牧场编号：{farm_code}\n"
+            f"牧场名称：{farm.get('name', '')}\n"
+            f"数据来源：{farm.get('source_system', '')}\n"
+            f"有效母牛：{farm.get('cow_count', 0)} 头\n"
+            f"配种记录：{breeding_text}",
+        )
+
+    def _reupload_local_farm(self, farm_code: str):
+        old_farm = self.local_farms.get(farm_code)
+        if not old_farm:
+            return
+
+        from gui.local_farm_dialog import LocalFarmUploadDialog
+        from core.data.composite_farm_manager import cleanup_local_farm
+
+        dialog = LocalFarmUploadDialog(
+            old_farm.get("source_system", "伊起牛"), self
+        )
+        if (
+            dialog.exec() != QDialog.DialogCode.Accepted
+            or not dialog.result_farm
+        ):
+            return
+
+        new_farm = dialog.result_farm
+        new_code = str(new_farm.get("farmCode", "")).strip()
+        interface_codes = {
+            str(item.get("farmCode", "")).strip()
+            for item in self.all_farms
+        }
+        other_local_codes = set(self.local_farms) - {farm_code}
+        if new_code in interface_codes or new_code in other_local_codes:
+            cleanup_local_farm(new_farm)
+            QMessageBox.warning(
+                self,
+                "牧场编号重复",
+                "重新上传后的牧场编号与现有牧场重复。",
+            )
+            return
+
+        was_selected = farm_code in self.selected_farms
+        cleanup_local_farm(old_farm)
+        self.local_farms.pop(farm_code, None)
+        self.selected_farms.pop(farm_code, None)
+        self.local_farms[new_code] = new_farm
+        if was_selected:
+            self.selected_farms[new_code] = new_farm
+        self._refresh_local_farm_list()
+        self.update_selection_ui()
+
+    def _clear_local_farms(self):
+        from core.data.composite_farm_manager import cleanup_local_farm
+
+        for farm in self.local_farms.values():
+            cleanup_local_farm(farm)
+        self.local_farms.clear()
+        self.local_farm_list_items.clear()
+        if hasattr(self, "local_farm_list"):
+            self.local_farm_list.clear()
+        if hasattr(self, "local_farm_group"):
+            self.local_farm_group.setVisible(False)
+
+    def _build_selected_farm_specs(self):
+        """构建工作线程使用的接口牧场和本地牧场定义。"""
+        interface_farms = []
+        local_farms = []
+        for farm in self.selected_farms.values():
+            if farm.get("source_kind") == "local":
+                local_farms.append(
+                    {
+                        "code": str(farm.get("farmCode", "")).strip(),
+                        "name": str(farm.get("name", "")).strip(),
+                        "cow_count": int(farm.get("cow_count", 0)),
+                        "breeding_count": int(
+                            farm.get("breeding_count", 0)
+                        ),
+                        "has_breeding_records": bool(
+                            farm.get("has_breeding_records", False)
+                        ),
+                        "source_kind": "local",
+                        "source_system": farm.get("source_system", ""),
+                        "staging_path": farm.get("staging_path", ""),
+                    }
+                )
+            else:
+                interface_farms.append(
+                    {
+                        "code": str(
+                            farm.get("farmCode", "")
+                        ).strip(),
+                        "name": str(farm.get("name", "")).strip(),
+                        "cow_count": 0,
+                        "has_breeding_records": (
+                            self.data_source == "伊起牛"
+                        ),
+                        "source_kind": "api",
+                        "source_system": self.data_source,
+                    }
+                )
+        return interface_farms, local_farms
+
     def init_api_client(self):
         """初始化API客户端并加载牧场列表"""
         self.logger.info("开始初始化伊起牛API客户端")
@@ -1271,7 +1687,15 @@ class FarmSelectionPage(QWidget):
     def update_selection_ui(self):
         """更新选择相关的UI"""
         count = len(self.selected_farms)
-        self.selected_count_label.setText(f"已选: {count}个")
+        local_count = sum(
+            1
+            for farm in self.selected_farms.values()
+            if farm.get("source_kind") == "local"
+        )
+        interface_count = count - local_count
+        self.selected_count_label.setText(
+            f"已选: {count}个（接口{interface_count}/本地{local_count}）"
+        )
 
         # 多选警告
         self.warning_frame.setVisible(count >= 2)
@@ -1331,7 +1755,11 @@ class FarmSelectionPage(QWidget):
         for i, farm in enumerate(farm_list, 1):
             code = farm.get('farmCode', '')
             name = farm.get('name', '')
-            info_lines.append(f"{i}. {code} - {name}")
+            if farm.get("source_kind") == "local":
+                source = f"本地·{farm.get('source_system', '')}"
+            else:
+                source = f"接口·{self.data_source}"
+            info_lines.append(f"{i}. {code} - {name}（{source}）")
 
         info_lines.append(f"\n合计: {len(farm_list)} 个牧场")
 
@@ -1349,7 +1777,15 @@ class FarmSelectionPage(QWidget):
             QMessageBox.warning(self, "提示", "请先选择牧场")
             return
 
-        farm_list = list(self.selected_farms.values())
+        interface_farms, local_farms = self._build_selected_farm_specs()
+        if not interface_farms:
+            QMessageBox.warning(
+                self,
+                "缺少接口牧场",
+                "接口复合项目至少需要勾选一个接口牧场。",
+            )
+            return
+        farm_list = interface_farms + local_farms
         is_merged = len(farm_list) > 1
 
         # 确认对话框
@@ -1359,7 +1795,8 @@ class FarmSelectionPage(QWidget):
                 restriction_text = "• 基因组检测、体型外貌、个体选配功能将被禁用\n"
             confirm_msg = (
                 f"即将创建{self.data_source}合并牧场项目\n\n"
-                f"包含 {len(farm_list)} 个牧场的数据\n\n"
+                f"包含 {len(interface_farms)} 个接口牧场"
+                f"和 {len(local_farms)} 个本地补充牧场\n\n"
                 f"⚠️ 注意：\n"
                 f"• 牛号和母亲号将添加牧场站号前缀\n"
                 f"{restriction_text}\n"
@@ -1389,24 +1826,20 @@ class FarmSelectionPage(QWidget):
             QMessageBox.warning(self, "未开通", "当前账号未开通慧牧云功能。")
             return
 
-        farm_list = list(self.selected_farms.values())
-        is_merged = len(farm_list) > 1
+        interface_farms, local_farms = self._build_selected_farm_specs()
+        if not interface_farms:
+            QMessageBox.warning(
+                self, "缺少接口牧场", "接口复合项目至少需要一个接口牧场。"
+            )
+            return
+        farms_info = interface_farms + local_farms
+        is_merged = len(farms_info) > 1
 
         try:
             # 创建项目文件夹
             from config.settings import Settings
             settings = Settings()
             base_path = Path(settings.get_default_storage())
-
-            # 准备牧场信息
-            farms_info = [
-                {
-                    "code": f.get('farmCode', ''),
-                    "name": f.get('name', ''),
-                    "cow_count": 0  # 牛只数量将在下载数据时更新
-                }
-                for f in farm_list
-            ]
 
             if is_merged:
                 project_path = FileManager.create_merged_project(
@@ -1439,9 +1872,10 @@ class FarmSelectionPage(QWidget):
             )
             self.worker = worker_class(
                 self.api_client,
-                farms_info,
+                interface_farms,
                 project_path,
-                is_merged
+                is_merged,
+                local_farms=local_farms,
             )
 
             # 连接信号
@@ -1490,7 +1924,7 @@ class FarmSelectionPage(QWidget):
                 f"合并牧场项目已创建成功!\n\n"
                 f"项目位置: {project_path}\n\n"
                 f"已完成:\n"
-                f"✅ {farm_count} 个牧场数据已合并下载\n"
+                f"✅ {farm_count} 个牧场数据已合并处理\n"
                 f"✅ 牛号和母亲号已添加牧场前缀\n"
                 f"✅ 数据已自动标准化\n"
                 f"✅ 已生成 merged_farms.txt 说明文件"
@@ -1504,10 +1938,20 @@ class FarmSelectionPage(QWidget):
             bull_ready = bull_file.exists()
 
             if self.data_source == "慧牧云":
+                local_breeding_ready = any(
+                    farm.get("source_kind") == "local"
+                    and farm.get("has_breeding_records")
+                    for farm in self.selected_farms.values()
+                )
+                breeding_line = (
+                    "✅ 本地补充牧场配种记录已合并\n"
+                    if local_breeding_ready
+                    else "ℹ️ 慧牧云接口配种记录暂不可用\n"
+                )
                 completed_lines = (
                     "✅ 牛群明细已自动下载\n"
                     "✅ 数据已自动标准化\n"
-                    "ℹ️ 配种记录暂不使用\n"
+                    f"{breeding_line}"
                     "ℹ️ 选配结果推送暂不可用"
                 )
             else:
@@ -1541,6 +1985,7 @@ class FarmSelectionPage(QWidget):
 
         # 重置状态
         self.selected_farms.clear()
+        self._clear_local_farms()
         self.update_selection_ui()
 
         # 更新列表中的勾选状态
@@ -1582,10 +2027,26 @@ class FarmSelectionPage(QWidget):
             QMessageBox.warning(self, "提示", "请先选择牧场")
             return
 
-        farm_list = list(self.selected_farms.values())
-        is_merged = len(farm_list) > 1
+        interface_farms, local_farms = self._build_selected_farm_specs()
+        if not interface_farms:
+            QMessageBox.warning(
+                self,
+                "缺少接口牧场",
+                "接口复合项目至少需要勾选一个接口牧场。",
+            )
+            return
 
         if self.data_source == "慧牧云":
+            local_breeding_ready = any(
+                farm.get("source_kind") == "local"
+                and farm.get("has_breeding_records")
+                for farm in self.selected_farms.values()
+            )
+            breeding_text = (
+                "本地补充牧场的配种记录将参与可用分析；"
+                if local_breeding_ready
+                else "配种记录和已配公牛分析将跳过；"
+            )
             confirm_msg = (
                 "即将创建慧牧云项目并自动生成当前可用报告\n\n"
                 "系统将自动执行:\n"
@@ -1593,7 +2054,8 @@ class FarmSelectionPage(QWidget):
                 "2. 在群母牛关键育种性状分析\n"
                 "3. 母牛群指数排名 (NM$权重)\n"
                 "4. 生成当前可用的Excel和PPT报告\n\n"
-                "配种记录、已配公牛和推送功能将跳过；"
+                f"{breeding_text}"
+                "推送功能将跳过；"
                 "备选公牛需在项目创建后手动上传。\n\n"
                 "整个过程可能需要几分钟，是否继续?"
             )
@@ -1630,23 +2092,20 @@ class FarmSelectionPage(QWidget):
             QMessageBox.warning(self, "未开通", "当前账号未开通慧牧云功能。")
             return
 
-        farm_list = list(self.selected_farms.values())
-        is_merged = len(farm_list) > 1
+        interface_farms, local_farms = self._build_selected_farm_specs()
+        if not interface_farms:
+            QMessageBox.warning(
+                self, "缺少接口牧场", "接口复合项目至少需要一个接口牧场。"
+            )
+            return
+        farms_info = interface_farms + local_farms
+        is_merged = len(farms_info) > 1
 
         try:
             # 创建项目文件夹
             from config.settings import Settings
             settings = Settings()
             base_path = Path(settings.get_default_storage())
-
-            farms_info = [
-                {
-                    "code": f.get('farmCode', ''),
-                    "name": f.get('name', ''),
-                    "cow_count": 0
-                }
-                for f in farm_list
-            ]
 
             if is_merged:
                 project_path = FileManager.create_merged_project(
@@ -1662,10 +2121,25 @@ class FarmSelectionPage(QWidget):
 
             # 创建进度对话框
             from gui.progress import ProgressDialog
-            progress_dialog = ProgressDialog(self)
+            # 使用主窗口作为真实父级并设为窗口级模态，确保处理期间
+            # 始终位于主窗口上方，同时不会压住其他应用。
+            main_window = self.window()
+            progress_dialog = ProgressDialog(main_window)
             progress_dialog.setWindowTitle("创建项目并自动生成报告")
+            progress_dialog.setWindowModality(
+                Qt.WindowModality.WindowModal
+            )
+            progress_dialog.setWindowFlag(
+                Qt.WindowType.WindowMinimizeButtonHint, False
+            )
             progress_dialog.set_task_info("正在准备...")
+            progress_dialog.adjustSize()
+            dialog_geometry = progress_dialog.frameGeometry()
+            dialog_geometry.moveCenter(main_window.frameGeometry().center())
+            progress_dialog.move(dialog_geometry.topLeft())
             progress_dialog.show()
+            progress_dialog.raise_()
+            progress_dialog.activateWindow()
 
             # 自动报告为无人值守流程，强制关闭对比牧场总开关：
             # 避免历史勾选残留导致自动生成的报告静默带上对比牧场。
@@ -1680,11 +2154,12 @@ class FarmSelectionPage(QWidget):
             from gui.auto_report_worker import AutoReportWorker
             self.auto_worker = AutoReportWorker(
                 self.api_client,
-                farms_info,
+                interface_farms,
                 project_path,
                 is_merged,
                 service_staff=getattr(self, 'login_user_name', None) or '',
                 data_source=self.data_source,
+                local_farms=local_farms,
             )
 
             # 连接信号
@@ -1870,6 +2345,7 @@ class FarmSelectionPage(QWidget):
 
         # 重置状态
         self.selected_farms.clear()
+        self._clear_local_farms()
         self.update_selection_ui()
 
         for farm_code, widget in self.farm_list_items.items():

@@ -144,7 +144,15 @@ class FileManager:
             code = farm.get('code', 'N/A')
             name = farm.get('name', 'N/A')
             count = farm.get('cow_count', 0)
-            content_lines.append(f"{i}. {code} - {name} ({count}头)")
+            source_kind = farm.get("source_kind", "api")
+            source_system = farm.get("source_system", "")
+            source_label = "本地" if source_kind == "local" else "接口"
+            source_text = (
+                f"，{source_label}·{source_system}" if source_system else ""
+            )
+            content_lines.append(
+                f"{i}. {code} - {name} ({count}头{source_text})"
+            )
 
         content_lines.extend([
             "",
@@ -166,17 +174,34 @@ class FileManager:
             project_path: 项目路径
             farms: 牧场列表
         """
+        normalized_farms = []
+        for farm in farms:
+            normalized_farms.append(
+                {
+                    "code": farm.get('code', ''),
+                    "name": farm.get('name', ''),
+                    "cow_count": farm.get('cow_count', 0),
+                    "source_kind": farm.get("source_kind", "api"),
+                    "source_system": farm.get(
+                        "source_system", data_source
+                    ),
+                    "has_breeding_records": bool(
+                        farm.get("has_breeding_records", False)
+                    ),
+                    "breeding_count": farm.get("breeding_count", 0),
+                }
+            )
+
         metadata = {
             "is_merged": len(farms) > 1,
             "data_source": data_source,
-            "farms": [
-                {
-                    "code": f.get('code', ''),
-                    "name": f.get('name', ''),
-                    "cow_count": f.get('cow_count', 0)
-                }
-                for f in farms
-            ],
+            "interface_source": data_source,
+            "project_type": (
+                "interface_composite"
+                if len(farms) > 1
+                else "single_farm"
+            ),
+            "farms": normalized_farms,
             "created_at": datetime.now().isoformat()
         }
 

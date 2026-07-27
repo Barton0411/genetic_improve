@@ -128,7 +128,6 @@ a = Analysis(
         'notebook',
         'pytest',
         'setuptools',
-        'distutils',
     ],
     noarchive=False,
 )

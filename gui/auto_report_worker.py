@@ -34,6 +34,7 @@ class AutoReportWorker(QThread):
         is_merged=False,
         service_staff=None,
         data_source="伊起牛",
+        local_farms=None,
     ):
         """
         初始化
@@ -52,6 +53,7 @@ class AutoReportWorker(QThread):
         self.is_merged = is_merged
         self.service_staff = service_staff
         self.data_source = data_source
+        self.local_farms = local_farms or []
 
         # 各步骤结果跟踪
         self.results = {
@@ -122,6 +124,13 @@ class AutoReportWorker(QThread):
             cow_count = len(api_data.get('data', []))
             farm['cow_count'] = cow_count
             all_api_data.append((farm_code, api_data))
+            if cow_count:
+                farm_raw_dir = (
+                    self.project_path / "raw_data" / "farms" / str(farm_code)
+                )
+                YQNDataConverter.convert_herd_to_excel(
+                    api_data, farm_raw_dir / "cow_data.xlsx"
+                )
 
         # 合并+转换 (5-6%)
         self.progress.emit(5, "正在合并数据...")
@@ -147,10 +156,29 @@ class AutoReportWorker(QThread):
                 self.progress.emit(pct, f"正在下载 {farm_name} 配种记录...")
                 breeding_data = self.api_client.get_breeding_records(farm_code)
                 all_breeding_data.append((farm_code, breeding_data))
+                data = breeding_data.get("data", {})
+                count = (
+                    len(data.get("rows", []))
+                    if isinstance(data, dict)
+                    else 0
+                )
+                if count:
+                    farm_raw_dir = (
+                        self.project_path
+                        / "raw_data"
+                        / "farms"
+                        / str(farm_code)
+                    )
+                    YQNDataConverter.convert_breeding_records_to_excel(
+                        breeding_data,
+                        farm_raw_dir / "breeding_records.xlsx",
+                    )
 
             # 转换配种记录 (10-11%)
             self.progress.emit(10, "正在转换配种记录...")
-            merged_breeding = YQNDataConverter.merge_breeding_records(all_breeding_data)
+            merged_breeding = YQNDataConverter.merge_breeding_records(
+                all_breeding_data, force_prefix=self.is_merged
+            )
 
             if merged_breeding:
                 merged_breeding_api = {"data": {"rows": merged_breeding}}
@@ -258,6 +286,18 @@ class AutoReportWorker(QThread):
         except Exception as e:
             logger.warning(f"冻精库存处理失败: {e}")
 
+        from core.data.composite_farm_manager import finalize_composite_project
+
+        finalize_composite_project(
+            self.project_path,
+            self.farms,
+            self.local_farms,
+            data_source="伊起牛",
+            ids_are_prefixed=self.is_merged,
+            progress_callback=lambda pct, msg: self.progress.emit(
+                28 + int(pct * 0.02), msg
+            ),
+        )
         self.results['success_items'].append("数据下载与标准化")
         self.progress.emit(30, "数据下载与标准化完成")
 
@@ -265,7 +305,6 @@ class AutoReportWorker(QThread):
         """慧牧云仅下载牛群数据，不请求配种记录和冻精库存。"""
         from core.data.hmy_data_converter import HMYDataConverter
         from core.data.uploader import upload_and_standardize_cow_data
-        from utils.file_manager import FileManager
 
         all_api_data = []
         total_farms = len(self.farms)
@@ -275,6 +314,16 @@ class AutoReportWorker(QThread):
             api_data = self.api_client.get_farm_herd(farm["code"])
             farm["cow_count"] = len(api_data.get("data") or [])
             all_api_data.append((farm["code"], api_data))
+            if farm["cow_count"]:
+                farm_raw_dir = (
+                    self.project_path
+                    / "raw_data"
+                    / "farms"
+                    / str(farm["code"])
+                )
+                HMYDataConverter.convert_herd_to_excel(
+                    api_data, farm_raw_dir / "cow_data.xlsx"
+                )
 
         merged_data = (
             HMYDataConverter.merge_herd_data(all_api_data)
@@ -309,11 +358,25 @@ class AutoReportWorker(QThread):
             progress_callback=standardize_progress,
             source_system="慧牧云",
         )
-        FileManager.save_project_metadata(
-            self.project_path, self.farms, data_source="慧牧云"
+        from core.data.composite_farm_manager import finalize_composite_project
+
+        finalize_composite_project(
+            self.project_path,
+            self.farms,
+            self.local_farms,
+            data_source="慧牧云",
+            ids_are_prefixed=self.is_merged,
+            progress_callback=lambda pct, msg: self.progress.emit(
+                28 + int(pct * 0.02), msg
+            ),
         )
         self.results["success_items"].append("慧牧云牛群数据下载与标准化")
-        self.results["success_items"].append("配种记录不可用，已跳过")
+        if any(
+            farm.get("has_breeding_records") for farm in self.local_farms
+        ):
+            self.results["success_items"].append("本地补充牧场配种记录已合并")
+        else:
+            self.results["success_items"].append("配种记录不可用，已跳过")
         self.results["success_items"].append("冻精库存不可用，备选公牛需手动上传")
         self.progress.emit(30, "慧牧云牛群数据准备完成")
 

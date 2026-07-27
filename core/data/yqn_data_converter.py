@@ -499,7 +499,9 @@ class YQNDataConverter:
         return output_path
 
     @staticmethod
-    def merge_breeding_records(all_records: List[tuple]) -> List[dict]:
+    def merge_breeding_records(
+        all_records: List[tuple], force_prefix: bool = False
+    ) -> List[dict]:
         """
         合并多个牧场的配种记录，多牧场时给耳号加站号前缀
 
@@ -512,7 +514,7 @@ class YQNDataConverter:
         logger = logging.getLogger(__name__)
 
         merged = []
-        add_prefix = len(all_records) > 1
+        add_prefix = force_prefix or len(all_records) > 1
 
         for farm_code, api_data in all_records:
             data = api_data.get("data", {})
