@@ -9,6 +9,15 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
+
+def configure_console_encoding():
+    """确保 Windows CI 控制台能够输出中文版本信息。"""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def get_version_info():
     """获取版本信息"""
     try:
@@ -97,6 +106,7 @@ echo "[BUILD] Changelog generation and upload completed"
 
 def main():
     """主函数"""
+    configure_console_encoding()
     print("[AUTO-CHANGELOG] Starting changelog generation...")
     print("=" * 50)
     
