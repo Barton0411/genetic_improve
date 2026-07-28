@@ -709,12 +709,25 @@ class MainWindow(QMainWindow):
 
         nav_layout.addWidget(version_label)
         nav_layout.addWidget(self.db_version_label)
+        if self.login_type == "yili":
+            change_password_btn = QPushButton("修改密码")
+            change_password_btn.setStyleSheet(about_btn.styleSheet())
+            change_password_btn.clicked.connect(self.show_change_password_dialog)
+            nav_layout.addWidget(change_password_btn)
         nav_layout.addWidget(about_btn)
 
         layout.addWidget(nav_frame)
 
         # 连接导航信号
         self.nav_list.currentRowChanged.connect(self.on_nav_item_changed)
+
+    def show_change_password_dialog(self):
+        """仅为本地账号显示修改密码窗口。"""
+        if self.login_type != "yili":
+            return
+        from gui.change_password_dialog import ChangePasswordDialog
+
+        ChangePasswordDialog(self.username, parent=self).exec()
 
     def create_genetic_analysis_page(self):
         page = QWidget()

@@ -21,7 +21,7 @@ from api.yqn_api_client import YQNApiClient
 from api.hmy_api_client import HMYApiClient
 from core.data.hmy_data_converter import HMYDataConverter
 from core.data.yqn_data_converter import YQNDataConverter
-from config.hmy_access import is_hmy_user_allowed
+from config.hmy_access import can_use_interface_data, is_hmy_user_allowed
 from utils.file_manager import FileManager
 from core.data.uploader import (
     upload_and_standardize_breeding_data,
@@ -511,9 +511,18 @@ class FarmListItem(QWidget):
 
     checked_changed = pyqtSignal(str, bool)  # farm_code, is_checked
 
-    def __init__(self, farm_data: dict, parent=None):
+    API_FARMCODE_WIDTH = 105
+    FARM_NUMBER_WIDTH = 90
+
+    def __init__(
+        self,
+        farm_data: dict,
+        show_hmy_identity: bool = False,
+        parent=None,
+    ):
         super().__init__(parent)
         self.farm_data = farm_data
+        self.show_hmy_identity = show_hmy_identity
         self.init_ui()
 
     def init_ui(self):
@@ -526,16 +535,39 @@ class FarmListItem(QWidget):
         self.checkbox.stateChanged.connect(self._on_checkbox_changed)
         layout.addWidget(self.checkbox)
 
-        # 站号
-        code_label = QLabel(str(self.farm_data.get('farmCode', '')))
-        code_label.setFixedWidth(90)
-        code_label.setStyleSheet("font-size: 12px; color: #606266;")
-        layout.addWidget(code_label)
+        api_farmcode = str(self.farm_data.get("farmCode", "")).strip()
+        full_name = str(self.farm_data.get("name", "")).strip()
+        if self.show_hmy_identity:
+            farm_number, farm_name = HMYDataConverter.split_farm_name(
+                full_name
+            )
+        else:
+            farm_number, farm_name = "", full_name
 
-        # 牧场名称 (字段为 name)
-        name_label = QLabel(self.farm_data.get('name', ''))
-        name_label.setStyleSheet("font-size: 13px; color: #303133;")
-        layout.addWidget(name_label, 1)
+        self.api_farmcode_label = QLabel(api_farmcode)
+        self.api_farmcode_label.setFixedWidth(self.API_FARMCODE_WIDTH)
+        self.api_farmcode_label.setToolTip(api_farmcode)
+        self.api_farmcode_label.setStyleSheet(
+            "font-size: 12px; color: #606266;"
+        )
+        layout.addWidget(self.api_farmcode_label)
+
+        self.farm_name_label = QLabel(farm_name)
+        self.farm_name_label.setToolTip(farm_name)
+        self.farm_name_label.setStyleSheet(
+            "font-size: 13px; color: #303133;"
+        )
+        layout.addWidget(self.farm_name_label, 1)
+
+        self.farm_number_label = None
+        if self.show_hmy_identity:
+            self.farm_number_label = QLabel(farm_number)
+            self.farm_number_label.setFixedWidth(self.FARM_NUMBER_WIDTH)
+            self.farm_number_label.setToolTip(farm_number)
+            self.farm_number_label.setStyleSheet(
+                "font-size: 12px; color: #606266;"
+            )
+            layout.addWidget(self.farm_number_label)
 
     def _on_checkbox_changed(self, state):
         is_checked = state == Qt.CheckState.Checked.value
@@ -637,8 +669,9 @@ class FarmSelectionPage(QWidget):
         super().__init__(parent)
         self.yqn_token = yqn_token
         self.username = username  # 登录账号，作为姓名获取失败时的 fallback
+        self.interface_access_allowed = can_use_interface_data(username)
         self.hmy_access_allowed = is_hmy_user_allowed(username)
-        if yqn_token:
+        if yqn_token and self.interface_access_allowed:
             self.data_source = "伊起牛"
         elif self.hmy_access_allowed:
             self.data_source = "慧牧云"
@@ -957,16 +990,28 @@ class FarmSelectionPage(QWidget):
         self.add_local_farm_btn.setToolTip(
             "为当前伊起牛或慧牧云接口项目补充接口中没有的牧场"
         )
+        self.add_local_farm_btn.setFixedHeight(32)
+        self.add_local_farm_btn.setMinimumWidth(104)
         self.add_local_farm_btn.setStyleSheet(
             """
             QPushButton {
-                padding: 6px 12px; color: #67c23a; background: white;
-                border: 1px solid #67c23a; border-radius: 4px;
-                font-size: 12px; font-weight: bold;
+                padding: 5px 12px;
+                color: #67c23a;
+                background-color: white;
+                border: 1px solid #67c23a;
+                border-radius: 5px;
+                font-size: 12px;
+                font-weight: 500;
             }
-            QPushButton:hover { background: #f0f9eb; }
+            QPushButton:hover {
+                background-color: #f0f9eb;
+                border-color: #85ce61;
+            }
+            QPushButton:pressed { background-color: #e1f3d8; }
             QPushButton:disabled {
-                color: #c0c4cc; border-color: #dcdfe6;
+                color: #c0c4cc;
+                background-color: #f5f7fa;
+                border-color: #e4e7ed;
             }
             """
         )
@@ -976,8 +1021,30 @@ class FarmSelectionPage(QWidget):
         self.select_group_btn = QPushButton("全选当前分组")
         self.select_group_btn.setEnabled(False)
         self.select_group_btn.setToolTip("选择当前大区、区域或分类中的全部牧场")
+        self.select_group_btn.setFixedHeight(32)
+        self.select_group_btn.setMinimumWidth(104)
         self.select_group_btn.setStyleSheet(
-            "font-size: 12px; padding: 4px 10px;"
+            """
+            QPushButton {
+                padding: 5px 12px;
+                color: #409eff;
+                background-color: white;
+                border: 1px solid #409eff;
+                border-radius: 5px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #ecf5ff;
+                border-color: #66b1ff;
+            }
+            QPushButton:pressed { background-color: #d9ecff; }
+            QPushButton:disabled {
+                color: #c0c4cc;
+                background-color: #f5f7fa;
+                border-color: #e4e7ed;
+            }
+            """
         )
         self.select_group_btn.clicked.connect(
             lambda: self.set_current_group_checked(True)
@@ -987,8 +1054,31 @@ class FarmSelectionPage(QWidget):
         self.deselect_group_btn = QPushButton("取消当前分组")
         self.deselect_group_btn.setEnabled(False)
         self.deselect_group_btn.setToolTip("取消当前大区、区域或分类中的全部牧场")
+        self.deselect_group_btn.setFixedHeight(32)
+        self.deselect_group_btn.setMinimumWidth(104)
         self.deselect_group_btn.setStyleSheet(
-            "font-size: 12px; padding: 4px 10px;"
+            """
+            QPushButton {
+                padding: 5px 12px;
+                color: #606266;
+                background-color: white;
+                border: 1px solid #dcdfe6;
+                border-radius: 5px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                color: #409eff;
+                background-color: #ecf5ff;
+                border-color: #c6e2ff;
+            }
+            QPushButton:pressed { background-color: #d9ecff; }
+            QPushButton:disabled {
+                color: #c0c4cc;
+                background-color: #f5f7fa;
+                border-color: #e4e7ed;
+            }
+            """
         )
         self.deselect_group_btn.clicked.connect(
             lambda: self.set_current_group_checked(False)
@@ -1000,6 +1090,45 @@ class FarmSelectionPage(QWidget):
         list_header.addWidget(self.selected_count_label)
 
         right_layout.addLayout(list_header)
+
+        self.farm_column_header = QFrame()
+        self.farm_column_header.setStyleSheet(
+            """
+            QFrame {
+                background-color: #f5f7fa;
+                border: 1px solid #e4e7ed;
+                border-bottom: none;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QLabel {
+                border: none;
+                color: #606266;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            """
+        )
+        column_header_layout = QHBoxLayout(self.farm_column_header)
+        column_header_layout.setContentsMargins(8, 5, 8, 5)
+        column_header_layout.setSpacing(10)
+        column_header_layout.addSpacing(18)
+
+        api_farmcode_header = QLabel("API farmcode")
+        api_farmcode_header.setFixedWidth(
+            FarmListItem.API_FARMCODE_WIDTH
+        )
+        column_header_layout.addWidget(api_farmcode_header)
+
+        farm_name_header = QLabel("牧场名称")
+        column_header_layout.addWidget(farm_name_header, 1)
+
+        farm_number_header = QLabel("牧场编号")
+        farm_number_header.setFixedWidth(FarmListItem.FARM_NUMBER_WIDTH)
+        column_header_layout.addWidget(farm_number_header)
+
+        self.farm_column_header.setVisible(self.data_source == "慧牧云")
+        right_layout.addWidget(self.farm_column_header)
 
         # 牧场列表
         self.farm_list = QListWidget()
@@ -1148,13 +1277,27 @@ class FarmSelectionPage(QWidget):
         bottom_layout.addWidget(self.auto_report_btn)
 
         layout.addLayout(bottom_layout)
-        if not self.yqn_token:
+        if not self.yqn_token or not self.interface_access_allowed:
             self.source_buttons["伊起牛"].setEnabled(False)
-            self.source_buttons["伊起牛"].setToolTip("伊起牛数据源需要伊起牛账号登录")
+            if self.interface_access_allowed:
+                self.source_buttons["伊起牛"].setToolTip(
+                    "伊起牛数据源需要伊起牛账号登录"
+                )
+            else:
+                self.source_buttons["伊起牛"].setToolTip(
+                    "当前账号未开通接口数据功能"
+                )
         if not self.hmy_access_allowed:
             self.source_buttons["慧牧云"].setEnabled(False)
-            self.source_buttons["慧牧云"].setToolTip("当前账号未开通慧牧云功能")
-            if not self.yqn_token:
+            if self.interface_access_allowed:
+                self.source_buttons["慧牧云"].setToolTip(
+                    "当前账号未开通慧牧云功能"
+                )
+            else:
+                self.source_buttons["慧牧云"].setToolTip(
+                    "当前账号未开通接口数据功能"
+                )
+            if not self.yqn_token or not self.interface_access_allowed:
                 self.region_title_label.setText("当前账号没有可用的数据源")
     # 无伊起牛 token 时保留慧牧云入口。
     def show_no_token_message(self):
@@ -1179,6 +1322,13 @@ class FarmSelectionPage(QWidget):
         """切换牧场数据来源，不允许跨来源混合选择。"""
         if source == self.data_source and self.api_client is not None:
             self._update_source_button_styles()
+            return
+        if not self.interface_access_allowed:
+            QMessageBox.information(
+                self,
+                "未开通",
+                "当前账号未开通接口数据功能。",
+            )
             return
         if source == "伊起牛" and not self.yqn_token:
             QMessageBox.information(self, "提示", "伊起牛数据源需要使用伊起牛账号登录")
@@ -1218,6 +1368,11 @@ class FarmSelectionPage(QWidget):
         self._update_source_button_styles()
 
         is_hmy = source == "慧牧云"
+        self.farm_column_header.setVisible(is_hmy)
+        self.search_input.setPlaceholderText(
+            "搜索名称、编号或farmcode..." if is_hmy
+            else "搜索牧场名称或站号..."
+        )
         self.status_filter_widget.setVisible(not is_hmy)
         self.type_filter_widget.setVisible(not is_hmy)
         self.classification_widget.setVisible(is_hmy)
@@ -1739,7 +1894,10 @@ class FarmSelectionPage(QWidget):
             item.setSizeHint(item_size)
 
             # 创建自定义widget
-            farm_widget = FarmListItem(farm)
+            farm_widget = FarmListItem(
+                farm,
+                show_hmy_identity=self.data_source == "慧牧云",
+            )
             farm_widget.checked_changed.connect(self.on_farm_checked_changed)
 
             # 如果之前已选中，恢复选中状态

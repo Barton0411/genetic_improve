@@ -110,6 +110,21 @@ class AuthService:
             logging.error(f"获取用户姓名失败: {e}")
             return None
 
+    def change_password(
+        self,
+        current_password: str,
+        new_password: str,
+    ) -> Tuple[bool, str]:
+        """修改当前已登录本地账号的密码。"""
+        try:
+            return self.api_client.change_password(
+                current_password,
+                new_password,
+            )
+        except Exception as e:
+            logging.error("修改密码失败: %s", type(e).__name__)
+            return False, "修改密码失败，请稍后重试"
+
     def logout(self) -> bool:
         """用户登出"""
         try:

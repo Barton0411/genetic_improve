@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 import pandas as pd
+from PyQt6.QtWidgets import QApplication
 
 from api.hmy_api_client import HMYApiClient
 from core.data.composite_farm_manager import (
@@ -10,6 +11,7 @@ from core.data.composite_farm_manager import (
     _annotate_interface_cows,
 )
 from core.data.hmy_data_converter import HMYDataConverter
+from gui.farm_selection_page import FarmListItem
 
 
 class _FakeResponse:
@@ -36,6 +38,10 @@ class _FakeSession:
 
 
 class HMYFarmIdentityTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
     def test_split_numbered_farm_name(self):
         self.assertEqual(
             HMYDataConverter.split_farm_name("0101001合肥陈刘牧场"),
@@ -47,6 +53,34 @@ class HMYFarmIdentityTests(unittest.TestCase):
             HMYDataConverter.split_farm_name("密云"),
             ("", "密云"),
         )
+
+    def test_hmy_list_item_displays_three_separate_identity_columns(self):
+        item = FarmListItem(
+            {
+                "farmCode": "1100110001",
+                "name": "0101001合肥陈刘牧场",
+            },
+            show_hmy_identity=True,
+        )
+
+        self.assertEqual(item.api_farmcode_label.text(), "1100110001")
+        self.assertEqual(item.farm_name_label.text(), "合肥陈刘牧场")
+        self.assertEqual(item.farm_number_label.text(), "0101001")
+        item.deleteLater()
+
+    def test_hmy_list_item_leaves_missing_farm_number_blank(self):
+        item = FarmListItem(
+            {
+                "farmCode": "1100310011",
+                "name": "密云",
+            },
+            show_hmy_identity=True,
+        )
+
+        self.assertEqual(item.api_farmcode_label.text(), "1100310011")
+        self.assertEqual(item.farm_name_label.text(), "密云")
+        self.assertEqual(item.farm_number_label.text(), "")
+        item.deleteLater()
 
     def test_excel_outputs_three_farm_identity_columns(self):
         records = [

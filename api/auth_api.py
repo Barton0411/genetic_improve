@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import jwt
 from sqlalchemy import create_engine, text
 import hashlib
@@ -74,6 +74,10 @@ class RegisterRequest(BaseModel):
     password: str
     invite_code: str
     name: str
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=6, max_length=128)
 
 class APIResponse(BaseModel):
     success: bool
@@ -322,6 +326,59 @@ async def get_profile(current_user: str = Depends(verify_token)):
             success=False,
             message=f"获取用户信息失败: {str(e)}",
             timestamp=int(datetime.utcnow().timestamp())
+        )
+
+
+@app.post("/api/auth/change-password")
+async def change_password(
+    request: ChangePasswordRequest,
+    current_user: str = Depends(verify_token),
+):
+    """由已登录的本地账号修改自己的密码。"""
+    if request.current_password == request.new_password:
+        return APIResponse(
+            success=False,
+            message="新密码不能与当前密码相同",
+            timestamp=int(datetime.utcnow().timestamp()),
+        )
+
+    try:
+        engine = get_db_engine()
+        with engine.begin() as connection:
+            result = connection.execute(
+                text(
+                    """
+                    UPDATE `id-pw`
+                    SET PW=:new_password
+                    WHERE ID=:username AND PW=:current_password
+                    """
+                ),
+                {
+                    "username": current_user,
+                    "current_password": request.current_password,
+                    "new_password": hash_password(request.new_password),
+                },
+            )
+
+        if result.rowcount != 1:
+            return APIResponse(
+                success=False,
+                message="当前密码错误",
+                timestamp=int(datetime.utcnow().timestamp()),
+            )
+
+        logger.info("用户密码修改成功: user=%s", current_user)
+        return APIResponse(
+            success=True,
+            message="密码修改成功",
+            timestamp=int(datetime.utcnow().timestamp()),
+        )
+    except Exception as e:
+        logger.error("修改密码失败: user=%s error=%s", current_user, type(e).__name__)
+        return APIResponse(
+            success=False,
+            message="修改密码失败，请稍后重试",
+            timestamp=int(datetime.utcnow().timestamp()),
         )
 
 

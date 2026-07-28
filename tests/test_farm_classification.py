@@ -52,15 +52,15 @@ class FarmClassificationTests(unittest.TestCase):
             "area": {
                 "东北大区": 16,
                 "中西部大区": 13,
-                "内蒙大区": 25,
+                "内蒙大区": 23,
                 "华北大区": 16,
-                "其他": 35,
+                "其他": 37,
             },
-            "organic_hp": {"是": 19, "否": 51, "其他": 35},
-            "heat_stress": {"是": 19, "否": 51, "其他": 35},
-            "source_mode": {"自繁": 52, "进口": 18, "其他": 35},
-            "a2": {"是": 10, "否": 60, "其他": 35},
-            "dha": {"是": 1, "否": 69, "其他": 35},
+            "organic_hp": {"是": 17, "否": 51, "其他": 37},
+            "heat_stress": {"是": 19, "否": 49, "其他": 37},
+            "source_mode": {"自繁": 50, "进口": 18, "其他": 37},
+            "a2": {"是": 9, "否": 59, "其他": 37},
+            "dha": {"是": 1, "否": 67, "其他": 37},
         }
 
         for _, field in HMY_CLASSIFICATION_OPTIONS:
@@ -75,6 +75,20 @@ class FarmClassificationTests(unittest.TestCase):
             self.assertEqual(len(grouped_codes), 105)
             self.assertEqual(len(set(grouped_codes)), 105)
             self.assertEqual(list(groups)[-1], "其他")
+
+    def test_saikexing_same_name_farms_do_not_inherit_youran_categories(self):
+        farms_by_code = {
+            farm["farmCode"]: farm for farm in self.farms
+        }
+
+        for code in ("1100310009", "1100310026"):
+            farm = farms_by_code[code]
+            for _, field in HMY_CLASSIFICATION_OPTIONS:
+                self.assertEqual(
+                    farm[field],
+                    "其他",
+                    f"{code} 的 {field} 不应继承优然同名牧场分类",
+                )
 
     def test_group_select_and_deselect_updates_whole_current_group(self):
         group = self.farms[:3]

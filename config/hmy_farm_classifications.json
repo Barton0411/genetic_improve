@@ -2,7 +2,8 @@
   "_meta": {
     "source": "优然牧业牧场类型.xlsx",
     "source_sheet": "牧场明细",
-    "matched_farm_count": 70,
+    "source_scope": "仅优然牧业",
+    "matched_farm_count": 68,
     "unmatched_policy": "各分类维度统一归入其他"
   },
   "farms": {
@@ -55,10 +56,8 @@
     "1100110049": {"area": "内蒙大区", "organic_hp": "否", "heat_stress": "否", "source_mode": "自繁", "a2": "否", "dha": "否"},
     "1100110050": {"area": "华北大区", "organic_hp": "否", "heat_stress": "是", "source_mode": "进口", "a2": "否", "dha": "否"},
     "1100110051": {"area": "华北大区", "organic_hp": "否", "heat_stress": "是", "source_mode": "进口", "a2": "否", "dha": "否"},
-    "1100310009": {"area": "内蒙大区", "organic_hp": "是", "heat_stress": "否", "source_mode": "自繁", "a2": "否", "dha": "否"},
     "1100110052": {"area": "内蒙大区", "organic_hp": "否", "heat_stress": "否", "source_mode": "进口", "a2": "否", "dha": "否"},
     "1100110057": {"area": "中西部大区", "organic_hp": "否", "heat_stress": "否", "source_mode": "自繁", "a2": "否", "dha": "否"},
-    "1100310026": {"area": "内蒙大区", "organic_hp": "是", "heat_stress": "否", "source_mode": "自繁", "a2": "是", "dha": "否"},
     "1100110055": {"area": "内蒙大区", "organic_hp": "是", "heat_stress": "否", "source_mode": "自繁", "a2": "否", "dha": "否"},
     "1100110056": {"area": "东北大区", "organic_hp": "是", "heat_stress": "否", "source_mode": "自繁", "a2": "否", "dha": "否"},
     "1100110058": {"area": "华北大区", "organic_hp": "否", "heat_stress": "是", "source_mode": "自繁", "a2": "否", "dha": "否"},

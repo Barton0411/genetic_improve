@@ -354,6 +354,33 @@ class APIClient:
         else:
             return False, response.get('message', '注册失败')
 
+    def change_password(
+        self,
+        current_password: str,
+        new_password: str,
+    ) -> Tuple[bool, str]:
+        """修改当前已登录本地账号的密码。"""
+        if not self.token:
+            return False, "未登录，请先登录"
+
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+        }
+        data = {
+            "current_password": current_password,
+            "new_password": new_password,
+        }
+        success, response = self._make_request(
+            "POST",
+            "/api/auth/change-password",
+            data,
+            headers=headers,
+        )
+
+        if success and response.get("success"):
+            return True, response.get("message", "密码修改成功")
+        return False, response.get("message", "密码修改失败")
+
     def get_profile(self) -> Tuple[bool, Optional[Dict], str]:
         """
         获取当前用户信息
