@@ -2042,6 +2042,11 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
     # 检测是否存在"是否性控"列（慧牧云特有）
     has_sex_control_column = '是否性控' in df_raw.columns
 
+    # 慧牧云同时输出 API farmcode 与展示用牧场编号；内部归属必须使用
+    # API farmcode，避免把七位展示编号误当作接口请求编码。
+    if 'API farmcode' in df_raw.columns:
+        df_raw[FARM_CODE_COLUMN] = df_raw['API farmcode']
+
     for target_col, possible_names in column_mappings.items():
         if target_col not in df_raw.columns:
             for possible_name in possible_names:

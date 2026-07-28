@@ -96,6 +96,45 @@ class HMYProxyClientTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertNotEqual(first, next_day)
 
+    def test_proxy_reads_breeding_page_from_read_only_endpoint(self):
+        session = FakeSession(
+            [
+                FakeResponse(
+                    {
+                        "code": 200,
+                        "count": 1,
+                        "data": [
+                            {
+                                "farmCode": "farm-1",
+                                "cowId": "1001",
+                                "siren": "291HO23025",
+                                "eventDate": "2026-07-01",
+                            }
+                        ],
+                    }
+                )
+            ]
+        )
+        client = HMYProxyClient(
+            aes_key=TEST_CIPHER_MATERIAL,
+            base_url="https://hmy.example.test",
+            session=session,
+        )
+
+        payload = client.get_breeding_page(
+            "farm-1", page_size=10000, page_num=1
+        )
+
+        self.assertEqual(payload["count"], 1)
+        url, request = session.calls[0]
+        self.assertEqual(
+            url,
+            "https://hmy.example.test/outside/yl/bred",
+        )
+        self.assertEqual(request["params"]["pageSize"], 10000)
+        self.assertEqual(request["timeout"], 60)
+        self.assertIn("secret", request["headers"])
+
     def test_proxy_requires_server_configuration(self):
         with patch.dict(
             os.environ,
@@ -220,6 +259,99 @@ class HMYDesktopClientTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "未开通慧牧云功能"):
             client.get_farm_herd("farm-1")
+
+    def test_desktop_breeding_uses_proxy_and_merges_pages(self):
+        session = FakeSession(
+            [
+                FakeResponse(
+                    {
+                        "code": 200,
+                        "count": 2,
+                        "data": [
+                            {
+                                "farmCode": "farm-1",
+                                "farmName": "0101001测试牧场",
+                                "cowId": "1001",
+                                "siren": "291HO23025",
+                                "eventDate": "2026-07-01",
+                            }
+                        ],
+                    }
+                ),
+                FakeResponse(
+                    {
+                        "code": 200,
+                        "count": 2,
+                        "data": [
+                            {
+                                "farmCode": "farm-1",
+                                "farmName": "0101001测试牧场",
+                                "cowId": "1002",
+                                "siren": "XK291HO23138",
+                                "eventDate": "2026-07-02",
+                            }
+                        ],
+                    }
+                ),
+            ]
+        )
+        client = HMYApiClient(
+            auth_token=TEST_CLIENT_CREDENTIAL,
+            proxy_base_url="https://api.example.test",
+            session=session,
+        )
+
+        payload = client.get_breeding_records("farm-1", page_size=1)
+
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(payload["farmName"], "0101001测试牧场")
+        self.assertEqual(
+            [row["cowId"] for row in payload["data"]],
+            ["1001", "1002"],
+        )
+        self.assertTrue(
+            all(
+                call[0].endswith(
+                    "/api/auth/hmy/breeding-records"
+                )
+                for call in session.calls
+            )
+        )
+        self.assertTrue(
+            all(
+                "secret" not in call[1].get("headers", {})
+                for call in session.calls
+            )
+        )
+
+    def test_desktop_breeding_rejects_blank_required_fields(self):
+        session = FakeSession(
+            [
+                FakeResponse(
+                    {
+                        "code": 200,
+                        "count": 1,
+                        "data": [
+                            {
+                                "farmCode": "farm-1",
+                                "farmName": "0101001测试牧场",
+                                "cowId": "1001",
+                                "siren": "",
+                                "eventDate": "2026-07-01",
+                            }
+                        ],
+                    }
+                )
+            ]
+        )
+        client = HMYApiClient(
+            auth_token=TEST_CLIENT_CREDENTIAL,
+            proxy_base_url="https://api.example.test",
+            session=session,
+        )
+
+        with self.assertRaisesRegex(ValueError, "siren"):
+            client.get_breeding_records("farm-1", page_size=1)
 
     def test_yqn_exchange_establishes_current_software_session(self):
         client = APIClient.__new__(APIClient)
@@ -526,6 +658,37 @@ class HMYAuthRouteTests(unittest.TestCase):
             response = self.client.get(
                 "/api/auth/hmy/cows",
                 params={"farmCode": "farm-1", "pageSize": 1, "pageNum": 1},
+                headers=self._headers("10075345"),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected)
+
+    def test_breeding_route_returns_page_for_whitelisted_user(self):
+        expected = {
+            "code": 200,
+            "count": 1,
+            "data": [
+                {
+                    "farmCode": "farm-1",
+                    "cowId": "1001",
+                    "siren": "291HO23025",
+                    "eventDate": "2026-07-01",
+                }
+            ],
+        }
+        with patch.object(
+            self.auth_api.HMYProxyClient,
+            "get_breeding_page",
+            return_value=expected,
+        ):
+            response = self.client.get(
+                "/api/auth/hmy/breeding-records",
+                params={
+                    "farmCode": "farm-1",
+                    "pageSize": 10000,
+                    "pageNum": 1,
+                },
                 headers=self._headers("10075345"),
             )
 

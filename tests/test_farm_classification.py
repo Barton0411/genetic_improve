@@ -27,8 +27,8 @@ class FarmClassificationTests(unittest.TestCase):
         cls.farms = cls.client.get_farm_list()["data"]
 
     def test_real_hmy_farm_config_has_complete_classification_fallback(self):
-        self.assertEqual(len(self.farms), 102)
-        self.assertEqual(len({farm["farmCode"] for farm in self.farms}), 102)
+        self.assertEqual(len(self.farms), 105)
+        self.assertEqual(len({farm["farmCode"] for farm in self.farms}), 105)
 
         classified = next(
             farm
@@ -54,13 +54,13 @@ class FarmClassificationTests(unittest.TestCase):
                 "中西部大区": 13,
                 "内蒙大区": 25,
                 "华北大区": 16,
-                "其他": 32,
+                "其他": 35,
             },
-            "organic_hp": {"是": 19, "否": 51, "其他": 32},
-            "heat_stress": {"是": 19, "否": 51, "其他": 32},
-            "source_mode": {"自繁": 52, "进口": 18, "其他": 32},
-            "a2": {"是": 10, "否": 60, "其他": 32},
-            "dha": {"是": 1, "否": 69, "其他": 32},
+            "organic_hp": {"是": 19, "否": 51, "其他": 35},
+            "heat_stress": {"是": 19, "否": 51, "其他": 35},
+            "source_mode": {"自繁": 52, "进口": 18, "其他": 35},
+            "a2": {"是": 10, "否": 60, "其他": 35},
+            "dha": {"是": 1, "否": 69, "其他": 35},
         }
 
         for _, field in HMY_CLASSIFICATION_OPTIONS:
@@ -72,8 +72,8 @@ class FarmClassificationTests(unittest.TestCase):
                 for group_farms in groups.values()
                 for farm in group_farms
             ]
-            self.assertEqual(len(grouped_codes), 102)
-            self.assertEqual(len(set(grouped_codes)), 102)
+            self.assertEqual(len(grouped_codes), 105)
+            self.assertEqual(len(set(grouped_codes)), 105)
             self.assertEqual(list(groups)[-1], "其他")
 
     def test_group_select_and_deselect_updates_whole_current_group(self):

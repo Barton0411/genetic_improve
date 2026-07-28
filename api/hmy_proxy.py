@@ -49,7 +49,10 @@ class HMYProxyUpstreamError(HMYProxyError):
 
 
 class HMYProxyClient:
-    """使用服务端 AES 密钥读取慧牧云牛群分页数据。"""
+    """使用服务端 AES 密钥读取慧牧云牛群和配种分页数据。"""
+
+    COW_PAGE_SIZE_MAX = 2000
+    BREEDING_PAGE_SIZE_MAX = 10000
 
     def __init__(
         self,
@@ -83,31 +86,37 @@ class HMYProxyClient:
         encrypted = encryptor.update(padded) + encryptor.finalize()
         return base64.b64encode(encrypted).decode("ascii")
 
-    def get_cow_page(
+    def _get_page(
         self,
+        path: str,
+        label: str,
         farm_code: str,
-        page_size: int = 2000,
-        page_num: int = 1,
+        page_size: int,
+        page_num: int,
+        page_size_max: int,
+        timeout: int,
     ) -> dict:
-        """读取一页牛群数据，并在服务边界验证响应格式。"""
+        """读取一页慧牧云数据，并在服务边界验证响应格式。"""
         normalized_farm_code = str(farm_code or "").strip()
         if not normalized_farm_code:
             raise ValueError("牧场编码不能为空")
-        if not 1 <= int(page_size) <= 2000:
-            raise ValueError("page_size 必须在 1 到 2000 之间")
+        if not 1 <= int(page_size) <= page_size_max:
+            raise ValueError(
+                f"page_size 必须在 1 到 {page_size_max} 之间"
+            )
         if int(page_num) < 1:
             raise ValueError("page_num 必须大于等于 1")
 
         try:
             response = self.session.get(
-                f"{self.base_url}/outside/yl/cow",
+                f"{self.base_url}{path}",
                 params={
                     "farmCode": normalized_farm_code,
                     "pageSize": int(page_size),
                     "pageNum": int(page_num),
                 },
                 headers={"secret": self._make_secret()},
-                timeout=30,
+                timeout=timeout,
             )
             response.raise_for_status()
             payload = response.json()
@@ -116,6 +125,10 @@ class HMYProxyClient:
 
         if not isinstance(payload, dict):
             raise HMYProxyUpstreamError("慧牧云上游返回格式异常")
+        if payload.get("code") not in (None, 0, 200):
+            raise HMYProxyUpstreamError(
+                f"慧牧云上游{label}业务状态异常"
+            )
 
         rows = payload.get("data") or []
         if not isinstance(rows, list):
@@ -128,3 +141,37 @@ class HMYProxyClient:
             raise HMYProxyUpstreamError("慧牧云上游 count 字段无效")
 
         return {"code": payload.get("code", 200), "count": count, "data": rows}
+
+    def get_cow_page(
+        self,
+        farm_code: str,
+        page_size: int = 2000,
+        page_num: int = 1,
+    ) -> dict:
+        """读取一页牛群数据。"""
+        return self._get_page(
+            path="/outside/yl/cow",
+            label="牛群接口",
+            farm_code=farm_code,
+            page_size=page_size,
+            page_num=page_num,
+            page_size_max=self.COW_PAGE_SIZE_MAX,
+            timeout=30,
+        )
+
+    def get_breeding_page(
+        self,
+        farm_code: str,
+        page_size: int = 10000,
+        page_num: int = 1,
+    ) -> dict:
+        """读取一页配种记录。"""
+        return self._get_page(
+            path="/outside/yl/bred",
+            label="配种接口",
+            farm_code=farm_code,
+            page_size=page_size,
+            page_num=page_num,
+            page_size_max=self.BREEDING_PAGE_SIZE_MAX,
+            timeout=60,
+        )

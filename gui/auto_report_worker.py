@@ -302,16 +302,22 @@ class AutoReportWorker(QThread):
         self.progress.emit(30, "数据下载与标准化完成")
 
     def _phase_download_and_standardize_hmy(self):
-        """慧牧云仅下载牛群数据，不请求配种记录和冻精库存。"""
+        """下载并标准化慧牧云牛群与配种记录。"""
         from core.data.hmy_data_converter import HMYDataConverter
-        from core.data.uploader import upload_and_standardize_cow_data
+        from core.data.uploader import (
+            upload_and_standardize_breeding_data,
+            upload_and_standardize_cow_data,
+        )
 
         all_api_data = []
         total_farms = len(self.farms)
         for index, farm in enumerate(self.farms):
-            pct = int(index / max(total_farms, 1) * 10)
+            pct = int(index / max(total_farms, 1) * 8)
             self.progress.emit(pct, f"正在下载 {farm['name']} 牛群数据...")
             api_data = self.api_client.get_farm_herd(farm["code"])
+            api_farm_name = str(api_data.get("farmName") or "").strip()
+            if api_farm_name:
+                farm["name"] = api_farm_name
             farm["cow_count"] = len(api_data.get("data") or [])
             all_api_data.append((farm["code"], api_data))
             if farm["cow_count"]:
@@ -335,6 +341,58 @@ class AutoReportWorker(QThread):
         excel_path = raw_dir / "cow_data.xlsx"
         HMYDataConverter.convert_herd_to_excel(merged_data, excel_path)
 
+        breeding_excel_path = None
+        self.progress.emit(9, "正在下载慧牧云配种记录...")
+        try:
+            all_breeding_data = []
+            for index, farm in enumerate(self.farms):
+                pct = 9 + int(index / max(total_farms, 1) * 3)
+                self.progress.emit(
+                    pct,
+                    f"正在下载 {farm['name']} 配种记录...",
+                )
+                breeding_data = self.api_client.get_breeding_records(
+                    farm["code"]
+                )
+                farm["breeding_count"] = len(
+                    breeding_data.get("data") or []
+                )
+                all_breeding_data.append(
+                    (farm["code"], breeding_data)
+                )
+                if farm["breeding_count"]:
+                    farm_raw_dir = (
+                        self.project_path
+                        / "raw_data"
+                        / "farms"
+                        / str(farm["code"])
+                    )
+                    HMYDataConverter.convert_breeding_records_to_excel(
+                        breeding_data,
+                        farm_raw_dir / "breeding_records.xlsx",
+                    )
+
+            merged_breeding = HMYDataConverter.merge_breeding_records(
+                all_breeding_data,
+                force_prefix=self.is_merged,
+            )
+            if merged_breeding.get("data"):
+                breeding_excel_path = raw_dir / "breeding_records.xlsx"
+                HMYDataConverter.convert_breeding_records_to_excel(
+                    merged_breeding,
+                    breeding_excel_path,
+                )
+            self.progress.emit(12, "慧牧云配种记录下载完成")
+        except Exception as exc:
+            logger.warning(
+                "慧牧云配种记录下载失败（不影响主流程）: %s",
+                exc,
+            )
+            self.progress.emit(
+                12,
+                f"配种记录下载失败: {str(exc)[:50]}，继续处理牛群数据...",
+            )
+
         self.progress.emit(12, "正在标准化慧牧云牛群数据...")
 
         def standardize_progress(*args):
@@ -348,7 +406,7 @@ class AutoReportWorker(QThread):
                 self.progress.emit(12, f"标准化牛群: {message or value}")
                 return
             self.progress.emit(
-                12 + int(numeric_value * 0.18),
+                12 + int(numeric_value * 0.08),
                 f"标准化牛群: {message or value}",
             )
 
@@ -358,6 +416,45 @@ class AutoReportWorker(QThread):
             progress_callback=standardize_progress,
             source_system="慧牧云",
         )
+
+        if breeding_excel_path and breeding_excel_path.exists():
+            self.progress.emit(20, "正在标准化慧牧云配种记录...")
+
+            def breeding_progress(*args):
+                if not args:
+                    return
+                value = args[0]
+                message = args[1] if len(args) > 1 else ""
+                try:
+                    numeric_value = float(value)
+                except (TypeError, ValueError):
+                    self.progress.emit(
+                        20,
+                        f"标准化配种记录: {message or value}",
+                    )
+                    return
+                self.progress.emit(
+                    20 + int(numeric_value * 0.07),
+                    f"标准化配种记录: {message or value}",
+                )
+
+            try:
+                upload_and_standardize_breeding_data(
+                    input_files=[breeding_excel_path],
+                    project_path=self.project_path,
+                    progress_callback=breeding_progress,
+                    source_system="慧牧云",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "慧牧云配种记录标准化失败（不影响主流程）: %s",
+                    exc,
+                )
+                self.progress.emit(
+                    27,
+                    f"配种记录标准化失败: {str(exc)[:50]}，继续生成报告...",
+                )
+
         from core.data.composite_farm_manager import finalize_composite_project
 
         finalize_composite_project(
@@ -371,10 +468,13 @@ class AutoReportWorker(QThread):
             ),
         )
         self.results["success_items"].append("慧牧云牛群数据下载与标准化")
-        if any(
-            farm.get("has_breeding_records") for farm in self.local_farms
-        ):
-            self.results["success_items"].append("本地补充牧场配种记录已合并")
+        standardized_breeding = (
+            self.project_path
+            / "standardized_data"
+            / "processed_breeding_data.xlsx"
+        )
+        if standardized_breeding.exists():
+            self.results["success_items"].append("配种记录下载与标准化")
         else:
             self.results["success_items"].append("配种记录不可用，已跳过")
         self.results["success_items"].append("冻精库存不可用，备选公牛需手动上传")

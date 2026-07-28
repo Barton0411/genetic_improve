@@ -416,6 +416,63 @@ async def get_hmy_cows(
         ) from exc
 
 
+@app.get("/api/auth/hmy/breeding-records")
+async def get_hmy_breeding_records(
+    farmCode: str,
+    pageSize: int = 10000,
+    pageNum: int = 1,
+    current_user: str = Depends(verify_token),
+):
+    """为已授权账号代理读取慧牧云配种记录分页数据。"""
+    if not is_hmy_user_allowed(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="当前账号未开通慧牧云功能",
+        )
+    if not str(farmCode or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="牧场编码不能为空",
+        )
+    if not 1 <= pageSize <= 10000 or pageNum < 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="分页参数无效",
+        )
+
+    try:
+        payload = HMYProxyClient().get_breeding_page(
+            farm_code=farmCode,
+            page_size=pageSize,
+            page_num=pageNum,
+        )
+        logger.info(
+            "慧牧云配种只读代理成功: user=%s farm=%s page=%s rows=%s",
+            current_user,
+            farmCode,
+            pageNum,
+            len(payload.get("data") or []),
+        )
+        return payload
+    except HMYProxyConfigError as exc:
+        logger.error("慧牧云服务端鉴权未正确配置")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="慧牧云服务暂不可用",
+        ) from exc
+    except HMYProxyUpstreamError as exc:
+        logger.warning(
+            "慧牧云配种上游请求失败: user=%s farm=%s page=%s",
+            current_user,
+            farmCode,
+            pageNum,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="慧牧云上游请求失败",
+        ) from exc
+
+
 @app.post("/api/auth/verify")
 async def verify_token_endpoint(current_user: str = Depends(verify_token)):
     """验证令牌有效性"""

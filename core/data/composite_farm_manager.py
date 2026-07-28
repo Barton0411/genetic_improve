@@ -12,6 +12,7 @@ from typing import Callable, Dict, Iterable, List, Optional
 
 import pandas as pd
 
+from core.data.hmy_data_converter import HMYDataConverter
 from core.data.uploader import (
     upload_and_standardize_breeding_data,
     upload_and_standardize_cow_data,
@@ -33,6 +34,7 @@ _COW_READ_DTYPES = {
 }
 _BREEDING_READ_DTYPES = {"耳号": str, "父号": str, "冻精编号": str}
 _FARM_CODE_ALIASES = (
+    "API farmcode",
     "牧场编号",
     "牧场代码",
     "站号",
@@ -270,7 +272,7 @@ def _annotate_interface_cows(
     existing_code_column = next(
         (
             column
-            for column in ("farm_code", "牧场编号")
+            for column in ("API farmcode", "farm_code", "牧场编号")
             if column in result.columns
         ),
         None,
@@ -298,9 +300,41 @@ def _annotate_interface_cows(
         missing = int(invalid_code_mask.sum())
         raise ValueError(f"有 {missing} 条接口母牛记录无法识别所属牧场")
 
-    result["farm_name"] = result["farm_code"].map(names).fillna("")
-    result["牧场编号"] = result["farm_code"]
-    result["牧场名称"] = result["farm_name"]
+    if data_source == "慧牧云":
+        result["API farmcode"] = result["farm_code"]
+        mapped_full_names = result["farm_code"].map(names).fillna("")
+        parsed_metadata = mapped_full_names.map(
+            HMYDataConverter.split_farm_name
+        )
+        mapped_numbers = parsed_metadata.map(lambda item: item[0])
+        mapped_names = parsed_metadata.map(lambda item: item[1])
+
+        if "牧场名称" not in result.columns:
+            result["牧场名称"] = ""
+        result["牧场名称"] = (
+            result["牧场名称"].fillna("").astype(str).str.strip()
+        )
+        missing_name = result["牧场名称"].eq("")
+        result.loc[missing_name, "牧场名称"] = mapped_names[missing_name]
+
+        if "牧场编号" not in result.columns:
+            result["牧场编号"] = ""
+        result["牧场编号"] = result["牧场编号"].apply(_clean_id)
+        needs_display_number = result["牧场编号"].eq("") | result[
+            "牧场编号"
+        ].eq(result["farm_code"])
+        replacements = mapped_numbers.where(
+            mapped_numbers.ne(""),
+            result["farm_code"],
+        )
+        result.loc[needs_display_number, "牧场编号"] = replacements[
+            needs_display_number
+        ]
+        result["farm_name"] = result["牧场名称"]
+    else:
+        result["farm_name"] = result["farm_code"].map(names).fillna("")
+        result["牧场编号"] = result["farm_code"]
+        result["牧场名称"] = result["farm_name"]
     result["source_kind"] = "api"
     result["source_system"] = data_source
     result["raw_cow_id"] = result.apply(
@@ -355,7 +389,7 @@ def _annotate_interface_breeding(
     existing_code_column = next(
         (
             column
-            for column in ("farm_code", "牧场编号")
+            for column in ("API farmcode", "farm_code", "牧场编号")
             if column in result.columns
         ),
         None,
@@ -381,9 +415,24 @@ def _annotate_interface_breeding(
     if invalid_code_mask.any():
         missing = int(invalid_code_mask.sum())
         raise ValueError(f"有 {missing} 条接口配种记录无法识别所属牧场")
-    result["farm_name"] = result["farm_code"].map(names).fillna("")
-    result["牧场编号"] = result["farm_code"]
-    result["牧场名称"] = result["farm_name"]
+    if data_source == "慧牧云":
+        result["API farmcode"] = result["farm_code"]
+        mapped_full_names = result["farm_code"].map(names).fillna("")
+        parsed_metadata = mapped_full_names.map(
+            HMYDataConverter.split_farm_name
+        )
+        mapped_numbers = parsed_metadata.map(lambda item: item[0])
+        mapped_names = parsed_metadata.map(lambda item: item[1])
+        result["牧场编号"] = mapped_numbers.where(
+            mapped_numbers.ne(""),
+            result["farm_code"],
+        )
+        result["牧场名称"] = mapped_names
+        result["farm_name"] = result["牧场名称"]
+    else:
+        result["farm_name"] = result["farm_code"].map(names).fillna("")
+        result["牧场编号"] = result["farm_code"]
+        result["牧场名称"] = result["farm_name"]
     result["source_kind"] = "api"
     result["source_system"] = data_source
     result["raw_cow_id"] = result.apply(

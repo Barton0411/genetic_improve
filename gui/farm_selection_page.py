@@ -23,7 +23,10 @@ from core.data.hmy_data_converter import HMYDataConverter
 from core.data.yqn_data_converter import YQNDataConverter
 from config.hmy_access import is_hmy_user_allowed
 from utils.file_manager import FileManager
-from core.data.uploader import upload_and_standardize_cow_data
+from core.data.uploader import (
+    upload_and_standardize_breeding_data,
+    upload_and_standardize_cow_data,
+)
 
 
 HMY_CLASSIFICATION_OPTIONS = (
@@ -308,7 +311,7 @@ class DataDownloadWorker(QThread):
 
 
 class HMYDataDownloadWorker(QThread):
-    """慧牧云牛群数据下载和标准化线程（不读取配种记录或冻精库存）。"""
+    """慧牧云牛群及配种数据下载和标准化线程。"""
 
     progress = pyqtSignal(int, str)
     finished = pyqtSignal(Path)
@@ -334,9 +337,12 @@ class HMYDataDownloadWorker(QThread):
             all_api_data = []
             total_farms = len(self.farms)
             for index, farm in enumerate(self.farms):
-                pct = 5 + int(index / max(total_farms, 1) * 45)
+                pct = 5 + int(index / max(total_farms, 1) * 35)
                 self.progress.emit(pct, f"正在下载 {farm['name']} 牛群数据...")
                 api_data = self.api_client.get_farm_herd(farm["code"])
+                api_farm_name = str(api_data.get("farmName") or "").strip()
+                if api_farm_name:
+                    farm["name"] = api_farm_name
                 farm["cow_count"] = len(api_data.get("data") or [])
                 all_api_data.append((farm["code"], api_data))
                 if farm["cow_count"]:
@@ -350,7 +356,7 @@ class HMYDataDownloadWorker(QThread):
                         api_data, farm_raw_dir / "cow_data.xlsx"
                     )
 
-            self.progress.emit(55, "正在合并牛群数据...")
+            self.progress.emit(40, "正在合并牛群数据...")
             if self.is_merged:
                 merged_data = HMYDataConverter.merge_herd_data(all_api_data)
             else:
@@ -360,6 +366,60 @@ class HMYDataDownloadWorker(QThread):
             raw_dir.mkdir(parents=True, exist_ok=True)
             excel_path = raw_dir / "cow_data.xlsx"
             HMYDataConverter.convert_herd_to_excel(merged_data, excel_path)
+
+            breeding_excel_path = None
+            self.progress.emit(45, "正在下载慧牧云配种记录...")
+            try:
+                all_breeding_data = []
+                for index, farm in enumerate(self.farms):
+                    pct = 45 + int(index / max(total_farms, 1) * 15)
+                    self.progress.emit(
+                        pct,
+                        f"正在下载 {farm['name']} 配种记录...",
+                    )
+                    breeding_data = self.api_client.get_breeding_records(
+                        farm["code"]
+                    )
+                    farm["breeding_count"] = len(
+                        breeding_data.get("data") or []
+                    )
+                    all_breeding_data.append(
+                        (farm["code"], breeding_data)
+                    )
+                    if farm["breeding_count"]:
+                        farm_raw_dir = (
+                            self.project_path
+                            / "raw_data"
+                            / "farms"
+                            / str(farm["code"])
+                        )
+                        HMYDataConverter.convert_breeding_records_to_excel(
+                            breeding_data,
+                            farm_raw_dir / "breeding_records.xlsx",
+                        )
+
+                merged_breeding = HMYDataConverter.merge_breeding_records(
+                    all_breeding_data,
+                    force_prefix=self.is_merged,
+                )
+                if merged_breeding.get("data"):
+                    breeding_excel_path = (
+                        raw_dir / "breeding_records.xlsx"
+                    )
+                    HMYDataConverter.convert_breeding_records_to_excel(
+                        merged_breeding,
+                        breeding_excel_path,
+                    )
+                self.progress.emit(60, "慧牧云配种记录下载完成")
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "慧牧云配种记录下载失败（不影响牛群数据）: %s",
+                    exc,
+                )
+                self.progress.emit(
+                    60,
+                    f"配种记录下载失败: {str(exc)[:50]}，继续处理牛群数据...",
+                )
 
             self.progress.emit(65, "正在标准化慧牧云牛群数据...")
 
@@ -375,7 +435,7 @@ class HMYDataDownloadWorker(QThread):
                     self.progress.emit(65, f"标准化: {message or value}")
                     return
                 self.progress.emit(
-                    65 + int(numeric_value * 0.3),
+                    65 + int(numeric_value * 0.15),
                     f"标准化: {message or value}",
                 )
 
@@ -385,6 +445,45 @@ class HMYDataDownloadWorker(QThread):
                 progress_callback=standardize_progress,
                 source_system="慧牧云",
             )
+
+            if breeding_excel_path and breeding_excel_path.exists():
+                self.progress.emit(80, "正在标准化慧牧云配种记录...")
+
+                def breeding_progress(*args):
+                    if not args:
+                        return
+                    value = args[0]
+                    message = args[1] if len(args) > 1 else ""
+                    try:
+                        numeric_value = float(value)
+                    except (TypeError, ValueError):
+                        self.progress.emit(
+                            80,
+                            f"标准化配种记录: {message or value}",
+                        )
+                        return
+                    self.progress.emit(
+                        80 + int(numeric_value * 0.15),
+                        f"标准化配种记录: {message or value}",
+                    )
+
+                try:
+                    upload_and_standardize_breeding_data(
+                        input_files=[breeding_excel_path],
+                        project_path=self.project_path,
+                        progress_callback=breeding_progress,
+                        source_system="慧牧云",
+                    )
+                except Exception as exc:
+                    logging.getLogger(__name__).warning(
+                        "慧牧云配种记录标准化失败（不影响牛群数据）: %s",
+                        exc,
+                    )
+                    self.progress.emit(
+                        95,
+                        f"配种记录标准化失败: {str(exc)[:50]}，继续创建项目...",
+                    )
+
             self.progress.emit(95, "正在合并本地补充牧场...")
             from core.data.composite_farm_manager import (
                 finalize_composite_project,
@@ -1908,6 +2007,12 @@ class FarmSelectionPage(QWidget):
     def on_worker_finished(self, dialog, project_path, excel_path, is_merged):
         """工作线程完成"""
         dialog.close()
+        breeding_file = (
+            Path(project_path)
+            / "standardized_data"
+            / "processed_breeding_data.xlsx"
+        )
+        breeding_ready = breeding_file.exists()
 
         # 构建成功消息
         if is_merged:
@@ -1920,6 +2025,11 @@ class FarmSelectionPage(QWidget):
                     "• 体型外貌数据上传\n"
                     "• 个体选配"
                 )
+            breeding_text = (
+                "\n✅ 配种记录已自动下载、合并并标准化"
+                if breeding_ready
+                else "\nℹ️ 本次未取得可用配种记录"
+            )
             success_msg = (
                 f"合并牧场项目已创建成功!\n\n"
                 f"项目位置: {project_path}\n\n"
@@ -1928,25 +2038,20 @@ class FarmSelectionPage(QWidget):
                 f"✅ 牛号和母亲号已添加牧场前缀\n"
                 f"✅ 数据已自动标准化\n"
                 f"✅ 已生成 merged_farms.txt 说明文件"
+                f"{breeding_text}"
                 f"{restricted_text}"
             )
         else:
-            farm = list(self.selected_farms.values())[0]
             # 检查备选公牛数据是否已自动生成
             from pathlib import Path
             bull_file = Path(project_path) / "standardized_data" / "processed_bull_data.xlsx"
             bull_ready = bull_file.exists()
 
             if self.data_source == "慧牧云":
-                local_breeding_ready = any(
-                    farm.get("source_kind") == "local"
-                    and farm.get("has_breeding_records")
-                    for farm in self.selected_farms.values()
-                )
                 breeding_line = (
-                    "✅ 本地补充牧场配种记录已合并\n"
-                    if local_breeding_ready
-                    else "ℹ️ 慧牧云接口配种记录暂不可用\n"
+                    "✅ 配种记录已自动下载并标准化\n"
+                    if breeding_ready
+                    else "ℹ️ 本次未取得可用配种记录\n"
                 )
                 completed_lines = (
                     "✅ 牛群明细已自动下载\n"
@@ -2037,24 +2142,16 @@ class FarmSelectionPage(QWidget):
             return
 
         if self.data_source == "慧牧云":
-            local_breeding_ready = any(
-                farm.get("source_kind") == "local"
-                and farm.get("has_breeding_records")
-                for farm in self.selected_farms.values()
-            )
-            breeding_text = (
-                "本地补充牧场的配种记录将参与可用分析；"
-                if local_breeding_ready
-                else "配种记录和已配公牛分析将跳过；"
-            )
             confirm_msg = (
                 "即将创建慧牧云项目并自动生成当前可用报告\n\n"
                 "系统将自动执行:\n"
-                "1. 下载并标准化牛群数据\n"
+                "1. 下载并标准化牛群数据和配种记录\n"
                 "2. 在群母牛关键育种性状分析\n"
-                "3. 母牛群指数排名 (NM$权重)\n"
-                "4. 生成当前可用的Excel和PPT报告\n\n"
-                f"{breeding_text}"
+                "3. 已配公牛关键育种数据分析\n"
+                "4. 已配公牛近交系数及隐性基因分析\n"
+                "5. 母牛群指数排名 (NM$权重)\n"
+                "6. 生成当前可用的Excel和PPT报告\n\n"
+                "如配种接口临时不可用，系统仍会继续处理牛群数据；"
                 "推送功能将跳过；"
                 "备选公牛需在项目创建后手动上传。\n\n"
                 "整个过程可能需要几分钟，是否继续?"

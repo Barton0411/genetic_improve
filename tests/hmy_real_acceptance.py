@@ -23,7 +23,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from api.hmy_api_client import HMYApiClient
 from core.data.hmy_data_converter import HMYDataConverter
-from core.data.uploader import upload_and_standardize_cow_data
+from core.data.uploader import (
+    upload_and_standardize_breeding_data,
+    upload_and_standardize_cow_data,
+)
 
 
 NUMERIC_LIMITS = {
@@ -109,7 +112,10 @@ def _verify_excel_roundtrip(records: list[dict], excel_path: Path) -> dict:
                     "cowId": row.get("耳号"),
                     "dam": row.get("母号"),
                     "sire": row.get("父号"),
-                    "farmCode": row.get("牧场编号"),
+                    "farmCode": (
+                        row.get("API farmcode")
+                        or row.get("牧场编号")
+                    ),
                 }
             )
         )
@@ -200,6 +206,8 @@ def main() -> int:
     records = herd.get("data") or []
     if not records:
         raise RuntimeError("selected farm returned no records")
+    breeding = client.get_breeding_records(primary_farm, page_size=10000)
+    breeding_records = breeding.get("data") or []
 
     cow_ids = [_normalize_id(record.get("cowId")) for record in records]
     api_ids = [_normalize_id(record.get("id")) for record in records]
@@ -261,6 +269,78 @@ def main() -> int:
             else 0,
         }
 
+        if breeding_records:
+            raw_breeding = (
+                project_path / "raw_data" / "breeding_records.xlsx"
+            )
+            HMYDataConverter.convert_breeding_records_to_excel(
+                breeding,
+                raw_breeding,
+            )
+            logging.disable(logging.CRITICAL)
+            try:
+                with contextlib.redirect_stdout(
+                    captured_stdout
+                ), contextlib.redirect_stderr(captured_stderr):
+                    processed_breeding_path = (
+                        upload_and_standardize_breeding_data(
+                            input_files=[raw_breeding],
+                            project_path=project_path,
+                            source_system="慧牧云",
+                        )
+                    )
+            finally:
+                logging.disable(previous_disable)
+            processed_breeding = pd.read_excel(
+                processed_breeding_path,
+                dtype={
+                    "耳号": str,
+                    "父号": str,
+                    "冻精编号": str,
+                    "牧场编号": str,
+                },
+                keep_default_na=False,
+            )
+        else:
+            processed_breeding = pd.DataFrame()
+
+        breeding_summary = {
+            "api_reported_count": int(breeding.get("count") or 0),
+            "downloaded_rows": len(breeding_records),
+            "blank_cow_ids": sum(
+                not _normalize_id(record.get("cowId"))
+                for record in breeding_records
+            ),
+            "blank_sire_ids": sum(
+                not _normalize_id(record.get("siren"))
+                for record in breeding_records
+            ),
+            "blank_event_dates": sum(
+                not _normalize_id(record.get("eventDate"))
+                for record in breeding_records
+            ),
+            "farm_codes_seen": sorted(
+                {
+                    _normalize_id(record.get("farmCode"))
+                    for record in breeding_records
+                    if _normalize_id(record.get("farmCode"))
+                }
+            ),
+            "farm_names_seen": sorted(
+                {
+                    str(record.get("farmName") or "").strip()
+                    for record in breeding_records
+                    if str(record.get("farmName") or "").strip()
+                }
+            ),
+            "standardized_rows": len(processed_breeding),
+            "unknown_semen_type_rows": int(
+                processed_breeding.get(
+                    "冻精类型", pd.Series(dtype=str)
+                ).eq("未知").sum()
+            ),
+        }
+
     report = {
         "farm_code": primary_farm,
         "api_reported_count": int(herd.get("count") or 0),
@@ -284,6 +364,7 @@ def main() -> int:
         "numeric": _numeric_summary(records),
         "excel_roundtrip": excel_result,
         "standardized": standardized,
+        "breeding": breeding_summary,
         "multi_farm_prefix": _verify_multi_farm_prefix(
             client, primary_farm, secondary_farm
         ),

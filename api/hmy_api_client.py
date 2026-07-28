@@ -13,7 +13,7 @@ import requests
 
 
 class HMYApiClient:
-    """通过自有认证服务访问慧牧云牛群数据。"""
+    """通过自有认证服务访问慧牧云牛群和配种数据。"""
 
     DEFAULT_PROXY_BASE_URL = "https://api.genepop.com"
     CLASSIFICATION_FIELDS = (
@@ -82,21 +82,23 @@ class HMYApiClient:
         except (OSError, ValueError, TypeError):
             return None
 
-    def _get_cow_page(
+    def _get_proxy_page(
         self,
+        endpoint: str,
         farm_code: str,
         page_size: int,
         page_num: int,
+        timeout: int,
     ) -> dict:
         try:
             response = self.session.get(
-                f"{self.base_url}/api/auth/hmy/cows",
+                f"{self.base_url}{endpoint}",
                 params={
                     "farmCode": str(farm_code),
                     "pageSize": int(page_size),
                     "pageNum": int(page_num),
                 },
-                timeout=35,
+                timeout=timeout,
             )
         except requests.RequestException as exc:
             raise RuntimeError("无法连接慧牧云数据代理服务") from exc
@@ -125,6 +127,34 @@ class HMYApiClient:
             raise RuntimeError("慧牧云数据代理 count 字段格式异常") from exc
 
         return {"code": payload.get("code", 200), "count": count, "data": rows}
+
+    def _get_cow_page(
+        self,
+        farm_code: str,
+        page_size: int,
+        page_num: int,
+    ) -> dict:
+        return self._get_proxy_page(
+            endpoint="/api/auth/hmy/cows",
+            farm_code=farm_code,
+            page_size=page_size,
+            page_num=page_num,
+            timeout=35,
+        )
+
+    def _get_breeding_page(
+        self,
+        farm_code: str,
+        page_size: int,
+        page_num: int,
+    ) -> dict:
+        return self._get_proxy_page(
+            endpoint="/api/auth/hmy/breeding-records",
+            farm_code=farm_code,
+            page_size=page_size,
+            page_num=page_num,
+            timeout=60,
+        )
 
     def get_farm_list(self) -> dict:
         """读取随应用发布的慧牧云牧场编码表。"""
@@ -167,13 +197,18 @@ class HMYApiClient:
 
     def get_farm_herd(self, farm_code: str, page_size: int = 2000) -> dict:
         """通过受控代理分页下载指定牧场的完整牛群数据。"""
+        normalized_farm_code = str(farm_code or "").strip()
+        if not normalized_farm_code:
+            raise ValueError("牧场编码不能为空")
+
         records: List[dict] = []
+        farm_names: set[str] = set()
         total: Optional[int] = None
         page_num = 1
 
         while total is None or len(records) < total:
             payload = self._get_cow_page(
-                farm_code=farm_code,
+                farm_code=normalized_farm_code,
                 page_size=page_size,
                 page_num=page_num,
             )
@@ -184,7 +219,30 @@ class HMYApiClient:
             if not page_records:
                 break
 
-            records.extend(page_records)
+            normalized_records = []
+            for source in page_records:
+                if not isinstance(source, dict):
+                    raise ValueError("慧牧云牛群接口记录格式异常")
+                record = dict(source)
+                returned_code = str(record.get("farmCode") or "").strip()
+                if returned_code and returned_code != normalized_farm_code:
+                    raise ValueError(
+                        "慧牧云牛群接口返回的牧场编码与请求不一致："
+                        f"请求 {normalized_farm_code}，返回 {returned_code}"
+                    )
+                record["farmCode"] = normalized_farm_code
+
+                returned_name = str(record.get("farmName") or "").strip()
+                if returned_name:
+                    farm_names.add(returned_name)
+                    if len(farm_names) > 1:
+                        raise ValueError(
+                            "慧牧云牛群接口同一牧场返回了多个牧场名称"
+                        )
+                    record["farmName"] = returned_name
+                normalized_records.append(record)
+
+            records.extend(normalized_records)
             page_num += 1
             if page_num > 10000:
                 raise RuntimeError("慧牧云牛群接口分页异常，已停止下载")
@@ -195,4 +253,102 @@ class HMYApiClient:
                 f"实际取得 {len(records)} 条"
             )
 
-        return {"code": 200, "count": len(records), "data": records}
+        farm_name = next(iter(farm_names), "")
+        if farm_name:
+            for record in records:
+                if not str(record.get("farmName") or "").strip():
+                    record["farmName"] = farm_name
+
+        return {
+            "code": 200,
+            "count": len(records),
+            "farmName": farm_name,
+            "data": records,
+        }
+
+    def get_breeding_records(
+        self,
+        farm_code: str,
+        page_size: int = 10000,
+    ) -> dict:
+        """通过受控代理分页下载指定牧场的完整配种记录。"""
+        normalized_farm_code = str(farm_code or "").strip()
+        if not normalized_farm_code:
+            raise ValueError("牧场编码不能为空")
+
+        records: List[dict] = []
+        farm_names: set[str] = set()
+        total: Optional[int] = None
+        page_num = 1
+        required_fields = ("cowId", "siren", "eventDate")
+
+        while total is None or len(records) < total:
+            payload = self._get_breeding_page(
+                farm_code=normalized_farm_code,
+                page_size=page_size,
+                page_num=page_num,
+            )
+            if total is None:
+                total = payload["count"]
+
+            page_records = payload["data"]
+            if not page_records:
+                break
+
+            normalized_records = []
+            for source in page_records:
+                if not isinstance(source, dict):
+                    raise ValueError("慧牧云配种接口记录格式异常")
+                record = dict(source)
+                returned_code = str(record.get("farmCode") or "").strip()
+                if returned_code and returned_code != normalized_farm_code:
+                    raise ValueError(
+                        "慧牧云配种接口返回的牧场编码与请求不一致："
+                        f"请求 {normalized_farm_code}，返回 {returned_code}"
+                    )
+                record["farmCode"] = normalized_farm_code
+
+                returned_name = str(record.get("farmName") or "").strip()
+                if returned_name:
+                    farm_names.add(returned_name)
+                    if len(farm_names) > 1:
+                        raise ValueError(
+                            "慧牧云配种接口同一牧场返回了多个牧场名称"
+                        )
+                    record["farmName"] = returned_name
+
+                missing_fields = [
+                    field
+                    for field in required_fields
+                    if not str(record.get(field) or "").strip()
+                ]
+                if missing_fields:
+                    raise ValueError(
+                        "慧牧云配种接口存在关键字段为空的记录："
+                        + "、".join(missing_fields)
+                    )
+                normalized_records.append(record)
+
+            records.extend(normalized_records)
+            page_num += 1
+            if page_num > 10000:
+                raise RuntimeError("慧牧云配种接口分页异常，已停止下载")
+
+        if total is not None and len(records) != total:
+            raise ValueError(
+                f"慧牧云配种记录下载不完整：接口报告 {total} 条，"
+                f"实际取得 {len(records)} 条"
+            )
+
+        farm_name = next(iter(farm_names), "")
+        if farm_name:
+            for record in records:
+                if not str(record.get("farmName") or "").strip():
+                    record["farmName"] = farm_name
+
+        return {
+            "code": 200,
+            "count": len(records),
+            "farmName": farm_name,
+            "data": records,
+        }
