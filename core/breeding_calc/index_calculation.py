@@ -6,10 +6,8 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Optional
 from sqlalchemy import create_engine, text
-from openpyxl import load_workbook
-from openpyxl.styles import Font, PatternFill
-
 from core.breeding_calc.traits_calculation import TraitsCalculation
+from utils.large_excel_writer import write_dataframe_atomic
 
 from .base_calculation import BaseCowCalculation
 from .cow_traits_calc import TRAITS_TRANSLATION
@@ -260,7 +258,11 @@ class IndexCalculation(BaseCowCalculation):
                             genomic_df[source_col] = 'P'  # 标记为系谱来源
 
                         # 保存更新后的基因组评估文件
-                        genomic_df.to_excel(genomic_scores_path, index=False)
+                        if not self.save_results_with_retry(
+                            genomic_df,
+                            genomic_scores_path,
+                        ):
+                            return False, "更新基因组评估文件失败"
                         df = genomic_df
             else:
                 # 3.2 基因组评估结果不存在，检查是否有基因组数据
@@ -343,7 +345,12 @@ class IndexCalculation(BaseCowCalculation):
             # 5. 排序并添加排名
             if progress_callback:
                 progress_callback(95, "排序并添加排名...")
-            df = df.sort_values(f'{weight_name}_index', ascending=False)
+            df.sort_values(
+                f'{weight_name}_index',
+                ascending=False,
+                inplace=True,
+                ignore_index=True,
+            )
             df['ranking'] = range(1, len(df) + 1)
 
             # 5.5 确保 cow_id 列保持为字符串类型（修复格式变化问题）
@@ -594,131 +601,13 @@ class IndexCalculation(BaseCowCalculation):
         return df, len(missing_traits) == 0
 
     def save_with_formatting(self, df, output_path):
-        """保存Excel文件并应用格式化（红色字体和灰底黄字）"""
+        """低内存保存 Excel，并按同一行的来源字段应用颜色。"""
         try:
-            # 检查是否需要加载detail文件来获取原始source值
-            need_detail = False
-            for col in df.columns:
-                if col.endswith('_score_source'):
-                    # 检查source值是否是P/G格式
-                    sample_val = df[col].iloc[0] if len(df) > 0 else None
-                    if sample_val in ['P', 'G']:
-                        need_detail = True
-                        break
-
-            # 如果需要，加载detail文件
-            original_sources = {}
-            if need_detail:
-                # 尝试找到detail文件
-                detail_path = output_path.parent / "processed_cow_data_key_traits_detail.xlsx"
-                if detail_path.exists():
-                    detail_df = pd.read_excel(detail_path)
-                    # 只保留需要的列
-                    if 'cow_id' in detail_df.columns:
-                        original_sources['cow_id'] = detail_df['cow_id']
-                        for col in detail_df.columns:
-                            if col.endswith('_source') and (col.startswith('sire_') or
-                                                            col.startswith('mgs_') or
-                                                            col.startswith('mmgs_')):
-                                original_sources[col] = detail_df[col]
-
-            # 先保存基础数据
-            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Sheet1')
-                workbook = writer.book
-                worksheet = writer.sheets['Sheet1']
-
-                # 定义格式
-                red_font = Font(color="FF0000")  # 红色
-                yellow_font = Font(color="FFFF00")  # 亮黄色
-                gray_fill = PatternFill(start_color="808080", end_color="808080", fill_type="solid")  # 深灰色背景
-
-                # 获取列索引映射
-                col_map = {col: idx + 1 for idx, col in enumerate(df.columns)}
-
-                # 如果有原始source数据，创建cow_id到索引的映射
-                cow_id_map = {}
-                if original_sources and 'cow_id' in original_sources:
-                    for idx, cow_id in enumerate(original_sources['cow_id']):
-                        cow_id_map[cow_id] = idx
-
-                # 批量收集需要格式化的单元格 (性能优化)
-                red_cells = []  # source == 2 (年份预估值)
-                yellow_cells = []  # source == 3 (默认预估值)
-
-                # 处理 _score 列
-                for col_name in df.columns:
-                    if '_score' in col_name and not col_name.endswith('_source'):
-                        trait = col_name.replace('_score', '')
-                        col_idx = col_map[col_name]
-
-                        # 优先使用原始source数据（从detail文件）
-                        if original_sources and cow_id_map:
-                            # 向量化计算最大source值（替代iterrows）
-                            cow_max_source = {}
-                            for cid, didx in cow_id_map.items():
-                                source_vals = []
-                                for prefix in ['sire_', 'mgs_', 'mmgs_']:
-                                    sc = f'{prefix}{trait}_source'
-                                    if sc in original_sources:
-                                        val = original_sources[sc].iloc[didx]
-                                        if pd.notna(val):
-                                            source_vals.append(val)
-                                if source_vals:
-                                    cow_max_source[cid] = max(source_vals)
-
-                            if 'cow_id' in df.columns:
-                                max_sources = df['cow_id'].map(cow_max_source)
-                            else:
-                                max_sources = pd.Series(index=df.index, dtype=float)
-
-                            # 使用向量化掩码
-                            mask_red = max_sources == 2
-                            mask_yellow = max_sources == 3
-                            red_cells.extend([(r + 2, col_idx) for r in df.index[mask_red]])
-                            yellow_cells.extend([(r + 2, col_idx) for r in df.index[mask_yellow]])
-                        else:
-                            # 使用直接的 source 列
-                            direct_source_col = col_name + '_source'
-                            if direct_source_col in df.columns:
-                                mask_red = df[direct_source_col] == 2
-                                mask_yellow = df[direct_source_col] == 3
-                                red_cells.extend([(r + 2, col_idx) for r in df.index[mask_red]])
-                                yellow_cells.extend([(r + 2, col_idx) for r in df.index[mask_yellow]])
-
-                # 处理 sire_*、mgs_*、mmgs_* 列
-                for col_name in df.columns:
-                    if (col_name.startswith('sire_') or col_name.startswith('mgs_') or
-                        col_name.startswith('mmgs_')) and not col_name.endswith('_source'):
-                        col_idx = col_map[col_name]
-                        source_col = col_name + '_source'
-
-                        if source_col in df.columns:
-                            mask_red = df[source_col] == 2
-                            mask_yellow = df[source_col] == 3
-                            red_cells.extend([(r + 2, col_idx) for r in df.index[mask_red]])
-                            yellow_cells.extend([(r + 2, col_idx) for r in df.index[mask_yellow]])
-                        elif original_sources and cow_id_map and source_col in original_sources:
-                            # 向量化从original_sources获取（替代iterrows）
-                            cow_source_map = {
-                                cid: original_sources[source_col].iloc[didx]
-                                for cid, didx in cow_id_map.items()
-                            }
-                            if 'cow_id' in df.columns:
-                                mapped_sources = df['cow_id'].map(cow_source_map)
-                                mask_red = mapped_sources == 2
-                                mask_yellow = mapped_sources == 3
-                                red_cells.extend([(r + 2, col_idx) for r in df.index[mask_red]])
-                                yellow_cells.extend([(r + 2, col_idx) for r in df.index[mask_yellow]])
-
-                # 批量应用格式
-                for row, col in red_cells:
-                    worksheet.cell(row=row, column=col).font = red_font
-                for row, col in yellow_cells:
-                    cell = worksheet.cell(row=row, column=col)
-                    cell.font = yellow_font
-                    cell.fill = gray_fill
-
+            write_dataframe_atomic(
+                df,
+                output_path,
+                apply_source_formatting=True,
+            )
             print(f"文件已保存并格式化: {output_path}")
             return True
 
@@ -747,17 +636,10 @@ class IndexCalculation(BaseCowCalculation):
 
         while True:
             try:
-                # 确保 cow_id 列保持为字符串类型（修复格式变化问题）
-                if 'cow_id' in df.columns:
-                    df = df.copy()  # 创建副本避免修改原始数据
-                    df['cow_id'] = df['cow_id'].astype(str)
-
                 if apply_formatting and any('_source' in col for col in df.columns):
-                    # 使用save_with_formatting应用格式
                     return self.save_with_formatting(df, output_path)
-                else:
-                    df.to_excel(output_path, index=False)
-                    return True
+                write_dataframe_atomic(df, output_path)
+                return True
             except PermissionError:
                 if _is_main_thread():
                     from PyQt6.QtWidgets import QMessageBox
@@ -777,10 +659,14 @@ class IndexCalculation(BaseCowCalculation):
                     for attempt in range(3):
                         time.sleep(1)
                         try:
-                            if 'cow_id' in df.columns:
-                                df = df.copy()
-                                df['cow_id'] = df['cow_id'].astype(str)
-                            df.to_excel(output_path, index=False)
+                            write_dataframe_atomic(
+                                df,
+                                output_path,
+                                apply_source_formatting=(
+                                    apply_formatting
+                                    and any('_source' in col for col in df.columns)
+                                ),
+                            )
                             return True
                         except PermissionError:
                             continue

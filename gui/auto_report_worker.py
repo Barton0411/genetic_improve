@@ -4,6 +4,8 @@
 在后台执行完整流程：数据下载 → 标准化 → 7项数据分析 → Excel报告 → PPT报告
 """
 
+import gc
+import inspect
 import logging
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -35,6 +37,7 @@ class AutoReportWorker(QThread):
         service_staff=None,
         data_source="伊起牛",
         local_farms=None,
+        reliability_mode=False,
     ):
         """
         初始化
@@ -45,6 +48,7 @@ class AutoReportWorker(QThread):
             project_path: 项目路径
             is_merged: 是否为合并模式
             service_staff: 服务人员姓名（登录用户）
+            reliability_mode: 低内存可靠模式；牧场组逐场处理时启用
         """
         super().__init__()
         self.api_client = api_client
@@ -54,6 +58,9 @@ class AutoReportWorker(QThread):
         self.service_staff = service_staff
         self.data_source = data_source
         self.local_farms = local_farms or []
+        # 牧场组逐场处理时启用：优先控制内存峰值和跨牧场状态隔离。
+        # 默认关闭，保持原有单牧场并发行为不变。
+        self.reliability_mode = bool(reliability_mode)
 
         # 各步骤结果跟踪
         self.results = {
@@ -83,24 +90,70 @@ class AutoReportWorker(QThread):
     def run(self):
         """执行完整流程"""
         try:
-            # ===== Phase 1: 数据下载与标准化 (0-30%) =====
-            self._phase_download_and_standardize()
-
-            # ===== Phase 2: 数据分析 (30-75%) =====
-            self._phase_analysis()
-
-            # ===== Phase 3: Excel报告 (75-90%) =====
-            self._phase_excel_report()
-
-            # ===== Phase 4: PPT报告 (90-100%) =====
-            self._phase_ppt_report()
-
-            self.progress.emit(100, "全部完成!")
-            self.finished.emit(self.results)
+            results = self.execute()
+            self.finished.emit(results)
 
         except Exception as e:
             logger.exception("自动报告生成失败")
             self.error.emit(f"自动报告生成失败: {str(e)}")
+
+    def execute(
+        self,
+        *,
+        download: bool = True,
+        analysis: bool = True,
+        excel: bool = True,
+        ppt: bool = True,
+    ) -> dict:
+        """同步执行指定阶段，供牧场组工作线程逐场复用。"""
+        try:
+            if download:
+                self._phase_download_and_standardize()
+                self._release_phase_resources()
+            if analysis:
+                self._phase_analysis()
+                try:
+                    from core.group_tasks.manual_stage_bridge import (
+                        commit_manual_group_analysis_if_ready,
+                    )
+
+                    commit_manual_group_analysis_if_ready(
+                        self.project_path
+                    )
+                except Exception as bridge_error:
+                    logger.info(
+                        "当前分析结果尚不能提交牧场组阶段: %s",
+                        bridge_error,
+                    )
+                self._release_phase_resources(reset_pedigree=True)
+            if excel:
+                self._phase_excel_report()
+                self._release_phase_resources()
+            if ppt:
+                self._phase_ppt_report()
+                self._release_phase_resources()
+            self.progress.emit(100, "全部完成!")
+            return self.results
+        finally:
+            # 异常中断时也必须释放全局系谱对象，避免下一个牧场继承本场
+            # 母牛节点；同时回收 Excel/PPT 生成过程中可能形成的引用环。
+            self._release_phase_resources(reset_pedigree=True)
+
+    def _release_phase_resources(self, *, reset_pedigree=False):
+        """可靠模式下清理单场阶段资源，降低牧场组长期运行的内存峰值。"""
+        if not self.reliability_mode:
+            return
+
+        if reset_pedigree:
+            try:
+                from core.data.update_manager import reset_pedigree_db
+
+                reset_pedigree_db()
+            except Exception as exc:
+                # 清理失败不应把已完成的业务计算标记为失败。
+                logger.warning("释放系谱缓存失败（继续处理）: %s", exc)
+
+        gc.collect()
 
     def _phase_download_and_standardize(self):
         """Phase 1: 数据下载与标准化 (0-30%)"""
@@ -559,10 +612,17 @@ class AutoReportWorker(QThread):
             self.results["success_items"].append("配种记录不可用，已配公牛分析已跳过")
 
         task_display_names = [spec[0] for spec in task_specs]
-        self.progress.emit(30, f"开始数据分析（{len(task_specs)}项并行）...")
+        execution_label = "低内存顺序执行" if self.reliability_mode else "并行"
+        self.progress.emit(
+            30,
+            f"开始数据分析（{len(task_specs)}项，{execution_label}）...",
+        )
         self.parallel_start.emit(task_display_names)
 
-        with ThreadPoolExecutor(max_workers=max(1, len(task_specs))) as executor:
+        analysis_workers = (
+            1 if self.reliability_mode else max(1, len(task_specs))
+        )
+        with ThreadPoolExecutor(max_workers=analysis_workers) as executor:
             futures = {
                 executor.submit(function, *args): name
                 for name, function, args in task_specs
@@ -621,16 +681,51 @@ class AutoReportWorker(QThread):
                 farm_name = self.farms[0].get('name', '牧场')
             else:
                 farm_name = "合并牧场"
-            success, msg = run_excel_report(self.project_path, excel_progress,
-                                               service_staff=self.service_staff,
-                                               farm_name=farm_name)
+            report_kwargs = {
+                "service_staff": self.service_staff,
+                "farm_name": farm_name,
+            }
+            # 向后兼容：当前报告入口尚未开放并发参数；一旦入口支持，
+            # 可靠模式会自动把内部 collector 并发降为 1。
+            if self.reliability_mode:
+                report_parameters = inspect.signature(
+                    run_excel_report
+                ).parameters
+                if "max_workers" in report_parameters:
+                    report_kwargs["max_workers"] = 1
+                if "reliability_mode" in report_parameters:
+                    report_kwargs["reliability_mode"] = True
+
+            success, msg = run_excel_report(
+                self.project_path,
+                excel_progress,
+                **report_kwargs,
+            )
             if success:
                 self.results['success_items'].append("Excel综合报告")
                 # 查找生成的Excel文件
                 reports_dir = self.project_path / "reports"
                 excel_files = list(reports_dir.glob("育种分析综合报告_*.xlsx"))
                 if excel_files:
-                    self.results['excel_path'] = str(max(excel_files, key=lambda p: p.stat().st_mtime))
+                    latest_excel = max(
+                        excel_files,
+                        key=lambda p: p.stat().st_mtime,
+                    )
+                    self.results['excel_path'] = str(latest_excel)
+                    try:
+                        from core.group_tasks.manual_stage_bridge import (
+                            commit_manual_group_excel_if_ready,
+                        )
+
+                        commit_manual_group_excel_if_ready(
+                            self.project_path,
+                            latest_excel,
+                        )
+                    except Exception as bridge_error:
+                        logger.info(
+                            "单场Excel已生成，但暂未提交牧场组阶段: %s",
+                            bridge_error,
+                        )
                 self.progress.emit(90, "Excel综合报告生成完成")
             else:
                 self.results['failed_items'].append(("Excel综合报告", msg))

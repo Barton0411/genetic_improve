@@ -5,6 +5,7 @@
 import pandas as pd
 import logging
 from pathlib import Path
+from typing import Optional
 
 from config.breed_constants import is_dairy_breed
 
@@ -52,7 +53,10 @@ def _build_pedigree_summary(df: pd.DataFrame, labels: list[str]) -> pd.DataFrame
     )
 
 
-def generate_pedigree_analysis_result(project_path: Path) -> bool:
+def generate_pedigree_analysis_result(
+    project_path: Path,
+    source_df: Optional[pd.DataFrame] = None,
+) -> bool:
     """
     基于processed_cow_data_key_traits_detail.xlsx生成系谱识别分析结果
 
@@ -72,7 +76,36 @@ def generate_pedigree_analysis_result(project_path: Path) -> bool:
             logger.error(f"文件不存在: {detail_file}")
             return False
 
-        df = pd.read_excel(detail_file)
+        # 系谱汇总只使用下列字段。大型明细可能有数百列，限制读取列可以
+        # 避免汇总阶段再次把整张宽表加载、复制到内存。
+        required_columns = {
+            'cow_id',
+            'sex',
+            'breed',
+            'birth_year',
+            '是否在场',
+            'sire_identified',
+            'mgs_identified',
+            'mmgs_identified',
+            *FARM_COLUMNS,
+        }
+        if source_df is None:
+            df = pd.read_excel(
+                detail_file,
+                usecols=lambda column: str(column) in required_columns,
+                dtype={
+                    'cow_id': str,
+                    '牧场编号': str,
+                    '牧场名称': str,
+                },
+            )
+        else:
+            selected_columns = [
+                column
+                for column in source_df.columns
+                if str(column) in required_columns
+            ]
+            df = source_df.loc[:, selected_columns].copy()
         from core.data.processor import add_farm_lineage_columns
         df = add_farm_lineage_columns(
             df, project_path, animal_id_column='cow_id'
@@ -94,6 +127,9 @@ def generate_pedigree_analysis_result(project_path: Path) -> bool:
                 logger.info(f"  - 已排除非奶牛品种 {excluded} 头（系谱完整性仅统计奶牛）")
         else:
             logger.warning("  - 数据缺少 breed 列，无法按品种过滤，结果可能包含肉牛")
+        df['_farm_code_norm'] = (
+            df['牧场编号'].fillna('').astype(str).str.strip()
+        )
 
         # 使用当前年份动态生成年份分组（最近4年 + 5年及以前）
         # 例如2025年：bins=[-inf, 2021, 2022, 2023, 2024, 2025]
@@ -135,7 +171,7 @@ def generate_pedigree_analysis_result(project_path: Path) -> bool:
                         farm_code = farm['牧场编号'].strip()
                         farm_name = farm['牧场名称'].strip()
                         farm_df = df[
-                            df['牧场编号'].astype(str).str.strip() == farm_code
+                            df['_farm_code_norm'] == farm_code
                         ]
                         farm_result = _build_pedigree_summary(farm_df, labels)
                         farm_result.insert(0, '牧场名称', farm_name)

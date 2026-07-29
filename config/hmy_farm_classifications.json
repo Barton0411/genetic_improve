@@ -3,7 +3,7 @@
     "source": "优然牧业牧场类型.xlsx",
     "source_sheet": "牧场明细",
     "source_scope": "仅优然牧业",
-    "matched_farm_count": 68,
+    "matched_farm_count": 72,
     "unmatched_policy": "各分类维度统一归入其他"
   },
   "farms": {
@@ -68,12 +68,16 @@
     "1100110062": {"area": "华北大区", "organic_hp": "否", "heat_stress": "是", "source_mode": "进口", "a2": "否", "dha": "否"},
     "1100110063": {"area": "华北大区", "organic_hp": "否", "heat_stress": "否", "source_mode": "自繁", "a2": "否", "dha": "否"},
     "1100110064": {"area": "华北大区", "organic_hp": "否", "heat_stress": "是", "source_mode": "自繁", "a2": "否", "dha": "否"},
+    "1100110065": {"area": "华北大区", "organic_hp": "否", "heat_stress": "是", "source_mode": "自繁", "a2": "否", "dha": "否"},
     "1100110066": {"area": "中西部大区", "organic_hp": "否", "heat_stress": "否", "source_mode": "自繁", "a2": "否", "dha": "否"},
     "1100110067": {"area": "内蒙大区", "organic_hp": "否", "heat_stress": "否", "source_mode": "自繁", "a2": "否", "dha": "否"},
     "1100110068": {"area": "东北大区", "organic_hp": "是", "heat_stress": "否", "source_mode": "进口", "a2": "否", "dha": "否"},
     "1100110069": {"area": "中西部大区", "organic_hp": "否", "heat_stress": "是", "source_mode": "自繁", "a2": "否", "dha": "否"},
     "1100110070": {"area": "东北大区", "organic_hp": "否", "heat_stress": "否", "source_mode": "自繁", "a2": "否", "dha": "否"},
     "1100110071": {"area": "东北大区", "organic_hp": "否", "heat_stress": "否", "source_mode": "自繁", "a2": "否", "dha": "否"},
-    "1100110072": {"area": "中西部大区", "organic_hp": "否", "heat_stress": "否", "source_mode": "自繁", "a2": "否", "dha": "否"}
+    "1100110072": {"area": "中西部大区", "organic_hp": "否", "heat_stress": "否", "source_mode": "自繁", "a2": "否", "dha": "否"},
+    "1100110073": {"area": "内蒙大区", "organic_hp": "否", "heat_stress": "否", "source_mode": "自繁", "a2": "否", "dha": "是"},
+    "1100110074": {"area": "华北大区", "organic_hp": "否", "heat_stress": "是", "source_mode": "自繁", "a2": "否", "dha": "否"},
+    "1100110075": {"area": "中西部大区", "organic_hp": "否", "heat_stress": "是", "source_mode": "自繁", "a2": "否", "dha": "否"}
   }
 }

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import re
 import shutil
 import tempfile
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional
 
@@ -23,6 +27,13 @@ from utils.file_manager import FileManager
 logger = logging.getLogger(__name__)
 
 LOCAL_SOURCE_SYSTEMS = ("伊起牛", "优源-DC305", "慧牧云")
+LOCAL_STAGING_PREFIX = "genetic_improve_local_farm_"
+LOCAL_INPUT_BUNDLE_SCHEMA_VERSION = 1
+LOCAL_DATA_COMMIT_SCHEMA_VERSION = 1
+LOCAL_INPUT_BUNDLE_RELATIVE_PATH = Path("raw_data") / "input_bundle"
+LOCAL_DATA_COMMIT_RELATIVE_PATH = (
+    Path("standardized_data") / "local_data_commit.json"
+)
 _COW_ID_COLUMNS = ("cow_id", "dam", "mgd")
 _COW_READ_DTYPES = {
     "cow_id": str,
@@ -43,10 +54,230 @@ _FARM_CODE_ALIASES = (
     "farm_id",
 )
 
+_LOCAL_BUNDLE_COPY_ROOTS = (
+    "input_sources",
+    "raw_data",
+    "standardized_data",
+)
+_LOCAL_BUNDLE_REQUIRED_PATHS = (
+    "raw_data/cow_data.xlsx",
+    "standardized_data/processed_cow_data.xlsx",
+)
+_LOCAL_BUNDLE_BREEDING_PATHS = (
+    "raw_data/breeding_records.xlsx",
+    "standardized_data/processed_breeding_data.xlsx",
+)
+
 
 def _emit(progress_callback: Optional[Callable], value: int, message: str) -> None:
     if progress_callback:
         progress_callback(value, message)
+
+
+def _utc_now() -> str:
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _fsync_directory(path: Path) -> None:
+    """尽力把目录项落盘；不支持目录 fsync 的平台直接跳过。"""
+    try:
+        descriptor = os.open(str(path), os.O_RDONLY)
+    except (AttributeError, OSError):
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
+def _write_bytes_atomic(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("wb") as output:
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _write_json_atomic(path: Path, payload: Dict) -> None:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    ).encode("utf-8")
+    _write_bytes_atomic(path, encoded)
+
+
+def _copy_file_atomic(source: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(
+        f".{target.name}.{uuid.uuid4().hex}.copying"
+    )
+    try:
+        shutil.copy2(source, temporary)
+        if source.stat().st_size != temporary.stat().st_size:
+            raise IOError(f"文件复制大小不一致：{source.name}")
+        if _sha256_file(source) != _sha256_file(temporary):
+            raise IOError(f"文件复制摘要不一致：{source.name}")
+        os.replace(temporary, target)
+        _fsync_directory(target.parent)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _safe_bundle_member(bundle_path: Path, relative_path: str) -> Path:
+    relative = Path(str(relative_path))
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError(f"输入包包含不安全路径：{relative_path}")
+    bundle_resolved = bundle_path.resolve()
+    member = (bundle_path / relative).resolve()
+    if member != bundle_resolved and bundle_resolved not in member.parents:
+        raise ValueError(f"输入包路径越界：{relative_path}")
+    return member
+
+
+def _bundle_file_role(relative_path: str) -> str:
+    path = Path(relative_path)
+    name = path.name
+    if path.parts and path.parts[0] == "input_sources":
+        if name.startswith("cow_original"):
+            return "cow_original"
+        if name.startswith("breeding_original"):
+            return "breeding_original"
+        return "original_supporting"
+    role_by_path = {
+        "raw_data/cow_data.xlsx": "cow_raw",
+        "raw_data/breeding_records.xlsx": "breeding_raw",
+        "standardized_data/processed_cow_data.xlsx": "cow_standardized_seed",
+        "standardized_data/processed_breeding_data.xlsx": (
+            "breeding_standardized_seed"
+        ),
+    }
+    return role_by_path.get(relative_path, "supporting_input")
+
+
+def _manifest_file_entries(bundle_path: Path) -> List[Dict]:
+    entries = []
+    for root_name in _LOCAL_BUNDLE_COPY_ROOTS:
+        root = bundle_path / root_name
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*")):
+            if path.is_symlink():
+                raise ValueError(f"本地输入暂存中不允许符号链接：{path.name}")
+            if not path.is_file():
+                continue
+            relative = path.relative_to(bundle_path).as_posix()
+            entries.append(
+                {
+                    "role": _bundle_file_role(relative),
+                    "path": relative,
+                    "size": path.stat().st_size,
+                    "sha256": _sha256_file(path),
+                }
+            )
+    return entries
+
+
+def _validate_bundle_directory(
+    bundle_path: Path,
+    *,
+    expected_task_id: Optional[str] = None,
+    expected_farm_code: Optional[str] = None,
+) -> Dict:
+    bundle_path = Path(bundle_path)
+    manifest_path = bundle_path / "manifest.json"
+    digest_path = bundle_path / "manifest.sha256"
+    if not manifest_path.is_file() or not digest_path.is_file():
+        raise FileNotFoundError("本地输入包缺少 manifest.json 或 manifest.sha256")
+
+    expected_digest = digest_path.read_text(encoding="ascii").strip().lower()
+    actual_digest = _sha256_file(manifest_path)
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_digest):
+        raise ValueError("本地输入包 manifest 摘要格式无效")
+    if expected_digest != actual_digest:
+        raise ValueError("本地输入包 manifest 摘要校验失败")
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError("本地输入包 manifest 无法读取") from exc
+    if manifest.get("schema_version") != LOCAL_INPUT_BUNDLE_SCHEMA_VERSION:
+        raise ValueError("不支持的本地输入包版本")
+
+    task_id = str(manifest.get("task_id") or "")
+    farm_code = str(manifest.get("farm_code") or "")
+    if expected_task_id and task_id != str(expected_task_id):
+        raise ValueError("本地输入包 task_id 与当前子任务不一致")
+    if expected_farm_code and farm_code != str(expected_farm_code):
+        raise ValueError("本地输入包牧场编号与当前子任务不一致")
+
+    entries = manifest.get("files")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("本地输入包 manifest 没有文件清单")
+    seen_paths = set()
+    roles = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("本地输入包文件清单格式无效")
+        relative = str(entry.get("path") or "")
+        if not relative or relative in seen_paths:
+            raise ValueError("本地输入包包含空路径或重复路径")
+        seen_paths.add(relative)
+        roles.add(str(entry.get("role") or ""))
+        member = _safe_bundle_member(bundle_path, relative)
+        if member.is_symlink() or not member.is_file():
+            raise FileNotFoundError(f"本地输入包文件缺失：{relative}")
+        if member.stat().st_size != int(entry.get("size", -1)):
+            raise ValueError(f"本地输入包文件大小不一致：{relative}")
+        if _sha256_file(member) != str(entry.get("sha256") or "").lower():
+            raise ValueError(f"本地输入包文件摘要不一致：{relative}")
+
+    missing = set(_LOCAL_BUNDLE_REQUIRED_PATHS) - seen_paths
+    if missing:
+        raise FileNotFoundError(
+            f"本地输入包缺少必要文件：{', '.join(sorted(missing))}"
+        )
+
+    has_breeding = bool(manifest.get("has_breeding_records"))
+    if has_breeding:
+        missing_breeding = set(_LOCAL_BUNDLE_BREEDING_PATHS) - seen_paths
+        if missing_breeding:
+            raise FileNotFoundError(
+                "本地输入包声明含配种记录，但缺少："
+                + ", ".join(sorted(missing_breeding))
+            )
+    if manifest.get("original_source_preserved"):
+        if "cow_original" not in roles:
+            raise FileNotFoundError("本地输入包缺少原始母牛文件")
+        if has_breeding and "breeding_original" not in roles:
+            raise FileNotFoundError("本地输入包缺少原始配种记录文件")
+
+    manifest["manifest_sha256"] = actual_digest
+    manifest["bundle_path"] = str(bundle_path)
+    return manifest
 
 
 def _prepare_tabular_input(source: Path, target: Path) -> Path:
@@ -128,19 +359,33 @@ def stage_local_farm(
         raise ValueError("牧场名称不能为空")
     _validate_file_farm_code(cow_file, farm_code)
 
-    staging_path = Path(tempfile.mkdtemp(prefix="genetic_improve_local_farm_"))
+    staging_path = Path(tempfile.mkdtemp(prefix=LOCAL_STAGING_PREFIX))
     for name in ("raw_data", "standardized_data", "analysis_results", "reports"):
         (staging_path / name).mkdir(parents=True, exist_ok=True)
 
     try:
+        source_directory = staging_path / "input_sources"
+        source_directory.mkdir(parents=True, exist_ok=True)
+        cow_suffix = cow_file.suffix.lower() or ".data"
+        cow_original = source_directory / f"cow_original{cow_suffix}"
+        _copy_file_atomic(cow_file, cow_original)
+        breeding_original = None
+        if breeding_file:
+            breeding_suffix = breeding_file.suffix.lower() or ".data"
+            breeding_original = (
+                source_directory / f"breeding_original{breeding_suffix}"
+            )
+            _copy_file_atomic(breeding_file, breeding_original)
+
         cow_input = _prepare_tabular_input(
-            cow_file, staging_path / "incoming_cow_data.xlsx"
+            cow_original, staging_path / "incoming_cow_data.xlsx"
         )
         breeding_input = (
             _prepare_tabular_input(
-                breeding_file, staging_path / "incoming_breeding_records.xlsx"
+                breeding_original,
+                staging_path / "incoming_breeding_records.xlsx",
             )
-            if breeding_file
+            if breeding_original
             else None
         )
         _emit(progress_callback, 5, "正在处理母牛信息...")
@@ -198,17 +443,494 @@ def stage_local_farm(
             "source_kind": "local",
             "source_system": source_system,
             "staging_path": str(staging_path),
+            "cow_source_name": cow_file.name,
+            "breeding_source_name": (
+                breeding_file.name if breeding_file else ""
+            ),
+            "original_source_preserved": True,
         }
     except Exception:
         shutil.rmtree(staging_path, ignore_errors=True)
         raise
 
 
-def cleanup_local_farm(farm: Dict) -> None:
-    """清理尚未写入正式项目的本地牧场暂存目录。"""
-    staging_path = farm.get("staging_path")
-    if staging_path:
-        shutil.rmtree(Path(staging_path), ignore_errors=True)
+def cleanup_local_farm(farm: Dict) -> bool:
+    """只清理本模块创建的系统临时目录，绝不删除持久输入包。"""
+    raw_path = str(farm.get("staging_path") or "").strip()
+    if not raw_path:
+        return False
+
+    candidate = Path(raw_path)
+    try:
+        resolved = candidate.resolve(strict=False)
+        temp_root = Path(tempfile.gettempdir()).resolve(strict=True)
+    except OSError:
+        logger.warning("无法确认本地牧场暂存路径，已拒绝清理：%s", candidate)
+        return False
+
+    if (
+        resolved.parent != temp_root
+        or not resolved.name.startswith(LOCAL_STAGING_PREFIX)
+    ):
+        logger.warning("拒绝清理非受管本地牧场暂存目录：%s", candidate)
+        return False
+
+    shutil.rmtree(resolved, ignore_errors=True)
+    farm.pop("staging_path", None)
+    return not resolved.exists()
+
+
+def persist_local_input_bundle(project_path: Path, farm: Dict) -> Dict:
+    """把本地牧场 staging 原子固化到子项目的只读输入包。"""
+    project_path = Path(project_path)
+    bundle_path = project_path / LOCAL_INPUT_BUNDLE_RELATIVE_PATH
+    code = str(farm.get("code") or farm.get("farmCode") or "").strip()
+    task_id = str(
+        farm.get("task_id") or farm.get("group_task_id") or ""
+    ).strip()
+
+    if bundle_path.exists():
+        return validate_local_input_bundle(
+            project_path,
+            expected_task_id=task_id or None,
+            expected_farm_code=code or None,
+        )
+
+    staging_value = str(farm.get("staging_path") or "").strip()
+    if not staging_value:
+        raise FileNotFoundError("本地牧场没有可持久化的暂存数据")
+    staging_path = Path(staging_value)
+    if not staging_path.is_dir():
+        raise FileNotFoundError("本地牧场暂存数据不存在，请重新添加该牧场")
+
+    for relative in _LOCAL_BUNDLE_REQUIRED_PATHS:
+        if not (staging_path / relative).is_file():
+            raise FileNotFoundError(f"本地牧场暂存缺少必要文件：{relative}")
+
+    has_breeding = bool(farm.get("has_breeding_records")) or any(
+        (staging_path / relative).exists()
+        for relative in _LOCAL_BUNDLE_BREEDING_PATHS
+    )
+    if has_breeding:
+        missing_breeding = [
+            relative
+            for relative in _LOCAL_BUNDLE_BREEDING_PATHS
+            if not (staging_path / relative).is_file()
+        ]
+        if missing_breeding:
+            raise FileNotFoundError(
+                "本地牧场声明含配种记录，但暂存缺少："
+                + ", ".join(missing_breeding)
+            )
+
+    raw_parent = bundle_path.parent
+    raw_parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(
+        tempfile.mkdtemp(
+            prefix=f".input_bundle.{task_id or uuid.uuid4().hex}.",
+            dir=raw_parent,
+        )
+    )
+    try:
+        for root_name in _LOCAL_BUNDLE_COPY_ROOTS:
+            source_root = staging_path / root_name
+            if not source_root.exists():
+                continue
+            for source in sorted(source_root.rglob("*")):
+                if source.is_symlink():
+                    raise ValueError(
+                        f"本地输入暂存中不允许符号链接：{source.name}"
+                    )
+                if not source.is_file():
+                    continue
+                relative = source.relative_to(staging_path)
+                _copy_file_atomic(source, temporary / relative)
+
+        entries = _manifest_file_entries(temporary)
+        entry_paths = {entry["path"] for entry in entries}
+        original_roles = {entry["role"] for entry in entries}
+        original_preserved = (
+            "cow_original" in original_roles
+            and (
+                not has_breeding
+                or "breeding_original" in original_roles
+            )
+        )
+        manifest = {
+            "schema_version": LOCAL_INPUT_BUNDLE_SCHEMA_VERSION,
+            "created_at": _utc_now(),
+            "task_id": task_id,
+            "farm_code": code,
+            "farm_name": str(farm.get("name") or code),
+            "source_kind": "local",
+            "source_system": str(farm.get("source_system") or ""),
+            "cow_count": int(farm.get("cow_count", 0) or 0),
+            "breeding_count": int(
+                farm.get("breeding_count", 0) or 0
+            ),
+            "has_breeding_records": has_breeding,
+            "original_source_preserved": original_preserved,
+            "original_names": {
+                "cow": str(farm.get("cow_source_name") or ""),
+                "breeding": str(
+                    farm.get("breeding_source_name") or ""
+                ),
+            },
+            "files": entries,
+        }
+        missing = set(_LOCAL_BUNDLE_REQUIRED_PATHS) - entry_paths
+        if missing:
+            raise FileNotFoundError(
+                f"本地输入包缺少必要文件：{', '.join(sorted(missing))}"
+            )
+
+        manifest_path = temporary / "manifest.json"
+        _write_json_atomic(manifest_path, manifest)
+        digest = _sha256_file(manifest_path)
+        _write_bytes_atomic(
+            temporary / "manifest.sha256",
+            f"{digest}\n".encode("ascii"),
+        )
+        _validate_bundle_directory(
+            temporary,
+            expected_task_id=task_id or None,
+            expected_farm_code=code or None,
+        )
+
+        if bundle_path.exists():
+            raise FileExistsError("本地输入包在提交前被其他任务创建")
+        os.replace(temporary, bundle_path)
+        _fsync_directory(raw_parent)
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary, ignore_errors=True)
+
+    return validate_local_input_bundle(
+        project_path,
+        expected_task_id=task_id or None,
+        expected_farm_code=code or None,
+    )
+
+
+def persist_group_local_input_bundles(
+    group_project_path: Path,
+    farms: List[Dict],
+) -> List[Dict]:
+    """先持久化全部本地输入，全部成功后才清理临时 staging。"""
+    persisted = []
+    local_farms = [
+        farm for farm in farms if farm.get("source_kind") == "local"
+    ]
+    for farm in local_farms:
+        task_id = str(
+            farm.get("task_id") or farm.get("group_task_id") or ""
+        ).strip()
+        if not task_id:
+            raise ValueError("本地牧场任务缺少 task_id，无法定位子项目")
+        child_path = FileManager.get_group_child_path(
+            Path(group_project_path), task_id
+        )
+        if child_path is None:
+            raise FileNotFoundError(f"找不到本地牧场子项目：{task_id}")
+        manifest = persist_local_input_bundle(child_path, farm)
+        persisted.append(manifest)
+        farm["input_bundle_relative_path"] = (
+            LOCAL_INPUT_BUNDLE_RELATIVE_PATH.as_posix()
+        )
+        farm["input_manifest_sha256"] = manifest["manifest_sha256"]
+
+    for farm in local_farms:
+        cleanup_local_farm(farm)
+    return persisted
+
+
+def validate_local_input_bundle(
+    project_path: Path,
+    *,
+    expected_task_id: Optional[str] = None,
+    expected_farm_code: Optional[str] = None,
+) -> Dict:
+    """完整校验子项目本地输入包并返回 manifest。"""
+    bundle_path = Path(project_path) / LOCAL_INPUT_BUNDLE_RELATIVE_PATH
+    return _validate_bundle_directory(
+        bundle_path,
+        expected_task_id=expected_task_id,
+        expected_farm_code=expected_farm_code,
+    )
+
+
+def _local_data_output_entries(project_path: Path) -> List[Dict]:
+    output_paths = (
+        Path("standardized_data") / "processed_cow_data.xlsx",
+        Path("standardized_data") / "processed_breeding_data.xlsx",
+    )
+    entries = []
+    for relative in output_paths:
+        path = project_path / relative
+        if not path.is_file():
+            continue
+        entries.append(
+            {
+                "role": (
+                    "cow_standardized"
+                    if path.name == "processed_cow_data.xlsx"
+                    else "breeding_standardized"
+                ),
+                "path": relative.as_posix(),
+                "size": path.stat().st_size,
+                "sha256": _sha256_file(path),
+            }
+        )
+    return entries
+
+
+def validate_local_data_commit(
+    project_path: Path,
+    *,
+    expected_input_manifest_sha256: Optional[str] = None,
+    expected_farm_code: Optional[str] = None,
+    expected_task_id: Optional[str] = None,
+) -> Dict:
+    """校验本地数据阶段提交标记及其全部输出。"""
+    project_path = Path(project_path)
+    commit_path = project_path / LOCAL_DATA_COMMIT_RELATIVE_PATH
+    if not commit_path.is_file():
+        raise FileNotFoundError("本地数据阶段尚未完整提交")
+    try:
+        commit = json.loads(commit_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError("本地数据阶段提交标记无法读取") from exc
+    if commit.get("schema_version") != LOCAL_DATA_COMMIT_SCHEMA_VERSION:
+        raise ValueError("不支持的本地数据阶段提交标记版本")
+    if (
+        expected_farm_code
+        and str(commit.get("farm_code") or "") != str(expected_farm_code)
+    ):
+        raise ValueError("本地数据阶段提交标记牧场编号不一致")
+    if (
+        expected_task_id
+        and str(commit.get("task_id") or "") != str(expected_task_id)
+    ):
+        raise ValueError("本地数据阶段提交标记 task_id 不一致")
+    input_digest = str(commit.get("input_manifest_sha256") or "")
+    if (
+        expected_input_manifest_sha256
+        and input_digest != str(expected_input_manifest_sha256)
+    ):
+        raise ValueError("本地数据阶段引用的输入包摘要不一致")
+
+    bundle_path = project_path / LOCAL_INPUT_BUNDLE_RELATIVE_PATH
+    if bundle_path.exists():
+        bundle = validate_local_input_bundle(
+            project_path,
+            expected_task_id=expected_task_id,
+            expected_farm_code=expected_farm_code,
+        )
+        if input_digest != bundle["manifest_sha256"]:
+            raise ValueError("本地数据阶段未引用当前输入包")
+        if (
+            str(commit.get("task_id") or "")
+            != str(bundle.get("task_id") or "")
+        ):
+            raise ValueError("本地数据阶段与输入包 task_id 不一致")
+        if bool(commit.get("has_breeding_records")) != bool(
+            bundle.get("has_breeding_records")
+        ):
+            raise ValueError("本地数据阶段与输入包的配种记录状态不一致")
+
+    entries = commit.get("files")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("本地数据阶段提交标记没有输出清单")
+    roles = set()
+    seen_paths = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("本地数据阶段输出清单格式无效")
+        relative = str(entry.get("path") or "")
+        if not relative or relative in seen_paths:
+            raise ValueError("本地数据阶段包含空路径或重复路径")
+        seen_paths.add(relative)
+        roles.add(str(entry.get("role") or ""))
+        member = _safe_bundle_member(project_path, relative)
+        if member.is_symlink() or not member.is_file():
+            raise FileNotFoundError(f"本地数据阶段输出缺失：{relative}")
+        if member.stat().st_size != int(entry.get("size", -1)):
+            raise ValueError(f"本地数据阶段输出大小不一致：{relative}")
+        if _sha256_file(member) != str(entry.get("sha256") or "").lower():
+            raise ValueError(f"本地数据阶段输出摘要不一致：{relative}")
+
+    if "cow_standardized" not in roles:
+        raise FileNotFoundError("本地数据阶段缺少母牛标准化输出")
+    if (
+        commit.get("has_breeding_records")
+        and "breeding_standardized" not in roles
+    ):
+        raise FileNotFoundError("本地数据阶段缺少配种记录标准化输出")
+    return commit
+
+
+def materialize_single_local_project(
+    project_path: Path,
+    farm: Dict,
+    data_source: str,
+    progress_callback: Optional[Callable] = None,
+) -> Dict:
+    """把已暂存的本地牧场复制为一个独立、可继续计算的子项目。"""
+    project_path = Path(project_path)
+    code = str(farm.get("code") or farm.get("farmCode") or "").strip()
+    name = str(farm.get("name") or code).strip()
+    group_task_id = str(
+        farm.get("task_id") or farm.get("group_task_id") or ""
+    ).strip()
+    bundle_path = project_path / LOCAL_INPUT_BUNDLE_RELATIVE_PATH
+    input_manifest = None
+    if bundle_path.exists():
+        input_manifest = validate_local_input_bundle(
+            project_path,
+            expected_task_id=group_task_id or None,
+            expected_farm_code=code or None,
+        )
+        source_root = bundle_path
+    else:
+        staging_value = str(farm.get("staging_path") or "").strip()
+        if not staging_value or not Path(staging_value).is_dir():
+            raise FileNotFoundError(
+                "本地牧场持久输入包和暂存数据均不存在，请重新添加该牧场"
+            )
+        source_root = Path(staging_value)
+    breeding_source = (
+        source_root / "standardized_data" / "processed_breeding_data.xlsx"
+    )
+    has_breeding_records = bool(
+        input_manifest.get("has_breeding_records")
+        if input_manifest is not None
+        else farm.get("has_breeding_records") or breeding_source.exists()
+    )
+
+    _emit(progress_callback, 5, "正在复制本地牧场原始文件...")
+    raw_target = project_path / "raw_data"
+    standardized_target = project_path / "standardized_data"
+    raw_target.mkdir(parents=True, exist_ok=True)
+    standardized_target.mkdir(parents=True, exist_ok=True)
+    commit_path = project_path / LOCAL_DATA_COMMIT_RELATIVE_PATH
+    if commit_path.exists():
+        commit_path.unlink()
+
+    for filename in ("cow_data.xlsx", "breeding_records.xlsx"):
+        source = source_root / "raw_data" / filename
+        if source.exists():
+            _copy_file_atomic(source, raw_target / filename)
+        elif filename == "breeding_records.xlsx":
+            stale_target = raw_target / filename
+            if stale_target.exists():
+                stale_target.unlink()
+
+    _emit(progress_callback, 30, "正在写入牧场归属信息...")
+    cow_source = source_root / "standardized_data" / "processed_cow_data.xlsx"
+    if not cow_source.exists():
+        raise FileNotFoundError("本地牧场缺少标准化母牛数据")
+    cow_frame = _read_excel(cow_source, _COW_READ_DTYPES)
+    cow_frame["raw_cow_id"] = cow_frame["cow_id"].apply(_clean_id)
+    cow_frame["raw_dam_id"] = (
+        cow_frame["dam"].apply(_clean_id) if "dam" in cow_frame.columns else ""
+    )
+    cow_frame["farm_code"] = code
+    cow_frame["farm_name"] = name
+    cow_frame["牧场编号"] = code
+    cow_frame["牧场名称"] = name
+    cow_frame["source_kind"] = "local"
+    cow_frame["source_system"] = farm.get("source_system", data_source)
+    _atomic_write_excel(
+        cow_frame, standardized_target / "processed_cow_data.xlsx"
+    )
+
+    breeding_count = 0
+    if has_breeding_records and not breeding_source.is_file():
+        raise FileNotFoundError(
+            "本地牧场声明含配种记录，但缺少标准化配种记录"
+        )
+    if breeding_source.exists():
+        _emit(progress_callback, 70, "正在复制并标记配种记录...")
+        breeding_frame = _read_excel(breeding_source, _BREEDING_READ_DTYPES)
+        breeding_frame["raw_cow_id"] = breeding_frame["耳号"].apply(_clean_id)
+        breeding_frame["farm_code"] = code
+        breeding_frame["farm_name"] = name
+        breeding_frame["牧场编号"] = code
+        breeding_frame["牧场名称"] = name
+        breeding_frame["source_kind"] = "local"
+        breeding_frame["source_system"] = farm.get(
+            "source_system", data_source
+        )
+        _atomic_write_excel(
+            breeding_frame,
+            standardized_target / "processed_breeding_data.xlsx",
+        )
+        breeding_count = len(breeding_frame)
+    else:
+        stale_breeding_output = (
+            standardized_target / "processed_breeding_data.xlsx"
+        )
+        if stale_breeding_output.exists():
+            stale_breeding_output.unlink()
+
+    normalized = dict(farm)
+    normalized["code"] = code
+    normalized["name"] = name
+    normalized["cow_count"] = len(cow_frame)
+    normalized["breeding_count"] = breeding_count
+    normalized["has_breeding_records"] = has_breeding_records
+    normalized["source_kind"] = "local"
+    normalized["source_system"] = farm.get("source_system", data_source)
+    input_manifest_sha256 = (
+        input_manifest.get("manifest_sha256", "")
+        if input_manifest is not None
+        else ""
+    )
+    metadata_extra = {
+        "parent_group": "../..",
+        "group_farm_code": code,
+        "group_task_id": group_task_id,
+        "local_input_bundle": {
+            "relative_path": (
+                LOCAL_INPUT_BUNDLE_RELATIVE_PATH.as_posix()
+                if input_manifest is not None
+                else ""
+            ),
+            "manifest_sha256": input_manifest_sha256,
+        },
+    }
+    FileManager.save_project_metadata(
+        project_path,
+        [normalized],
+        data_source=data_source,
+        project_type="group_child",
+        extra=metadata_extra,
+    )
+
+    output_entries = _local_data_output_entries(project_path)
+    data_commit = {
+        "schema_version": LOCAL_DATA_COMMIT_SCHEMA_VERSION,
+        "completed_at": _utc_now(),
+        "task_id": group_task_id,
+        "farm_code": code,
+        "farm_name": name,
+        "input_manifest_sha256": input_manifest_sha256,
+        "has_breeding_records": has_breeding_records,
+        "cow_count": len(cow_frame),
+        "breeding_count": breeding_count,
+        "files": output_entries,
+    }
+    _write_json_atomic(commit_path, data_commit)
+    validate_local_data_commit(
+        project_path,
+        expected_input_manifest_sha256=(
+            input_manifest_sha256 or None
+        ),
+        expected_farm_code=code or None,
+        expected_task_id=group_task_id or None,
+    )
+    _emit(progress_callback, 100, "本地牧场子项目准备完成")
+    return normalized
 
 
 def _clean_id(value) -> str:
@@ -259,6 +981,27 @@ def _atomic_write_excel(frame: pd.DataFrame, output_path: Path) -> None:
             temp_path.unlink()
 
 
+def _hmy_farm_identity(farm: Dict) -> tuple[str, str]:
+    """读取显式慧牧云身份；兼容只保存原始接口名称的旧项目。"""
+    source_name = str(
+        farm.get("source_farm_name")
+        or farm.get("name")
+        or ""
+    ).strip()
+    parsed_number, parsed_name = HMYDataConverter.split_farm_name(
+        source_name
+    )
+    farm_number = (
+        str(farm.get("farm_number") or "").strip()
+        if "farm_number" in farm
+        else parsed_number
+    )
+    display_name = str(
+        farm.get("display_name") or parsed_name or source_name
+    ).strip()
+    return farm_number, display_name
+
+
 def _annotate_interface_cows(
     frame: pd.DataFrame,
     interface_farms: List[Dict],
@@ -268,6 +1011,10 @@ def _annotate_interface_cows(
     result = frame.copy()
     codes = [str(farm.get("code", "")) for farm in interface_farms]
     names = {str(farm.get("code", "")): farm.get("name", "") for farm in interface_farms}
+    hmy_identities = {
+        str(farm.get("code", "")): _hmy_farm_identity(farm)
+        for farm in interface_farms
+    }
 
     existing_code_column = next(
         (
@@ -302,12 +1049,13 @@ def _annotate_interface_cows(
 
     if data_source == "慧牧云":
         result["API farmcode"] = result["farm_code"]
-        mapped_full_names = result["farm_code"].map(names).fillna("")
-        parsed_metadata = mapped_full_names.map(
-            HMYDataConverter.split_farm_name
+        mapped_identities = result["farm_code"].map(hmy_identities)
+        mapped_numbers = mapped_identities.map(
+            lambda item: item[0] if isinstance(item, tuple) else ""
         )
-        mapped_numbers = parsed_metadata.map(lambda item: item[0])
-        mapped_names = parsed_metadata.map(lambda item: item[1])
+        mapped_names = mapped_identities.map(
+            lambda item: item[1] if isinstance(item, tuple) else ""
+        )
 
         if "牧场名称" not in result.columns:
             result["牧场名称"] = ""
@@ -323,11 +1071,7 @@ def _annotate_interface_cows(
         needs_display_number = result["牧场编号"].eq("") | result[
             "牧场编号"
         ].eq(result["farm_code"])
-        replacements = mapped_numbers.where(
-            mapped_numbers.ne(""),
-            result["farm_code"],
-        )
-        result.loc[needs_display_number, "牧场编号"] = replacements[
+        result.loc[needs_display_number, "牧场编号"] = mapped_numbers[
             needs_display_number
         ]
         result["farm_name"] = result["牧场名称"]
@@ -386,6 +1130,10 @@ def _annotate_interface_breeding(
     result = frame.copy()
     codes = [str(farm.get("code", "")) for farm in interface_farms]
     names = {str(farm.get("code", "")): farm.get("name", "") for farm in interface_farms}
+    hmy_identities = {
+        str(farm.get("code", "")): _hmy_farm_identity(farm)
+        for farm in interface_farms
+    }
     existing_code_column = next(
         (
             column
@@ -417,17 +1165,13 @@ def _annotate_interface_breeding(
         raise ValueError(f"有 {missing} 条接口配种记录无法识别所属牧场")
     if data_source == "慧牧云":
         result["API farmcode"] = result["farm_code"]
-        mapped_full_names = result["farm_code"].map(names).fillna("")
-        parsed_metadata = mapped_full_names.map(
-            HMYDataConverter.split_farm_name
+        mapped_identities = result["farm_code"].map(hmy_identities)
+        result["牧场编号"] = mapped_identities.map(
+            lambda item: item[0] if isinstance(item, tuple) else ""
         )
-        mapped_numbers = parsed_metadata.map(lambda item: item[0])
-        mapped_names = parsed_metadata.map(lambda item: item[1])
-        result["牧场编号"] = mapped_numbers.where(
-            mapped_numbers.ne(""),
-            result["farm_code"],
+        result["牧场名称"] = mapped_identities.map(
+            lambda item: item[1] if isinstance(item, tuple) else ""
         )
-        result["牧场名称"] = mapped_names
         result["farm_name"] = result["牧场名称"]
     else:
         result["farm_name"] = result["farm_code"].map(names).fillna("")

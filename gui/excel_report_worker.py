@@ -45,6 +45,20 @@ class ExcelReportWorker(QObject):
         try:
             logger.info(f"开始生成Excel报告: {self.project_path}")
 
+            from utils.file_manager import FileManager
+            metadata = FileManager.load_project_metadata(self.project_path)
+            if metadata.get("project_type") == "multi_farm_group":
+                from core.group_report import GroupExcelReportGenerator
+
+                generator = GroupExcelReportGenerator(
+                    self.project_path,
+                    service_staff=self.service_staff or "",
+                    progress_callback=self.progress_callback,
+                )
+                success, result = generator.generate()
+                self.finished.emit(success, result)
+                return
+
             # 导入生成器
             from core.excel_report import ExcelReportGenerator
 
@@ -57,6 +71,25 @@ class ExcelReportWorker(QObject):
 
             # 执行生成
             success, result = generator.generate()
+
+            if success:
+                try:
+                    from core.group_tasks.manual_stage_bridge import (
+                        commit_manual_group_excel_if_ready,
+                    )
+
+                    commit_manual_group_excel_if_ready(
+                        self.project_path,
+                        Path(result),
+                    )
+                except Exception as bridge_error:
+                    # 单场报告本身已经成功，不能因为父任务尚不满足完整
+                    # 分析口径而把报告改判失败。父任务保持未就绪，用户
+                    # 补完缺失分析并重新生成报告后会再次提交。
+                    logger.info(
+                        "单场Excel已生成，但暂未提交牧场组阶段: %s",
+                        bridge_error,
+                    )
 
             # 发送完成信号
             self.finished.emit(success, result)

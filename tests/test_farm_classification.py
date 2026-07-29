@@ -51,16 +51,16 @@ class FarmClassificationTests(unittest.TestCase):
         expected_counts = {
             "area": {
                 "东北大区": 16,
-                "中西部大区": 13,
-                "内蒙大区": 23,
-                "华北大区": 16,
-                "其他": 37,
+                "中西部大区": 14,
+                "内蒙大区": 24,
+                "华北大区": 18,
+                "其他": 33,
             },
-            "organic_hp": {"是": 17, "否": 51, "其他": 37},
-            "heat_stress": {"是": 19, "否": 49, "其他": 37},
-            "source_mode": {"自繁": 50, "进口": 18, "其他": 37},
-            "a2": {"是": 9, "否": 59, "其他": 37},
-            "dha": {"是": 1, "否": 67, "其他": 37},
+            "organic_hp": {"是": 17, "否": 55, "其他": 33},
+            "heat_stress": {"是": 22, "否": 50, "其他": 33},
+            "source_mode": {"自繁": 54, "进口": 18, "其他": 33},
+            "a2": {"是": 9, "否": 63, "其他": 33},
+            "dha": {"是": 2, "否": 70, "其他": 33},
         }
 
         for _, field in HMY_CLASSIFICATION_OPTIONS:
@@ -75,6 +75,21 @@ class FarmClassificationTests(unittest.TestCase):
             self.assertEqual(len(grouped_codes), 105)
             self.assertEqual(len(set(grouped_codes)), 105)
             self.assertEqual(list(groups)[-1], "其他")
+
+    def test_recent_youran_farms_use_classification_source_values(self):
+        farms_by_code = {
+            farm["farmCode"]: farm for farm in self.farms
+        }
+        expected = {
+            "1100110065": ("华北大区", "否"),
+            "1100110073": ("内蒙大区", "是"),
+            "1100110074": ("华北大区", "否"),
+            "1100110075": ("中西部大区", "否"),
+        }
+
+        for code, (area, dha) in expected.items():
+            self.assertEqual(farms_by_code[code]["area"], area)
+            self.assertEqual(farms_by_code[code]["dha"], dha)
 
     def test_saikexing_same_name_farms_do_not_inherit_youran_categories(self):
         farms_by_code = {

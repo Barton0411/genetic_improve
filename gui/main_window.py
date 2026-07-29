@@ -377,7 +377,9 @@ class MainWindow(QMainWindow):
 
             # 合并项目状态
             self.is_merged_project = False
+            self.is_group_project = False
             self.merged_farms = []
+            self.group_tasks = []
             self.project_data_source = ""
 
             # PPT后台生成状态
@@ -858,6 +860,7 @@ class MainWindow(QMainWindow):
 
         # 按顺序添加页面，每个页面只添加一次
         farm_page = FarmSelectionPage(yqn_token=self.yqn_token, username=self.username)
+        self.farm_selection_page = farm_page
         farm_page.project_created.connect(self.select_project_by_path)
         farm_page.user_name_fetched.connect(lambda name: setattr(self, 'service_staff_name', name))
         self.content_stack.addWidget(farm_page)  # 第0页：伊起牛牧场数据选择
@@ -1289,7 +1292,9 @@ class MainWindow(QMainWindow):
     def _load_project_metadata(self):
         """加载项目元数据，检查是否为合并项目"""
         self.is_merged_project = False
+        self.is_group_project = False
         self.merged_farms = []
+        self.group_tasks = []
         self.project_data_source = ""
 
         if not self.selected_project_path:
@@ -1297,7 +1302,9 @@ class MainWindow(QMainWindow):
 
         metadata = FileManager.load_project_metadata(self.selected_project_path)
         self.is_merged_project = metadata.get("is_merged", False)
+        self.is_group_project = metadata.get("project_type") == "multi_farm_group"
         self.merged_farms = metadata.get("farms", [])
+        self.group_tasks = metadata.get("group_tasks", [])
         self.project_data_source = metadata.get("data_source", "")
         if (
             self.project_data_source == "慧牧云"
@@ -1306,7 +1313,9 @@ class MainWindow(QMainWindow):
             logging.warning("当前账号未开通慧牧云功能，拒绝加载慧牧云项目")
             self.selected_project_path = None
             self.is_merged_project = False
+            self.is_group_project = False
             self.merged_farms = []
+            self.group_tasks = []
             self.project_data_source = ""
             return
 
@@ -1319,6 +1328,36 @@ class MainWindow(QMainWindow):
 
         if self.is_merged_project:
             logging.info(f"已加载合并项目，包含 {len(self.merged_farms)} 个牧场")
+        if self.is_group_project:
+            completed = sum(
+                task.get("status")
+                in {"completed", "completed_with_warning"}
+                for task in self.group_tasks
+                if task.get("included_in_summary", True)
+            )
+            active_count = sum(
+                task.get("included_in_summary", True)
+                for task in self.group_tasks
+            )
+            logging.info(
+                "已加载牧场组项目，任务完成 %s/%s",
+                completed,
+                active_count,
+            )
+        if hasattr(self, "excel_report_button"):
+            self.excel_report_button.setText(
+                "生成牧场组汇总Excel"
+                if self.is_group_project
+                else "生成Excel报告"
+            )
+        if hasattr(self, "ppt_report_button"):
+            self.ppt_report_button.setText(
+                "生成牧场组汇报PPT"
+                if self.is_group_project
+                else "生成PPT报告"
+            )
+        if hasattr(self, "group_task_manage_button"):
+            self.group_task_manage_button.setVisible(self.is_group_project)
 
         breeding_file = (
             self.selected_project_path
@@ -1512,6 +1551,22 @@ class MainWindow(QMainWindow):
         if current_item:
             text = current_item.text().strip()
 
+            if self.is_group_project and text in {
+                "数据上传",
+                "关键育种性状分析",
+                "牛只指数计算排名",
+                "近交系数及隐性基因分析",
+                "个体选配",
+            }:
+                QMessageBox.information(
+                    self,
+                    "牧场组项目",
+                    "牧场组父项目只用于查看子任务和生成最终汇总报告。\n\n"
+                    "请在“育种项目管理”中打开对应牧场子项目后再进行单牧场分析。",
+                )
+                self.content_stack.setCurrentIndex(1)
+                return
+
             # 根据导航文本切换页面
             if text == "牧场数据对接":
                 self.content_stack.setCurrentIndex(0)  # 牧场数据对接
@@ -1699,6 +1754,7 @@ class MainWindow(QMainWindow):
             }
         """)
         ppt_button.clicked.connect(self.on_generate_ppt)
+        self.ppt_report_button = ppt_button
 
         # Excel报告按钮
         excel_button = QPushButton("生成Excel报告")
@@ -1725,8 +1781,28 @@ class MainWindow(QMainWindow):
         """)
         excel_button.clicked.connect(self.on_generate_excel_report)
         excel_button.setToolTip("生成Excel综合报告（包含9个分析sheet）")
+        self.excel_report_button = excel_button
+
+        group_task_button = QPushButton("管理牧场子任务")
+        group_task_button.setMinimumSize(180, 60)
+        group_task_button.setStyleSheet("""
+            QPushButton {
+                background-color: #7f8c8d;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 17px;
+                font-weight: bold;
+                padding: 15px 24px;
+            }
+            QPushButton:hover { background-color: #6c7a7b; }
+        """)
+        group_task_button.clicked.connect(self.open_group_task_manager)
+        group_task_button.hide()
+        self.group_task_manage_button = group_task_button
 
         button_layout.addStretch()
+        button_layout.addWidget(group_task_button)
         button_layout.addWidget(ppt_button)
         button_layout.addWidget(excel_button)
         button_layout.addStretch()
@@ -4631,11 +4707,313 @@ class MainWindow(QMainWindow):
             logger.error(traceback.format_exc())
             QMessageBox.critical(self, "错误", f"选配分配失败:\n{str(e)}")
     
+    def open_group_task_manager(self):
+        """查看、打开、重试及调整牧场组最终汇总范围。"""
+        if not self.selected_project_path or not self.is_group_project:
+            QMessageBox.warning(self, "提示", "请先选择一个牧场组项目。")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("牧场组子任务管理")
+        dialog.resize(1320, 680)
+        layout = QVBoxLayout(dialog)
+        summary_label = QLabel()
+        summary_label.setWordWrap(True)
+        layout.addWidget(summary_label)
+
+        initial_metadata = FileManager.load_project_metadata(
+            self.selected_project_path
+        )
+        show_hmy_identity = (
+            initial_metadata.get("data_source") == "慧牧云"
+        )
+        identity_headers = (
+            ["API farmcode", "牧场编号", "牧场名称"]
+            if show_hmy_identity
+            else ["牧场编号", "牧场名称"]
+        )
+        table = QTableWidget()
+        table.setColumnCount(8 + len(identity_headers))
+        table.setHorizontalHeaderLabels(
+            [
+                "纳入汇总", *identity_headers, "任务状态",
+                "数据", "分析", "单场Excel", "进度", "当前阶段",
+                "错误/提示",
+            ]
+        )
+        table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        table.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
+        table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        table.horizontalHeader().setSectionResizeMode(
+            len(identity_headers), QHeaderView.ResizeMode.Stretch
+        )
+        table.horizontalHeader().setSectionResizeMode(
+            6 + len(identity_headers), QHeaderView.ResizeMode.Stretch
+        )
+        table.horizontalHeader().setSectionResizeMode(
+            7 + len(identity_headers), QHeaderView.ResizeMode.Stretch
+        )
+        layout.addWidget(table, 1)
+
+        state = {"tasks": []}
+        status_labels = {
+            "pending": "等待处理",
+            "running": "处理中",
+            "completed": "已完成",
+            "completed_with_warning": "已完成（有提示）",
+            "failed": "失败，可重试",
+            "interrupted": "已中断，可继续",
+            "stale": "已中断，可继续",
+        }
+        stage_status_labels = {
+            "pending": "等待",
+            "running": "处理中",
+            "completed": "完成",
+            "completed_with_warning": "完成·有提示",
+            "failed": "失败",
+            "interrupted": "中断",
+            "stale": "需重做",
+            "skipped": "按需",
+        }
+
+        def selected_task():
+            row = table.currentRow()
+            if row < 0 or row >= len(state["tasks"]):
+                QMessageBox.information(dialog, "提示", "请先选择一个牧场。")
+                return None
+            return state["tasks"][row]
+
+        def reload_table(refresh_files=False):
+            if refresh_files:
+                FileManager.refresh_group_task_statuses(
+                    self.selected_project_path
+                )
+            metadata = FileManager.load_project_metadata(
+                self.selected_project_path
+            )
+            tasks = metadata.get("group_tasks", [])
+            state["tasks"] = tasks
+            table.setRowCount(len(tasks))
+            completed = 0
+            active = 0
+            stage_completed = {
+                "data": 0,
+                "analysis": 0,
+                "child_excel": 0,
+            }
+            for row, task in enumerate(tasks):
+                included = task.get("included_in_summary", True)
+                if included:
+                    active += 1
+                    if task.get("status") in {
+                        "completed",
+                        "completed_with_warning",
+                    }:
+                        completed += 1
+                    stages = task.get("stages", {})
+                    for stage_name in stage_completed:
+                        if stages.get(stage_name, {}).get("status") in {
+                            "completed",
+                            "completed_with_warning",
+                        }:
+                            stage_completed[stage_name] += 1
+                identity_values = (
+                    [
+                        task.get("api_farmcode", ""),
+                        task.get("farm_number", ""),
+                        task.get("farm_name", ""),
+                    ]
+                    if show_hmy_identity
+                    else [
+                        task.get("farm_number")
+                        or task.get("farm_code", ""),
+                        task.get("farm_name", ""),
+                    ]
+                )
+                values = [
+                    "是" if included else "否",
+                    *identity_values,
+                    status_labels.get(
+                        task.get("status"), task.get("status", "")
+                    ),
+                    stage_status_labels.get(
+                        task.get("stages", {})
+                        .get("data", {})
+                        .get("status", ""),
+                        "",
+                    ),
+                    stage_status_labels.get(
+                        task.get("stages", {})
+                        .get("analysis", {})
+                        .get("status", ""),
+                        "",
+                    ),
+                    stage_status_labels.get(
+                        task.get("stages", {})
+                        .get("child_excel", {})
+                        .get("status", ""),
+                        "",
+                    ),
+                    f"{int(float(task.get('progress', 0) or 0))}%",
+                    task.get("stage", ""),
+                    task.get("error", ""),
+                ]
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    item.setData(
+                        Qt.ItemDataRole.UserRole,
+                        task.get("task_id"),
+                    )
+                    table.setItem(row, column, item)
+            summary_label.setText(
+                f"纳入汇总 {active} 个｜数据完成 "
+                f"{stage_completed['data']}/{active}｜单场分析 "
+                f"{stage_completed['analysis']}/{active}｜单场Excel "
+                f"{stage_completed['child_excel']}/{active}。\n"
+                f"本次模式任务完成 {completed}/{active}；排除只影响最终汇总，"
+                f"不删除子项目或已有结果。"
+            )
+            self._load_project_metadata()
+
+        buttons = QHBoxLayout()
+        enter_button = QPushButton("进入子项目")
+        open_report_button = QPushButton("打开单场Excel")
+        open_button = QPushButton("打开所在目录")
+        retry_button = QPushButton("重试所选任务")
+        include_button = QPushButton("移出/重新纳入汇总")
+        refresh_button = QPushButton("重新检查子项目结果")
+        continue_button = QPushButton("继续处理未完成任务")
+        close_button = QPushButton("关闭")
+        for button in (
+            enter_button,
+            open_report_button,
+            open_button,
+            retry_button,
+            include_button,
+            refresh_button,
+            continue_button,
+            close_button,
+        ):
+            buttons.addWidget(button)
+        layout.addLayout(buttons)
+
+        def open_selected():
+            task = selected_task()
+            if not task:
+                return
+            path = (
+                self.selected_project_path
+                / task.get("relative_path", "")
+            )
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+        def enter_selected():
+            task = selected_task()
+            if not task:
+                return
+            path = (
+                self.selected_project_path
+                / task.get("relative_path", "")
+            )
+            dialog.accept()
+            self.select_project_by_path(path)
+
+        def open_selected_report():
+            task = selected_task()
+            if not task:
+                return
+            path = (
+                self.selected_project_path
+                / task.get("relative_path", "")
+            )
+            reports = [
+                report
+                for report in (path / "reports").glob(
+                    "育种分析综合报告_*.xlsx"
+                )
+                if FileManager._valid_xlsx_file(report)
+            ]
+            if not reports:
+                QMessageBox.information(
+                    dialog, "尚未生成", "所选牧场还没有有效的单场Excel报告。"
+                )
+                return
+            report = max(reports, key=lambda item: item.stat().st_mtime)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(report)))
+
+        def retry_selected():
+            task = selected_task()
+            if not task:
+                return
+            FileManager.reset_group_task_for_retry(
+                self.selected_project_path,
+                task.get("task_id") or task.get("farm_code"),
+            )
+            reload_table()
+
+        def toggle_selected():
+            task = selected_task()
+            if not task:
+                return
+            FileManager.set_group_task_excluded(
+                self.selected_project_path,
+                task.get("task_id") or task.get("farm_code"),
+                excluded=task.get("included_in_summary", True),
+            )
+            reload_table()
+
+        def continue_tasks():
+            dialog.accept()
+            self.farm_selection_page.continue_group_project(
+                self.selected_project_path
+            )
+
+        enter_button.clicked.connect(enter_selected)
+        open_report_button.clicked.connect(open_selected_report)
+        open_button.clicked.connect(open_selected)
+        retry_button.clicked.connect(retry_selected)
+        include_button.clicked.connect(toggle_selected)
+        refresh_button.clicked.connect(lambda: reload_table(True))
+        continue_button.clicked.connect(continue_tasks)
+        close_button.clicked.connect(dialog.accept)
+        reload_table()
+        dialog.exec()
+
     def on_generate_ppt(self):
         """生成PPT报告按钮回调"""
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
+
+        if self.is_group_project:
+            metadata = FileManager.load_project_metadata(self.selected_project_path)
+            readiness = FileManager.get_group_summary_readiness(
+                self.selected_project_path
+            )
+            if not readiness.get("ready"):
+                QMessageBox.warning(
+                    self,
+                    "最终汇总尚未就绪",
+                    f"当前有 {readiness.get('ready_count', 0)}/"
+                    f"{readiness.get('included_count', 0)} 个纳入牧场"
+                    "具备核心分析结果和单场Excel。\n\n"
+                    "请在“管理牧场子任务”中进入未完成子项目继续计算，"
+                    "再重新检查结果。",
+                )
+                return
+            if metadata.get("group_results", {}).get("status") == "stale":
+                QMessageBox.warning(
+                    self,
+                    "汇总结果已失效",
+                    "牧场任务或汇总范围已发生变化，请先重新生成牧场组汇总Excel。",
+                )
+                return
 
         # 情况1: PPT已生成完成
         if self.ppt_output_path and Path(self.ppt_output_path).exists():
@@ -4656,8 +5034,7 @@ class MainWindow(QMainWindow):
             return
 
         # 情况3: 未开始生成 - 检查Excel报告是否存在后启动
-        reports_folder = self.selected_project_path / "reports"
-        excel_reports = list(reports_folder.glob("育种分析综合报告_*.xlsx")) if reports_folder.exists() else []
+        excel_reports = self._get_excel_report_files()
 
         if not excel_reports:
             reply = QMessageBox.question(
@@ -4673,6 +5050,20 @@ class MainWindow(QMainWindow):
         # 启动PPT后台生成并显示进度
         self._start_ppt_background_generation()
         self._show_ppt_progress_dialog()
+
+    def _get_excel_report_files(self):
+        """返回当前项目对应的Excel报告，牧场组不与单牧场文件混用。"""
+        if not self.selected_project_path:
+            return []
+        reports_folder = self.selected_project_path / "reports"
+        if not reports_folder.exists():
+            return []
+        pattern = (
+            "牧场组育种分析汇总报告_*.xlsx"
+            if self.is_group_project
+            else "育种分析综合报告_*.xlsx"
+        )
+        return list(reports_folder.glob(pattern))
 
     def _confirm_comparison_before_report(self) -> bool:
         """
@@ -4779,10 +5170,32 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
 
-        # 生成前确认是否加入对比牧场（默认不加，避免历史勾选残留）
-        # 用户选"取消生成"则中止，让其回去重新勾选对比来源
-        if not self._confirm_comparison_before_report():
-            return
+        if self.is_group_project:
+            readiness = FileManager.get_group_summary_readiness(
+                self.selected_project_path
+            )
+            if not readiness.get("ready"):
+                examples = []
+                for item in readiness.get("missing_tasks", [])[:3]:
+                    name = item.get("farm_name") or item.get("farm_code")
+                    examples.append(
+                        f"• {name}：{'、'.join(item.get('missing', [])[:3])}"
+                    )
+                details = "\n".join(examples)
+                QMessageBox.warning(
+                    self,
+                    "最终汇总尚未就绪",
+                    f"当前有 {readiness.get('ready_count', 0)}/"
+                    f"{readiness.get('included_count', 0)} 个纳入牧场"
+                    "具备核心分析结果和单场Excel。\n\n"
+                    "数据准备完成不等于汇总就绪；不生成阶段性汇总Excel。"
+                    + (f"\n\n{details}" if details else ""),
+                )
+                return
+        else:
+            # 单牧场报告沿用对比牧场确认。
+            if not self._confirm_comparison_before_report():
+                return
 
         try:
             from PyQt6.QtCore import QThread
@@ -4856,8 +5269,9 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}")
 
-            # 静默启动PPT后台生成
-            self._start_ppt_background_generation()
+            # 单牧场沿用自动生成PPT；牧场组PPT由用户按需点击生成。
+            if not self.is_group_project:
+                self._start_ppt_background_generation()
         else:
             # 生成失败
             error_msg = result
@@ -4883,8 +5297,7 @@ class MainWindow(QMainWindow):
             return
 
         # 检查Excel报告是否存在
-        reports_folder = self.selected_project_path / "reports"
-        excel_reports = list(reports_folder.glob("育种分析综合报告_*.xlsx")) if reports_folder.exists() else []
+        excel_reports = self._get_excel_report_files()
         if not excel_reports:
             return  # 没有Excel报告，不自动启动
 
@@ -4925,17 +5338,17 @@ class MainWindow(QMainWindow):
         reporter_name = self.service_staff_name or "用户"
 
         # 获取牧场名称
-        farm_name = "牧场"
+        farm_name = "牧场组" if self.is_group_project else "牧场"
         try:
-            reports_folder = self.selected_project_path / "reports"
-            excel_reports = list(reports_folder.glob("育种分析综合报告_*.xlsx")) if reports_folder.exists() else []
+            excel_reports = self._get_excel_report_files()
             if excel_reports:
                 latest_excel = max(excel_reports, key=lambda p: p.stat().st_mtime)
-                df_info = pd.read_excel(latest_excel, sheet_name='牧场基础信息', nrows=1)
-                if '牧场名称' in df_info.columns:
-                    farm_name = str(df_info['牧场名称'].iloc[0])
-                elif '项目名称' in df_info.columns:
-                    farm_name = str(df_info['项目名称'].iloc[0])
+                if not self.is_group_project:
+                    df_info = pd.read_excel(latest_excel, sheet_name='牧场基础信息', nrows=1)
+                    if '牧场名称' in df_info.columns:
+                        farm_name = str(df_info['牧场名称'].iloc[0])
+                    elif '项目名称' in df_info.columns:
+                        farm_name = str(df_info['项目名称'].iloc[0])
         except Exception as e:
             logging.warning(f"无法从Excel读取牧场名称: {e}")
             raw_name = self.selected_project_path.name

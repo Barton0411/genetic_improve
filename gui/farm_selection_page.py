@@ -68,6 +68,32 @@ def group_hmy_farms(farms: list, field: str) -> dict:
     }
 
 
+def farm_selection_action_policy(selected_count: int) -> dict:
+    """返回单选/多选对应的创建入口策略，避免 UI 与执行分支不一致。"""
+    count = max(0, int(selected_count or 0))
+    has_selection = count > 0
+    is_group = count >= 2
+    return {
+        "preview_enabled": has_selection,
+        "create_enabled": has_selection,
+        "auto_report_enabled": count == 1,
+        "create_text": (
+            "创建牧场组项目" if is_group else "创建牧场项目"
+        ),
+        "auto_report_text": (
+            "自动报告仅支持单牧场"
+            if is_group
+            else "创建项目并自动生成报告"
+        ),
+        "auto_report_tooltip": (
+            "多选仅创建牧场组项目；请在子项目中按需完成分析，"
+            "全部就绪后再生成最终汇总Excel"
+            if is_group
+            else ""
+        ),
+    }
+
+
 class DataDownloadWorker(QThread):
     """后台下载和处理数据的工作线程"""
     progress = pyqtSignal(int, str)  # (百分比, 状态消息)
@@ -1958,9 +1984,13 @@ class FarmSelectionPage(QWidget):
         self.warning_frame.setVisible(count >= 2)
 
         # 按钮状态
-        self.preview_btn.setEnabled(count > 0)
-        self.create_btn.setEnabled(count > 0)
-        self.auto_report_btn.setEnabled(count > 0)
+        policy = farm_selection_action_policy(count)
+        self.preview_btn.setEnabled(policy["preview_enabled"])
+        self.create_btn.setEnabled(policy["create_enabled"])
+        self.auto_report_btn.setEnabled(policy["auto_report_enabled"])
+        self.create_btn.setText(policy["create_text"])
+        self.auto_report_btn.setText(policy["auto_report_text"])
+        self.auto_report_btn.setToolTip(policy["auto_report_tooltip"])
 
     def on_search_changed(self, text: str):
         """搜索文本变化 - 搜索范围为所有牧场，不受左侧筛选限制"""
@@ -2022,9 +2052,12 @@ class FarmSelectionPage(QWidget):
 
         if len(farm_list) >= 2:
             info_lines.append("\n⚠️ 多选模式注意：")
-            info_lines.append("• 牛号和母亲号将添加牧场站号前缀")
-            if self.data_source == "伊起牛":
-                info_lines.append("• 部分功能将被禁用")
+            info_lines.append("• 每个牧场将作为独立子项目处理")
+            info_lines.append("• 本入口只逐场下载并标准化数据，不自动分析")
+            info_lines.append("• 后续进入子项目按需分析并生成单场Excel")
+            info_lines.append("• 全部就绪后手动生成最终牧场组汇总Excel")
+            info_lines.append("• 不生成阶段性汇总Excel")
+            info_lines.append("• 牧场组管理PPT按需手动生成")
 
         QMessageBox.information(self, "预览选中数据", "\n".join(info_lines))
 
@@ -2047,16 +2080,13 @@ class FarmSelectionPage(QWidget):
 
         # 确认对话框
         if is_merged:
-            restriction_text = ""
-            if self.data_source == "伊起牛":
-                restriction_text = "• 基因组检测、体型外貌、个体选配功能将被禁用\n"
             confirm_msg = (
-                f"即将创建{self.data_source}合并牧场项目\n\n"
+                f"即将创建{self.data_source}牧场组项目\n\n"
                 f"包含 {len(interface_farms)} 个接口牧场"
                 f"和 {len(local_farms)} 个本地补充牧场\n\n"
-                f"⚠️ 注意：\n"
-                f"• 牛号和母亲号将添加牧场站号前缀\n"
-                f"{restriction_text}\n"
+                f"系统将为每个牧场创建独立子项目并分别下载、标准化数据，"
+                f"不会把所有牛只明细合并到一个超大文件。\n\n"
+                f"每个牧场完成后可立即打开对应子项目目录。\n\n"
                 f"是否继续?"
             )
         else:
@@ -2099,8 +2129,19 @@ class FarmSelectionPage(QWidget):
             base_path = Path(settings.get_default_storage())
 
             if is_merged:
-                project_path = FileManager.create_merged_project(
-                    base_path, farms_info, data_source=self.data_source
+                project_path = FileManager.create_group_project(
+                    base_path,
+                    farms_info,
+                    data_source=self.data_source,
+                    task_mode="data_only",
+                )
+                from core.data.composite_farm_manager import (
+                    persist_group_local_input_bundles,
+                )
+
+                persist_group_local_input_bundles(
+                    project_path,
+                    farms_info,
                 )
             else:
                 project_path = FileManager.create_project(base_path, farms_info[0]['name'])
@@ -2110,6 +2151,14 @@ class FarmSelectionPage(QWidget):
                 )
 
             self.logger.info(f"项目文件夹已创建: {project_path}")
+
+            if is_merged:
+                self._start_group_tasks(
+                    project_path,
+                    farms_info,
+                    full_analysis=False,
+                )
+                return
 
             # 创建进度对话框
             progress_dialog = QProgressDialog(self)
@@ -2299,6 +2348,17 @@ class FarmSelectionPage(QWidget):
             )
             return
 
+        farms_info = interface_farms + local_farms
+        if len(farms_info) > 1:
+            QMessageBox.information(
+                self,
+                "多选仅创建牧场组",
+                "多选牧场不执行一键自动报告。\n\n"
+                "请点击“创建牧场组项目”逐场准备数据；后续可进入各子项目"
+                "按需完成分析，全部就绪后再生成最终汇总Excel。",
+            )
+            return
+
         if self.data_source == "慧牧云":
             confirm_msg = (
                 "即将创建慧牧云项目并自动生成当前可用报告\n\n"
@@ -2354,7 +2414,13 @@ class FarmSelectionPage(QWidget):
             )
             return
         farms_info = interface_farms + local_farms
-        is_merged = len(farms_info) > 1
+        if len(farms_info) > 1:
+            QMessageBox.information(
+                self,
+                "多选仅创建牧场组",
+                "多选牧场不执行一键自动报告，请使用“创建牧场组项目”。",
+            )
+            return
 
         try:
             # 创建项目文件夹
@@ -2362,15 +2428,12 @@ class FarmSelectionPage(QWidget):
             settings = Settings()
             base_path = Path(settings.get_default_storage())
 
-            if is_merged:
-                project_path = FileManager.create_merged_project(
-                    base_path, farms_info, data_source=self.data_source
-                )
-            else:
-                project_path = FileManager.create_project(base_path, farms_info[0]['name'])
-                FileManager.save_project_metadata(
-                    project_path, farms_info, data_source=self.data_source
-                )
+            project_path = FileManager.create_project(
+                base_path, farms_info[0]["name"]
+            )
+            FileManager.save_project_metadata(
+                project_path, farms_info, data_source=self.data_source
+            )
 
             self.logger.info(f"项目文件夹已创建: {project_path}")
 
@@ -2411,7 +2474,7 @@ class FarmSelectionPage(QWidget):
                 self.api_client,
                 interface_farms,
                 project_path,
-                is_merged,
+                False,
                 service_staff=getattr(self, 'login_user_name', None) or '',
                 data_source=self.data_source,
                 local_farms=local_farms,
@@ -2452,6 +2515,168 @@ class FarmSelectionPage(QWidget):
                 "创建失败",
                 f"无法创建项目文件夹:\n{str(e)}"
             )
+
+    def _start_group_tasks(self, project_path, farms_info, full_analysis):
+        """启动牧场组逐场处理；子项目完成后在进度窗口开放目录。"""
+        from gui.multi_farm_task_worker import MultiFarmTaskWorker
+        from gui.progress import ProgressDialog
+
+        main_window = self.window()
+        dialog = ProgressDialog(main_window)
+        dialog.setWindowTitle(
+            "牧场组自动分析" if full_analysis else "创建牧场组项目"
+        )
+        dialog.title_label.setText(
+            "牧场组自动分析" if full_analysis else "牧场组数据准备"
+        )
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.cancel_button.hide()
+        dialog.setMinimumWidth(720)
+        dialog.set_task_info("正在准备牧场子任务...")
+        dialog.show()
+
+        self.group_worker = MultiFarmTaskWorker(
+            self.api_client,
+            farms_info,
+            project_path,
+            data_source=self.data_source,
+            service_staff=getattr(self, "login_user_name", None) or "",
+            full_analysis=full_analysis,
+        )
+        self.group_worker.progress.connect(
+            lambda pct, msg: self._on_auto_report_progress(dialog, pct, msg)
+        )
+        self.group_worker.parallel_start.connect(dialog.show_sub_tasks)
+        self.group_worker.sub_task_progress.connect(dialog.update_sub_task)
+        self.group_worker.sub_task_done.connect(dialog.complete_sub_task)
+        self.group_worker.finished.connect(
+            lambda result: self._on_group_tasks_finished(dialog, project_path, result)
+        )
+        self.group_worker.error.connect(
+            lambda error: self._on_group_tasks_error(dialog, project_path, error)
+        )
+        self.group_worker.start()
+
+    def continue_group_project(self, project_path: Path):
+        """从父项目状态库继续未完成/失败的牧场任务。"""
+        project_path = Path(project_path)
+        metadata = FileManager.load_project_metadata(project_path)
+        if metadata.get("project_type") != "multi_farm_group":
+            QMessageBox.warning(self, "提示", "当前项目不是牧场组项目。")
+            return
+
+        source = metadata.get("data_source") or "伊起牛"
+        if source != self.data_source or self.api_client is None:
+            # 避免切换数据源时弹出清空当前勾选的二次确认。
+            self.selected_farms.clear()
+            self._clear_local_farms()
+            self.switch_data_source(source)
+        if self.api_client is None:
+            QMessageBox.warning(
+                self,
+                "数据源不可用",
+                f"无法初始化{source}数据源，暂不能继续接口任务。",
+            )
+            return
+
+        tasks = metadata.get("group_tasks", [])
+        farms_info = [
+            {
+                "task_id": task.get("task_id"),
+                "code": str(task.get("farm_code", "")),
+                "farmCode": str(task.get("farm_code", "")),
+                # 慧牧云接口名称可能仍带七位业务牧场编号。恢复任务时
+                # 使用原始接口名称，展示名称和业务编号继续独立保留。
+                "name": str(
+                    task.get("source_farm_name")
+                    or task.get("farm_name", "")
+                ),
+                "display_name": str(
+                    task.get("display_name")
+                    or task.get("farm_name", "")
+                ),
+                "farm_number": str(task.get("farm_number", "")),
+                "api_farmcode": str(task.get("api_farmcode", "")),
+                "source_kind": task.get("source_kind", "api"),
+                "source_system": task.get("source_system", source),
+            }
+            for task in tasks
+        ]
+        self._start_group_tasks(
+            project_path,
+            farms_info,
+            full_analysis=metadata.get("task_mode") == "analysis",
+        )
+
+    def _on_group_tasks_finished(self, dialog, project_path, result):
+        dialog.update_progress(100)
+        dialog.set_task_info("牧场组任务处理完成")
+        dialog.close()
+
+        completed = result.get("completed", [])
+        failed = result.get("failed", [])
+        summary_error = str(result.get("summary_error") or "")
+        excel_path = result.get("excel_path")
+        lines = [
+            f"牧场组任务处理完成：成功 {len(completed)} 个，失败 {len(failed)} 个。",
+            "",
+        ]
+        if excel_path:
+            lines.append("✅ 已生成最终牧场组汇总Excel")
+            lines.append("ℹ️ 牧场组PPT可在“自动化生成”页面按需生成")
+        elif result.get("full_analysis") and failed:
+            lines.append("⚠️ 存在失败牧场，未生成牧场组汇总Excel")
+            lines.append("请打开对应子项目检查，重试或从汇总范围移除后再生成。")
+        elif result.get("full_analysis") and summary_error:
+            lines.append("⚠️ 单牧场任务已完成，但最终汇总未发布")
+            lines.append(summary_error[:240])
+            lines.append("单牧场结果均已保留，可修复问题后仅重试最终汇总。")
+        else:
+            lines.append("✅ 每个牧场的数据已保存到独立子项目目录")
+        if failed:
+            lines.append("")
+            lines.append("失败任务：")
+            for item in failed[:8]:
+                lines.append(
+                    f"• {item.get('farm_name')}: {str(item.get('error', ''))[:80]}"
+                )
+
+        message = QMessageBox(self)
+        message.setWindowTitle("牧场组任务完成")
+        message.setText("\n".join(lines))
+        open_group = message.addButton("打开牧场组目录", QMessageBox.ButtonRole.ActionRole)
+        if excel_path:
+            open_excel = message.addButton("打开汇总Excel", QMessageBox.ButtonRole.ActionRole)
+        else:
+            open_excel = None
+        message.addButton("关闭", QMessageBox.ButtonRole.AcceptRole)
+        message.exec()
+        if message.clickedButton() is open_group:
+            self._open_path(str(project_path))
+        elif open_excel is not None and message.clickedButton() is open_excel:
+            self._open_file(excel_path)
+
+        self.selected_farms.clear()
+        self._clear_local_farms()
+        self.update_selection_ui()
+        for _, widget in self.farm_list_items.items():
+            widget.set_checked(False)
+        self.project_created.emit(Path(project_path))
+
+    def _on_group_tasks_error(self, dialog, project_path, error_message):
+        dialog.close()
+        self.logger.error("牧场组任务失败: %s", error_message)
+        message = QMessageBox(self)
+        message.setWindowTitle("牧场组任务异常")
+        message.setText(
+            f"牧场组处理发生异常：\n\n{error_message}\n\n"
+            "已完成的子项目会保留，不会被删除。"
+        )
+        open_group = message.addButton("打开牧场组目录", QMessageBox.ButtonRole.ActionRole)
+        message.addButton("关闭", QMessageBox.ButtonRole.AcceptRole)
+        message.exec()
+        if message.clickedButton() is open_group:
+            self._open_path(str(project_path))
 
     def _on_auto_report_progress(self, dialog, percentage, message):
         """自动报告进度更新"""

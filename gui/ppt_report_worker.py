@@ -56,6 +56,22 @@ class PPTReportWorker(QObject):
 
             logger.info(f"开始生成PPT报告: {self.project_path}")
 
+            from utils.file_manager import FileManager
+            metadata = FileManager.load_project_metadata(self.project_path)
+            if metadata.get("project_type") == "multi_farm_group":
+                from core.group_report import GroupPPTReportGenerator
+
+                generator = GroupPPTReportGenerator(
+                    project_path=self.project_path,
+                    reporter_name=self.reporter_name or "",
+                    progress_callback=self.progress_callback,
+                )
+                success, result = generator.generate()
+                if self._is_cancelled:
+                    return
+                self.finished.emit(success, result)
+                return
+
             # 导入生成器
             from core.ppt_report import ExcelBasedPPTGenerator
 

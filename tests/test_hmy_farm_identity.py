@@ -12,6 +12,7 @@ from core.data.composite_farm_manager import (
 )
 from core.data.hmy_data_converter import HMYDataConverter
 from gui.farm_selection_page import FarmListItem
+from utils.file_manager import FileManager
 
 
 class _FakeResponse:
@@ -152,6 +153,75 @@ class HMYFarmIdentityTests(unittest.TestCase):
         self.assertEqual(result.loc[0, "API farmcode"], "1100110001")
         self.assertEqual(result.loc[0, "牧场编号"], "0101001")
         self.assertEqual(result.loc[0, "牧场名称"], "合肥陈刘牧场")
+
+    def test_composite_annotation_accepts_normalized_group_metadata(self):
+        numbered = FileManager._normalize_farm(
+            {
+                "code": "1100110001",
+                "name": "0101001合肥陈刘牧场",
+            },
+            "慧牧云",
+        )
+        unnumbered = FileManager._normalize_farm(
+            {
+                "code": "1100310011",
+                "name": "密云",
+            },
+            "慧牧云",
+        )
+        frame = pd.DataFrame(
+            {
+                "cow_id": ["1100110001123", "1100310011456"],
+                "API farmcode": ["1100110001", "1100310011"],
+                # 模拟旧处理中间表把 API 编码误写入业务编号的形态。
+                "牧场编号": ["1100110001", "1100310011"],
+                "牧场名称": ["", ""],
+            }
+        )
+
+        result = _annotate_interface_cows(
+            frame,
+            [numbered, unnumbered],
+            ids_are_prefixed=True,
+            data_source="慧牧云",
+        )
+
+        self.assertEqual(
+            result["API farmcode"].tolist(),
+            ["1100110001", "1100310011"],
+        )
+        self.assertEqual(
+            result["牧场编号"].tolist(),
+            ["0101001", ""],
+        )
+        self.assertEqual(
+            result["牧场名称"].tolist(),
+            ["合肥陈刘牧场", "密云"],
+        )
+
+        breeding_result = _annotate_interface_breeding(
+            pd.DataFrame(
+                {
+                    "耳号": ["1100110001123", "1100310011456"],
+                    "API farmcode": ["1100110001", "1100310011"],
+                }
+            ),
+            [numbered, unnumbered],
+            ids_are_prefixed=True,
+            data_source="慧牧云",
+        )
+        self.assertEqual(
+            breeding_result["API farmcode"].tolist(),
+            ["1100110001", "1100310011"],
+        )
+        self.assertEqual(
+            breeding_result["牧场编号"].tolist(),
+            ["0101001", ""],
+        )
+        self.assertEqual(
+            breeding_result["牧场名称"].tolist(),
+            ["合肥陈刘牧场", "密云"],
+        )
 
     def test_breeding_annotation_outputs_three_farm_identity_columns(self):
         frame = pd.DataFrame(

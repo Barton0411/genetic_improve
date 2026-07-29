@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -116,6 +117,61 @@ class FarmLineageOutputTests(unittest.TestCase):
             totals = per_farm[per_farm["出生年份"] == "在群母牛总计"]
             self.assertEqual(totals["头数"].sum(), 4)
 
+    def test_key_traits_repairs_partial_farm_columns_from_metadata(self):
+        year = pd.Timestamp.now().year
+        rows = [
+            {
+                "cow_id": "1001123",
+                "sex": "母",
+                "是否在场": "是",
+                "birth_year": year,
+                "牧场编号": "1001.0",
+                "牧场名称": "",
+                "NM$_score": 300,
+                "TPI_score": 2300,
+            },
+            {
+                "cow_id": "1001456",
+                "sex": "母",
+                "是否在场": "是",
+                "birth_year": year,
+                "牧场编号": "",
+                "牧场名称": "",
+                "NM$_score": 320,
+                "TPI_score": 2320,
+            },
+            {
+                "cow_id": "2002123",
+                "sex": "母",
+                "是否在场": "是",
+                "birth_year": year,
+                "牧场编号": "",
+                "牧场名称": "",
+                "NM$_score": 340,
+                "TPI_score": 2340,
+            },
+        ]
+        pd.DataFrame(rows).to_excel(
+            self.project_path
+            / "analysis_results"
+            / "processed_cow_data_key_traits_final.xlsx",
+            index=False,
+        )
+
+        self.assertTrue(generate_key_traits_analysis_result(self.project_path))
+        output = (
+            self.project_path / "analysis_results" / "关键育种性状分析结果.xlsx"
+        )
+        per_farm = pd.read_excel(output, sheet_name="分牧场在群年份汇总")
+        totals = per_farm[per_farm["出生年份"] == "在群母牛总计"].copy()
+        totals["牧场编号"] = (
+            totals["牧场编号"].astype(str).str.replace(r"\.0$", "", regex=True)
+        )
+
+        self.assertEqual(totals["头数"].sum(), len(rows))
+        self.assertEqual(set(totals["牧场编号"]), {"1001", "2002"})
+        self.assertEqual(set(totals["牧场名称"]), {"一牧", "二牧"})
+
     def test_pedigree_adds_per_farm_summary(self):
         rows = []
         for farm_code, _farm_name in [("1001", "一牧"), ("2002", "二牧")]:
@@ -149,6 +205,133 @@ class FarmLineageOutputTests(unittest.TestCase):
                 & (farm_summary["birth_year_group"].astype(str) == "2026")
             ]
             self.assertEqual(totals["头数"].sum(), 2)
+
+    def test_pedigree_repairs_partial_farm_columns_from_metadata(self):
+        year = pd.Timestamp.now().year
+        rows = [
+            {
+                "cow_id": "1001123",
+                "sex": "母",
+                "breed": "荷斯坦",
+                "是否在场": "是",
+                "birth_year": year,
+                "牧场编号": "1001.0",
+                "牧场名称": "",
+                "sire_identified": True,
+                "mgs_identified": True,
+                "mmgs_identified": False,
+            },
+            {
+                "cow_id": "1001456",
+                "sex": "母",
+                "breed": "荷斯坦",
+                "是否在场": "是",
+                "birth_year": year,
+                "牧场编号": "",
+                "牧场名称": "",
+                "sire_identified": True,
+                "mgs_identified": False,
+                "mmgs_identified": False,
+            },
+            {
+                "cow_id": "2002123",
+                "sex": "母",
+                "breed": "荷斯坦",
+                "是否在场": "是",
+                "birth_year": year,
+                "牧场编号": "",
+                "牧场名称": "",
+                "sire_identified": False,
+                "mgs_identified": False,
+                "mmgs_identified": False,
+            },
+        ]
+        pd.DataFrame(rows).to_excel(
+            self.project_path
+            / "analysis_results"
+            / "processed_cow_data_key_traits_detail.xlsx",
+            index=False,
+        )
+
+        self.assertTrue(generate_pedigree_analysis_result(self.project_path))
+        output = self.project_path / "analysis_results" / "系谱识别分析结果.xlsx"
+        per_farm = pd.read_excel(output, sheet_name="分牧场汇总")
+        totals = per_farm[
+            (per_farm["是否在场"] == "总计")
+            & (per_farm["birth_year_group"].astype(str) == str(year))
+        ].copy()
+        totals["牧场编号"] = (
+            totals["牧场编号"].astype(str).str.replace(r"\.0$", "", regex=True)
+        )
+
+        self.assertEqual(totals["头数"].sum(), len(rows))
+        self.assertEqual(set(totals["牧场编号"]), {"1001", "2002"})
+        self.assertEqual(set(totals["牧场名称"]), {"一牧", "二牧"})
+
+    def test_analysis_source_df_paths_do_not_read_excel(self):
+        year = pd.Timestamp.now().year
+        source = pd.DataFrame(
+            {
+                "cow_id": ["1001123", "2002456"],
+                "sex": ["母", "母"],
+                "breed": ["荷斯坦", "荷斯坦"],
+                "是否在场": ["是", "是"],
+                "birth_year": [year, year],
+                "牧场编号": ["1001.0", ""],
+                "牧场名称": ["", ""],
+                "sire_identified": [True, False],
+                "mgs_identified": [True, False],
+                "mmgs_identified": [False, False],
+                "NM$_score": [300, 400],
+                "TPI_score": [2300, 2400],
+            }
+        )
+        analysis_results = self.project_path / "analysis_results"
+        (
+            analysis_results / "processed_cow_data_key_traits_final.xlsx"
+        ).write_text("source_df path must not read this file", encoding="utf-8")
+        (
+            analysis_results / "processed_cow_data_key_traits_detail.xlsx"
+        ).write_text("source_df path must not read this file", encoding="utf-8")
+
+        with patch(
+            "core.breeding_calc.generate_key_traits_analysis.pd.read_excel"
+        ) as read_excel:
+            self.assertTrue(
+                generate_key_traits_analysis_result(
+                    self.project_path, source_df=source
+                )
+            )
+            read_excel.assert_not_called()
+
+        key_output = analysis_results / "关键育种性状分析结果.xlsx"
+        key_totals = pd.read_excel(
+            key_output, sheet_name="分牧场在群年份汇总"
+        )
+        key_totals = key_totals[
+            key_totals["出生年份"] == "在群母牛总计"
+        ]
+        self.assertEqual(key_totals["头数"].sum(), len(source))
+
+        with patch(
+            "core.breeding_calc.generate_pedigree_analysis.pd.read_excel"
+        ) as read_excel:
+            self.assertTrue(
+                generate_pedigree_analysis_result(
+                    self.project_path, source_df=source
+                )
+            )
+            read_excel.assert_not_called()
+
+        pedigree_output = analysis_results / "系谱识别分析结果.xlsx"
+        pedigree_totals = pd.read_excel(
+            pedigree_output, sheet_name="分牧场汇总"
+        )
+        pedigree_totals = pedigree_totals[
+            (pedigree_totals["是否在场"] == "总计")
+            & (pedigree_totals["birth_year_group"].astype(str) == str(year))
+        ]
+        self.assertEqual(pedigree_totals["头数"].sum(), len(source))
 
     def test_sire_yearly_farm_output_is_separate(self):
         calculation = TraitsCalculation()

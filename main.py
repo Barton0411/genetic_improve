@@ -1,9 +1,6 @@
 import sys
 import os
 from pathlib import Path
-from PyQt6.QtWidgets import QApplication, QDialog
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QPalette, QColor
 
 # 延迟导入重量级模块
 def lazy_import():
@@ -12,7 +9,56 @@ def lazy_import():
     from gui.login_dialog import LoginDialog
     from gui.splash_screen import VideoSplashScreen
 
-def main():
+
+def _open_child_protocol_stdout():
+    """为 windowed PyInstaller 子进程恢复父进程传入的 stdout 管道。"""
+    if sys.stdout is not None:
+        return sys.stdout, False
+    try:
+        return os.fdopen(
+            os.dup(1),
+            "w",
+            encoding="utf-8",
+            buffering=1,
+        ), True
+    except OSError:
+        return None, False
+
+
+def dispatch_group_child_runner(argv=None):
+    """识别隐藏子任务入口；非子任务启动返回 ``None``。"""
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if not arguments or arguments[0] != "--group-child-runner":
+        return None
+
+    # 子任务也需要与正常启动相同的资源根目录，但不能初始化登录、日志、
+    # QApplication 或读取任何认证状态。
+    os.environ["GENETIC_IMPROVE_ROOT"] = str(Path(__file__).parent)
+    from core.group_tasks.child_runner import main as child_runner_main
+
+    protocol_stream, should_close = _open_child_protocol_stdout()
+    if protocol_stream is None:
+        return 74
+    try:
+        return child_runner_main(
+            arguments[1:],
+            output_stream=protocol_stream,
+        )
+    finally:
+        if should_close:
+            protocol_stream.close()
+
+
+def main(argv=None):
+    child_exit_code = dispatch_group_child_runner(argv)
+    if child_exit_code is not None:
+        return child_exit_code
+
+    # 必须晚于隐藏子任务分流；子进程不创建任何 GUI 对象。
+    from PyQt6.QtWidgets import QApplication, QDialog
+    from PyQt6.QtCore import Qt, QTimer
+    from PyQt6.QtGui import QPalette, QColor
+
     # 设置日志记录
     import logging
     from logging.handlers import RotatingFileHandler
@@ -71,7 +117,7 @@ def main():
     root_dir = Path(__file__).parent
     os.environ['GENETIC_IMPROVE_ROOT'] = str(root_dir)
 
-    app = QApplication(sys.argv)
+    app = QApplication(sys.argv if argv is None else [sys.argv[0], *argv])
 
     # 强制设置为浅色模式，不跟随系统深色模式
     light_palette = QPalette()

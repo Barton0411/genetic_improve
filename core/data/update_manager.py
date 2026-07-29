@@ -71,6 +71,16 @@ def get_cloud_engine():
 # 全局系谱库管理器实例
 pedigree_db_instance = None
 
+def reset_pedigree_db():
+    """释放本轮叠加的母牛系谱，下次从只读基础缓存重新加载。
+
+    牧场组逐场计算时必须在每个子任务结束后调用，避免前一个牧场的
+    母牛节点进入后一个牧场，同时让大型字典可以被垃圾回收。
+    """
+    global pedigree_db_instance
+    pedigree_db_instance = None
+
+
 def get_pedigree_db(force_update=False, progress_callback=None):
     """
     获取系谱库管理器实例，如果不存在则创建

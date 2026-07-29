@@ -6,6 +6,9 @@ Excel综合报告生成器
 from pathlib import Path
 from openpyxl import Workbook
 import logging
+import os
+import tempfile
+import zipfile
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -20,6 +23,7 @@ class ExcelReportGenerator:
         service_staff: str = None,
         progress_callback=None,
         farm_name: str = None,
+        max_workers: int = 6,
     ):
         """
         初始化生成器
@@ -34,6 +38,7 @@ class ExcelReportGenerator:
         self.service_staff = service_staff
         self.farm_name = farm_name
         self.progress_callback = progress_callback
+        self.max_workers = max(1, int(max_workers or 1))
 
         # 初始化workbook
         self.wb = Workbook()
@@ -216,7 +221,24 @@ class ExcelReportGenerator:
             output_path = reports_folder / filename
 
             self._report_progress(90, "正在写入Excel文件...")
-            self.wb.save(output_path)
+            file_descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{output_path.stem}.",
+                suffix=".tmp.xlsx",
+                dir=reports_folder,
+            )
+            os.close(file_descriptor)
+            temporary_path = Path(temporary_name)
+            try:
+                self.wb.save(temporary_path)
+                if (
+                    not temporary_path.exists()
+                    or temporary_path.stat().st_size == 0
+                    or not zipfile.is_zipfile(temporary_path)
+                ):
+                    raise RuntimeError("Excel临时文件校验失败")
+                os.replace(temporary_path, output_path)
+            finally:
+                temporary_path.unlink(missing_ok=True)
             self._report_progress(98, "正在完成...")
             self._report_progress(100, "✓ 报告生成完成!")
             logger.info(f"✓ Excel报告已保存: {output_path}")
@@ -291,7 +313,7 @@ class ExcelReportGenerator:
             return {'candidate_bulls_genes': genes, 'candidate_bulls_inbreeding': inbreeding, 'candidate_bulls_detail': detail}
 
         # 9个任务并行：3个共享文件组 + 6个独立collector
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             future_a = executor.submit(group_a_breeding)
             future_b = executor.submit(group_b_used_bulls)
             future_c = executor.submit(group_c_candidate_bulls)

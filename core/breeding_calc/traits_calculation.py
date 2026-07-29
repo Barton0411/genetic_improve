@@ -12,6 +12,12 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill
 
 from .base_calculation import BaseCowCalculation
+from utils.large_excel_writer import (
+    ExcelSizeError,
+    copy_file_atomic,
+    normalize_identifier,
+    write_dataframe_atomic,
+)
 
 class TraitsCalculation(BaseCowCalculation):
     def __init__(self):
@@ -157,6 +163,9 @@ class TraitsCalculation(BaseCowCalculation):
 
             detail_output_path = output_dir / f"{self.output_prefix}_detail.xlsx"
             if not self.save_results_with_retry(cow_df, detail_output_path, apply_formatting=False):
+                detail = getattr(self, "_last_save_error", None)
+                if detail:
+                    return False, f"保存详细结果失败：{detail}"
                 return False, "保存详细结果失败"
 
             if progress_callback:
@@ -199,7 +208,13 @@ class TraitsCalculation(BaseCowCalculation):
                 print("发现基因组数据，开始更新...")
                 if progress_callback:
                     progress_callback(97, "发现基因组数据，正在更新...")
-                if not self.update_genomic_data(pedigree_output_path, genomic_data_path, genomic_output_path, apply_formatting=False):
+                if not self.update_genomic_data(
+                    pedigree_output_path,
+                    genomic_data_path,
+                    genomic_output_path,
+                    apply_formatting=False,
+                    pedigree_df=cow_df,
+                ):
                     return False, "更新基因组数据失败"
                 print("基因组数据更新完成")
                 if progress_callback:
@@ -210,7 +225,12 @@ class TraitsCalculation(BaseCowCalculation):
                     progress_callback(97, "未找到基因组数据，创建占位文件...")
 
                 # 即使没有基因组数据，也创建genomic文件（内容与pedigree相同）
-                if not self.create_genomic_placeholder(pedigree_output_path, genomic_output_path, apply_formatting=False):
+                if not self.create_genomic_placeholder(
+                    pedigree_output_path,
+                    genomic_output_path,
+                    apply_formatting=False,
+                    pedigree_df=cow_df,
+                ):
                     return False, "创建基因组占位文件失败"
 
                 print("基因组占位文件已创建")
@@ -218,7 +238,6 @@ class TraitsCalculation(BaseCowCalculation):
                     progress_callback(99, f"基因组文件已创建（仅系谱数据）: {genomic_output_path.name}")
 
             # 10. 生成最终育种值文件
-            import shutil
             try:
                 print("生成最终育种值文件...")
                 genomic_scores_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_scores_genomic.xlsx"
@@ -226,21 +245,25 @@ class TraitsCalculation(BaseCowCalculation):
                 final_output_path = main_window.selected_project_path / "analysis_results" / "processed_cow_data_key_traits_final.xlsx"
 
                 if genomic_scores_path.exists():
-                    shutil.copy(genomic_scores_path, final_output_path)
+                    copy_file_atomic(genomic_scores_path, final_output_path)
                     print(f"✓ 已生成最终育种值文件 (来源: genomic)")
                 elif pedigree_scores_path.exists():
-                    shutil.copy(pedigree_scores_path, final_output_path)
+                    copy_file_atomic(pedigree_scores_path, final_output_path)
                     print(f"✓ 已生成最终育种值文件 (来源: pedigree)")
                 else:
-                    print("未找到scores文件，跳过生成final文件")
+                    return False, "未找到系谱或基因组得分文件，无法生成最终结果"
             except Exception as e:
                 print(f"生成最终育种值文件失败: {e}")
+                return False, f"生成最终育种值文件失败: {e}"
 
             # 11. 自动生成系谱识别分析结果
             try:
                 from core.breeding_calc.generate_pedigree_analysis import generate_pedigree_analysis_result
                 print("自动生成系谱识别分析结果...")
-                generate_pedigree_analysis_result(main_window.selected_project_path)
+                generate_pedigree_analysis_result(
+                    main_window.selected_project_path,
+                    source_df=cow_df,
+                )
                 print("✓ 系谱识别分析结果已生成")
             except Exception as e:
                 print(f"生成系谱识别分析结果失败: {e}")
@@ -249,10 +272,16 @@ class TraitsCalculation(BaseCowCalculation):
             try:
                 from core.breeding_calc.generate_key_traits_analysis import generate_key_traits_analysis_result
                 print("自动生成关键育种性状分析结果...")
-                generate_key_traits_analysis_result(main_window.selected_project_path)
+                generate_key_traits_analysis_result(
+                    main_window.selected_project_path,
+                    source_df=cow_df,
+                )
                 print("✓ 关键育种性状分析结果已生成")
             except Exception as e:
                 print(f"生成关键育种性状分析结果失败: {e}")
+
+            # 汇总已直接使用窄列副本，至此再释放完整宽表。
+            del cow_df
 
             if progress_callback:
                 progress_callback(100, "所有计算步骤已完成！")
@@ -359,13 +388,27 @@ class TraitsCalculation(BaseCowCalculation):
     def process_yearly_data_from_df(self, df: pd.DataFrame, output_path: Path, selected_traits: list) -> bool:
         """处理年度关键性状数据 - 优化版本，直接从DataFrame处理，避免临时文件"""
         try:
-            # 创建副本避免修改原始数据
-            df = df.copy()
-
             # 检查birth_year列是否存在
             if 'birth_year' not in df.columns:
                 print("错误：数据中缺少birth_year列")
                 return False
+
+            all_traits_to_process = list(selected_traits)
+            for required_trait in ['NM$', 'TPI']:
+                if required_trait not in all_traits_to_process:
+                    all_traits_to_process.append(required_trait)
+                    print(f"信息: 自动添加必需性状 {required_trait} 到处理列表")
+
+            # 只复制年度汇总真正使用的窄表，避免复制几十万行的完整宽表。
+            yearly_columns = ['birth_year']
+            if 'sire_identified' in df.columns:
+                yearly_columns.append('sire_identified')
+            yearly_columns.extend(
+                f'sire_{trait}'
+                for trait in all_traits_to_process
+                if f'sire_{trait}' in df.columns
+            )
+            df = df.loc[:, list(dict.fromkeys(yearly_columns))].copy()
 
             # 清理birth_year数据，移除空值和无效值
             df = df.dropna(subset=['birth_year'])
@@ -383,16 +426,6 @@ class TraitsCalculation(BaseCowCalculation):
             # 获取出生年份范围
             min_year = int(df['birth_year'].min())
             max_year = int(df['birth_year'].max())
-
-            # 必需的性状（用于生成正态分布图）
-            required_traits = ['NM$', 'TPI']
-
-            # 确保必需性状被包含在处理列表中
-            all_traits_to_process = list(selected_traits)
-            for req_trait in required_traits:
-                if req_trait not in all_traits_to_process:
-                    all_traits_to_process.append(req_trait)
-                    print(f"信息: 自动添加必需性状 {req_trait} 到处理列表")
 
             # 获取默认值（包含所有要处理的性状）
             default_values = self.get_default_values(all_traits_to_process)
@@ -457,7 +490,19 @@ class TraitsCalculation(BaseCowCalculation):
             if not all(column in df.columns for column in farm_columns):
                 return True
 
-            source = df.copy()
+            traits = list(selected_traits)
+            for required_trait in ['NM$', 'TPI']:
+                if required_trait not in traits:
+                    traits.append(required_trait)
+            source_columns = [*farm_columns, 'birth_year']
+            if 'sire_identified' in df.columns:
+                source_columns.append('sire_identified')
+            source_columns.extend(
+                f'sire_{trait}'
+                for trait in traits
+                if f'sire_{trait}' in df.columns
+            )
+            source = df.loc[:, list(dict.fromkeys(source_columns))].copy()
             source['牧场编号'] = source['牧场编号'].fillna('').astype(str).str.strip()
             source['牧场名称'] = source['牧场名称'].fillna('').astype(str).str.strip()
             farm_keys = source[farm_columns].drop_duplicates()
@@ -477,10 +522,6 @@ class TraitsCalculation(BaseCowCalculation):
 
             min_year = int(source['birth_year'].min())
             max_year = int(source['birth_year'].max())
-            traits = list(selected_traits)
-            for required_trait in ['NM$', 'TPI']:
-                if required_trait not in traits:
-                    traits.append(required_trait)
             default_values = self.get_default_values(traits)
 
             results = {trait: [] for trait in traits}
@@ -769,8 +810,8 @@ class TraitsCalculation(BaseCowCalculation):
             selected_traits: 选择的性状列表（用于确保生成所有性状的得分）
         """
         try:
-            # 创建副本避免修改原始数据
-            df = df.copy()
+            # 此方法在 process_data 中是 cow_df 的最后一个内存使用者。
+            # 直接追加得分列，避免几十万行、数百列时再复制整张明细表。
 
             # 处理日期列（如果尚未处理）
             date_columns = ['birth_date', 'birth_date_dam', 'birth_date_mgd']
@@ -863,8 +904,9 @@ class TraitsCalculation(BaseCowCalculation):
 
             save_ok = self.save_results_with_retry(df, output_path, apply_formatting=apply_formatting)
             if not save_ok:
-                self._last_scores_error = (
-                    f"保存得分文件失败（文件可能被 Excel 占用或磁盘空间不足）: {output_path.name}"
+                save_detail = getattr(self, "_last_save_error", None)
+                self._last_scores_error = save_detail or (
+                    f"保存得分文件失败: {output_path.name}"
                 )
             return save_ok
 
@@ -926,14 +968,28 @@ class TraitsCalculation(BaseCowCalculation):
 
         return contribution
 
-    def update_genomic_data(self, pedigree_path: Path, genomic_path: Path, output_path: Path, apply_formatting: bool = False) -> bool:
+    def update_genomic_data(
+        self,
+        pedigree_path: Path,
+        genomic_path: Path,
+        output_path: Path,
+        apply_formatting: bool = False,
+        pedigree_df: pd.DataFrame = None,
+    ) -> bool:
         """用基因组数据更新关键性状得分 - 优化版本，使用向量化操作替代循环"""
         try:
-            # 1. 读取系谱数据文件
-            df_pedigree = pd.read_excel(pedigree_path)
+            # 1. 优先复用刚计算完成的系谱表，避免再次读取并复制大型 Excel。
+            df_pedigree = (
+                pedigree_df
+                if pedigree_df is not None
+                else pd.read_excel(pedigree_path)
+            )
 
             # 2. 读取基因组数据
-            df_genomic = pd.read_excel(genomic_path)
+            df_genomic = pd.read_excel(
+                genomic_path,
+                dtype={'cow_id': str},
+            )
 
             # 打印基因组数据的列名以便调试
             print(f"基因组数据列名: {df_genomic.columns.tolist()[:30]}...")  # 打印前30个
@@ -961,9 +1017,13 @@ class TraitsCalculation(BaseCowCalculation):
             existing_traits = [trait for trait in traits if trait in df_genomic.columns]
             print(f"基因组数据中存在的性状: {existing_traits}")
 
-            # 确保cow_id类型一致（都转为字符串）
-            df_pedigree['cow_id_str'] = df_pedigree['cow_id'].astype(str)
-            df_genomic['cow_id_str'] = df_genomic['cow_id'].astype(str)
+            # 统一 Excel 常见的 123 / 123.0 / " 123 " 表示，同时保留前导零。
+            df_pedigree['cow_id_str'] = df_pedigree['cow_id'].map(
+                normalize_identifier
+            )
+            df_genomic['cow_id_str'] = df_genomic['cow_id'].map(
+                normalize_identifier
+            )
 
             # 为基因组数据设置索引以便快速查找
             df_genomic_indexed = df_genomic.set_index('cow_id_str')
@@ -1121,7 +1181,13 @@ class TraitsCalculation(BaseCowCalculation):
             print(f"获取公牛 {bull_id} 的性状数据时发生错误: {e}")
             return None
 
-    def create_genomic_placeholder(self, pedigree_path: Path, output_path: Path, apply_formatting: bool = False) -> bool:
+    def create_genomic_placeholder(
+        self,
+        pedigree_path: Path,
+        output_path: Path,
+        apply_formatting: bool = False,
+        pedigree_df: pd.DataFrame = None,
+    ) -> bool:
         """当没有基因组数据时，创建基因组占位文件
 
         Args:
@@ -1133,8 +1199,12 @@ class TraitsCalculation(BaseCowCalculation):
             bool: 是否成功创建
         """
         try:
-            # 读取系谱数据
-            df_pedigree = pd.read_excel(pedigree_path)
+            # 优先复用内存中的系谱结果，避免大文件再次读入内存。
+            df_pedigree = (
+                pedigree_df
+                if pedigree_df is not None
+                else pd.read_excel(pedigree_path)
+            )
 
             # 如果没有source列，添加它们
             score_columns = [col for col in df_pedigree.columns if col.endswith('_score')]
@@ -1192,9 +1262,14 @@ class TraitsCalculation(BaseCowCalculation):
                     if source_col not in cow_df.columns:
                         source_cols_to_add[source_col] = np.ones(len(cow_df), dtype=np.int8)
 
-            # 一次性添加所有source列
+            # 一次性添加所有 source 列，但不 concat 整张宽表，避免再次复制
+            # 原有几十万行明细。
             if source_cols_to_add:
-                cow_df = pd.concat([cow_df, pd.DataFrame(source_cols_to_add, index=cow_df.index)], axis=1)
+                source_frame = pd.DataFrame(
+                    source_cols_to_add,
+                    index=cow_df.index,
+                )
+                cow_df[list(source_frame.columns)] = source_frame
 
             for bull_type, year_col in bull_type_year_cols.items():
                 identified_col = f'{bull_type}_identified'
@@ -1325,20 +1400,25 @@ class TraitsCalculation(BaseCowCalculation):
             app = QApplication.instance()
             return app is not None and QThread.currentThread() == app.thread()
 
+        def _save_once():
+            if apply_formatting and any(
+                col.endswith("_source") for col in df.columns
+            ):
+                return self.save_with_formatting(df, output_path)
+            write_dataframe_atomic(df, output_path)
+            return True
+
+        background_attempts = 0
+        self._last_save_error = None
         while True:
             try:
-                # 确保 cow_id 列保持为字符串类型（修复格式变化问题）
-                if 'cow_id' in df.columns:
-                    df = df.copy()  # 创建副本避免修改原始数据
-                    df['cow_id'] = df['cow_id'].astype(str)
-
-                if apply_formatting and any(col.endswith('_source') for col in df.columns):
-                    # 使用save_with_formatting应用格式
-                    return self.save_with_formatting(df, output_path)
-                else:
-                    df.to_excel(output_path, index=False)
-                    return True
-            except PermissionError:
+                saved = _save_once()
+                if not saved:
+                    self._last_save_error = (
+                        f"{output_path.name} 写入或格式化失败"
+                    )
+                return saved
+            except PermissionError as error:
                 if _is_main_thread():
                     from PyQt6.QtWidgets import QMessageBox
                     reply = QMessageBox.question(
@@ -1351,21 +1431,40 @@ class TraitsCalculation(BaseCowCalculation):
                     )
                     if reply == QMessageBox.StandardButton.Cancel:
                         print(f"用户取消了保存操作: {output_path}")
+                        self._last_save_error = (
+                            f"{output_path.name} 正在被其他程序占用"
+                        )
                         return False
                 else:
                     import time
-                    for attempt in range(3):
+                    background_attempts += 1
+                    if background_attempts < 3:
                         time.sleep(1)
-                        try:
-                            if 'cow_id' in df.columns:
-                                df = df.copy()
-                                df['cow_id'] = df['cow_id'].astype(str)
-                            df.to_excel(output_path, index=False)
-                            return True
-                        except PermissionError:
-                            continue
-                    print(f"[警告] 文件 {output_path.name} 被占用，保存失败")
+                        continue
+                    self._last_save_error = (
+                        f"{output_path.name} 正在被其他程序占用"
+                    )
+                    print(
+                        f"[警告] 文件 {output_path.name} 被占用，保存失败: "
+                        f"{error}"
+                    )
                     return False
+            except ExcelSizeError as error:
+                self._last_save_error = str(error)
+                print(f"保存文件失败: {error}")
+                return False
+            except MemoryError:
+                self._last_save_error = (
+                    "内存不足，程序已停止写入且未覆盖原有结果文件"
+                )
+                print(f"保存文件失败: {self._last_save_error}")
+                return False
             except Exception as e:
-                print(f"保存文件失败: {e}")
+                import errno
+
+                if isinstance(e, OSError) and e.errno == errno.ENOSPC:
+                    self._last_save_error = "磁盘空间不足"
+                else:
+                    self._last_save_error = f"{type(e).__name__}: {e}"
+                print(f"保存文件失败: {self._last_save_error}")
                 return False

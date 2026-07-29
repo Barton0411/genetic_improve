@@ -2,8 +2,9 @@
 
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar,
                              QPushButton, QTextEdit, QApplication, QMessageBox, QWidget,
-                             QGridLayout)
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer
+                             QGridLayout, QScrollArea, QFrame)
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer, QUrl
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtGui import QTextCursor, QColor
 import sys
 import time  # 添加time模块导入
@@ -96,8 +97,13 @@ class ProgressDialog(QDialog):
         self._sub_tasks_layout = QVBoxLayout(self._sub_tasks_container)
         self._sub_tasks_layout.setContentsMargins(0, 0, 0, 0)
         self._sub_tasks_layout.setSpacing(4)
-        self._sub_tasks_container.setVisible(False)
-        layout.addWidget(self._sub_tasks_container)
+        self._sub_tasks_scroll = QScrollArea(self)
+        self._sub_tasks_scroll.setWidgetResizable(True)
+        self._sub_tasks_scroll.setMaximumHeight(300)
+        self._sub_tasks_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._sub_tasks_scroll.setWidget(self._sub_tasks_container)
+        self._sub_tasks_scroll.setVisible(False)
+        layout.addWidget(self._sub_tasks_scroll)
 
         # 子任务跟踪 {task_id: {"icon": QLabel, "bar": QProgressBar, "name": QLabel}}
         self._sub_task_widgets = {}
@@ -188,11 +194,19 @@ class ProgressDialog(QDialog):
     # ---- 子任务进度条 ---- #
 
     def show_sub_tasks(self, task_names: list):
-        """创建并显示子任务进度条"""
+        """创建并显示子任务进度条；牧场任务可附带完成后打开目录按钮。"""
         # 清除旧的子任务widget
         self._clear_sub_tasks()
 
-        for name in task_names:
+        for task in task_names:
+            if isinstance(task, dict):
+                task_id = str(task.get("id") or task.get("name") or "")
+                name = str(task.get("name") or task_id)
+                path = str(task.get("path") or "")
+            else:
+                task_id = str(task)
+                name = task_id
+                path = ""
             row_layout = QHBoxLayout()
             row_layout.setSpacing(6)
 
@@ -204,7 +218,7 @@ class ProgressDialog(QDialog):
 
             # 任务名
             name_label = QLabel(name)
-            name_label.setFixedWidth(130)
+            name_label.setFixedWidth(180 if path else 130)
             name_label.setStyleSheet("font-size: 11px;")
             row_layout.addWidget(name_label)
 
@@ -227,14 +241,28 @@ class ProgressDialog(QDialog):
             """)
             row_layout.addWidget(bar)
 
+            open_button = None
+            if path:
+                open_button = QPushButton("打开")
+                open_button.setFixedWidth(48)
+                open_button.setVisible(False)
+                open_button.setToolTip("打开已完成的牧场子项目目录")
+                open_button.clicked.connect(
+                    lambda checked=False, target=path: QDesktopServices.openUrl(
+                        QUrl.fromLocalFile(target)
+                    )
+                )
+                row_layout.addWidget(open_button)
+
             self._sub_tasks_layout.addLayout(row_layout)
-            self._sub_task_widgets[name] = {
+            self._sub_task_widgets[task_id] = {
                 "icon": icon_label,
                 "bar": bar,
                 "name": name_label,
+                "open": open_button,
             }
 
-        self._sub_tasks_container.setVisible(True)
+        self._sub_tasks_scroll.setVisible(True)
 
     def update_sub_task(self, task_id: str, pct: int):
         """更新子任务进度"""
@@ -264,6 +292,8 @@ class ProgressDialog(QDialog):
                     border-radius: 2px;
                 }
             """)
+            if w.get("open") is not None:
+                w["open"].setVisible(True)
         else:
             w["icon"].setText("\u2717")  # 叉号
             w["icon"].setStyleSheet("color: #e74c3c; font-weight: bold;")
@@ -281,7 +311,7 @@ class ProgressDialog(QDialog):
 
     def hide_sub_tasks(self):
         """隐藏子任务区域"""
-        self._sub_tasks_container.setVisible(False)
+        self._sub_tasks_scroll.setVisible(False)
 
     def _clear_sub_tasks(self):
         """清除所有子任务widget"""

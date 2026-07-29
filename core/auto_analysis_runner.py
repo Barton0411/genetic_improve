@@ -768,12 +768,14 @@ def run_excel_report(
     progress_cb=None,
     service_staff=None,
     farm_name=None,
+    max_workers=6,
 ):
     """生成Excel综合报告"""
     from core.excel_report.generator import ExcelReportGenerator
     gen = ExcelReportGenerator(project_path, service_staff=service_staff,
                                 progress_callback=progress_cb,
-                                farm_name=farm_name)
+                                farm_name=farm_name,
+                                max_workers=max_workers)
     return gen.generate()
 
 
