@@ -60,6 +60,11 @@ jobs:
         if (Test-Path "CHANGELOG_v*") { 
           Get-Item "CHANGELOG_v*" | ForEach { Write-Host $_.Name }
         }
+
+    - name: Verify Python 3.9 GUI import compatibility
+      run: |
+        python -m unittest tests.test_packaging_release_safety
+        python -c "from gui.main_window import MainWindow"
     
     - name: Build Windows executable (OneDir)
       run: |
@@ -216,6 +221,13 @@ jobs:
         python3 auto_generate_changelog.py
         echo "Generated changelog file:"
         ls -la CHANGELOG_v* || echo "No changelog files found"
+
+    - name: Verify Python 3.9 GUI import compatibility
+      env:
+        QT_QPA_PLATFORM: offscreen
+      run: |
+        python3 -m unittest tests.test_packaging_release_safety
+        python3 -c "from gui.main_window import MainWindow"
     
     - name: Convert ICO to ICNS and build macOS application
       run: |

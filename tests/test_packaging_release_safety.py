@@ -8,6 +8,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class PackagingReleaseSafetyTests(unittest.TestCase):
+    def test_main_window_defers_annotation_evaluation_for_python_39(self):
+        source = (PROJECT_ROOT / "gui" / "main_window.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertTrue(
+            source.startswith("from __future__ import annotations\n"),
+            "gui.main_window uses PEP 604 annotations and must remain "
+            "importable by the Python 3.9 Windows build",
+        )
+
     def test_macos_bundle_metadata_uses_application_version(self):
         spec = (PROJECT_ROOT / "GeneticImprove.spec").read_text(
             encoding="utf-8"
