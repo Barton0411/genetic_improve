@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from version import VERSION as APP_VERSION
 
 # 获取项目根目录
 project_root = Path.cwd()
@@ -95,12 +96,16 @@ a = Analysis(
         'gui.login_dialog',
         'gui.splash_screen',
         'gui.auto_report_worker',
+        'gui.group_feature_analysis_worker',
         'gui.matching_worker',
         'gui.recommendation_worker',
         'gui.auto_grouping_dialog',
         'gui.allocation_dialog',
         'core.group_tasks.child_runner',
         'core.group_tasks.parent_process',
+        'core.group_tasks.feature_runner',
+        'core.group_tasks.feature_process',
+        'core.group_tasks.feature_policy',
         'core.matching.complete_mating_executor',
         'core.grouping.group_manager',
         'core.breeding_calc',
@@ -176,12 +181,12 @@ app = BUNDLE(
     name='伊利奶牛选配.app',
     icon=icon_path,
     bundle_identifier='com.yili.breeding.app',
-    version='1.2.1.4',
+    version=APP_VERSION,
     info_plist={
         'CFBundleName': '伊利奶牛选配',
         'CFBundleDisplayName': '伊利奶牛选配',
-        'CFBundleVersion': '1.2.1.4',
-        'CFBundleShortVersionString': '1.2.1.4',
+        'CFBundleVersion': APP_VERSION,
+        'CFBundleShortVersionString': APP_VERSION,
         'CFBundleIdentifier': 'com.yili.breeding.app',
         'CFBundleInfoDictionaryVersion': '6.0',
         'CFBundlePackageType': 'APPL',

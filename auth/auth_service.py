@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict
 from api.api_client import get_api_client
 from auth.token_manager import get_token_manager
-from auth.offline_auth import OfflineAuthService
 
 class AuthService:
     """认证服务 - API版本"""
@@ -18,7 +17,6 @@ class AuthService:
         self.username = None
         self.api_client = get_api_client()
         self.token_manager = get_token_manager()
-        self.offline_service = None  # 离线服务备用
 
         # 尝试从本地恢复登录状态
         self._restore_session()
@@ -71,16 +69,8 @@ class AuthService:
                 return False, message
 
         except Exception as e:
-            logging.error(f"API登录失败，尝试离线模式: {e}")
-
-            # 如果API连接失败，切换到离线模式
-            if "SSL" in str(e) or "Connection" in str(e) or "网络" in str(e):
-                logging.warning("检测到网络问题，切换到离线认证模式")
-                if not self.offline_service:
-                    self.offline_service = OfflineAuthService()
-                return self.offline_service.login(username, password)
-
-            return False, f"登录失败: {str(e)}"
+            logging.error("API登录失败: %s", type(e).__name__)
+            return False, "登录服务暂时不可用，请检查网络后重试"
 
     def check_server_health(self) -> bool:
         """检查API服务连接"""

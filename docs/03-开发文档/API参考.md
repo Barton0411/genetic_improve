@@ -25,7 +25,7 @@ API域名: https://api.genepop.com
 ```json
 {
   "username": "user123",
-  "password": "password123",
+  "password": "<PASSWORD>",
   "invitation_code": "INVITE2024"
 }
 ```
@@ -37,7 +37,7 @@ API域名: https://api.genepop.com
   "message": "注册成功",
   "data": {
     "username": "user123",
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "token": "<TOKEN>",
     "expires_in": 86400
   }
 }
@@ -69,7 +69,7 @@ API域名: https://api.genepop.com
 ```json
 {
   "username": "user123",
-  "password": "password123"
+  "password": "<PASSWORD>"
 }
 ```
 
@@ -80,7 +80,7 @@ API域名: https://api.genepop.com
   "message": "登录成功",
   "data": {
     "username": "user123",
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "token": "<TOKEN>",
     "expires_in": 86400
   }
 }
@@ -325,7 +325,7 @@ response = requests.post(
     f"{BASE_URL}/api/auth/login",
     json={
         "username": "user123",
-        "password": "password123"
+        "password": "<PASSWORD>"
     }
 )
 data = response.json()
@@ -425,7 +425,7 @@ DATABASE_ERROR           - 数据库错误
 # 1. 测试登录
 curl -X POST https://api.genepop.com/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"test","password":"test123"}'
+  -d '{"username":"test","password":"<PASSWORD>"}'
 
 # 2. 测试数据库版本查询
 curl https://api.genepop.com/api/data/version

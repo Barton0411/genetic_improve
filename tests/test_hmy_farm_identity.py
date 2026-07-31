@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 import pandas as pd
@@ -7,10 +9,15 @@ from PyQt6.QtWidgets import QApplication
 
 from api.hmy_api_client import HMYApiClient
 from core.data.composite_farm_manager import (
+    _COW_READ_DTYPES,
     _annotate_interface_breeding,
     _annotate_interface_cows,
+    _read_excel,
+    finalize_composite_project,
 )
+from core.group_tasks.stage_policy import commit_child_stage
 from core.data.hmy_data_converter import HMYDataConverter
+from core.data.processor import preprocess_cow_data
 from gui.farm_selection_page import FarmListItem
 from utils.file_manager import FileManager
 
@@ -127,6 +134,63 @@ class HMYFarmIdentityTests(unittest.TestCase):
             ],
         )
 
+    def test_hmy_standardization_keeps_api_and_business_farm_codes(self):
+        frame = pd.DataFrame(
+            {
+                "API farmcode": ["1100110013"],
+                "牧场编号": ["0102004"],
+                "牧场名称": ["肇东长青牧场"],
+                "耳号": ["123"],
+                "品种": ["荷斯坦"],
+                "性别": ["母"],
+                "父号": ["001HO00001"],
+                "母号": [""],
+                "外祖父": ["001HO00002"],
+                "外曾外祖父": ["001HO00003"],
+                "胎次": [1],
+                "产犊日期": ["2026-01-01"],
+                "生日": ["2023-01-01"],
+                "月龄": [36],
+                "配次": [0],
+                "305奶量": [10000],
+                "泌乳天数": [100],
+                "繁育状态": ["空怀"],
+                "离场日期": [""],
+            }
+        )
+
+        with redirect_stdout(StringIO()):
+            result = preprocess_cow_data(
+                frame,
+                source_system="慧牧云",
+            )
+
+        self.assertEqual(result.loc[0, "API farmcode"], "1100110013")
+        self.assertEqual(result.loc[0, "牧场编号"], "0102004")
+        self.assertEqual(result.loc[0, "牧场名称"], "肇东长青牧场")
+        self.assertEqual(
+            result.columns[-3:].tolist(),
+            ["API farmcode", "牧场编号", "牧场名称"],
+        )
+
+    def test_composite_excel_read_keeps_business_number_leading_zero(self):
+        frame = pd.DataFrame(
+            {
+                "cow_id": ["123"],
+                "API farmcode": ["1100110013"],
+                "牧场编号": ["0102004"],
+                "牧场名称": ["肇东长青牧场"],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "processed_cow_data.xlsx"
+            frame.to_excel(output, index=False)
+            result = _read_excel(output, _COW_READ_DTYPES)
+
+        self.assertEqual(result.loc[0, "API farmcode"], "1100110013")
+        self.assertEqual(result.loc[0, "牧场编号"], "0102004")
+
     def test_composite_annotation_uses_api_code_for_lineage(self):
         frame = pd.DataFrame(
             {
@@ -153,6 +217,164 @@ class HMYFarmIdentityTests(unittest.TestCase):
         self.assertEqual(result.loc[0, "API farmcode"], "1100110001")
         self.assertEqual(result.loc[0, "牧场编号"], "0101001")
         self.assertEqual(result.loc[0, "牧场名称"], "合肥陈刘牧场")
+
+    def test_single_hmy_child_ignores_business_number_as_api_lineage(self):
+        farm = FileManager._normalize_farm(
+            {
+                "code": "1100110013",
+                "name": "0102004肇东长青牧场",
+            },
+            "慧牧云",
+        )
+        frame = pd.DataFrame(
+            {
+                "cow_id": ["123", "456"],
+                "牧场编号": ["0102004", "0102004"],
+                "牧场名称": ["肇东长青牧场", "肇东长青牧场"],
+            }
+        )
+
+        result = _annotate_interface_cows(
+            frame,
+            [farm],
+            ids_are_prefixed=False,
+            data_source="慧牧云",
+        )
+
+        self.assertEqual(
+            result["farm_code"].tolist(),
+            ["1100110013", "1100110013"],
+        )
+        self.assertEqual(
+            result["API farmcode"].tolist(),
+            ["1100110013", "1100110013"],
+        )
+        self.assertEqual(
+            result["牧场编号"].tolist(),
+            ["0102004", "0102004"],
+        )
+
+    def test_single_hmy_breeding_ignores_business_number_as_api_lineage(self):
+        farm = FileManager._normalize_farm(
+            {
+                "code": "1100110013",
+                "name": "0102004肇东长青牧场",
+            },
+            "慧牧云",
+        )
+        frame = pd.DataFrame(
+            {
+                "耳号": ["123"],
+                "牧场编号": ["0102004"],
+                "牧场名称": ["肇东长青牧场"],
+            }
+        )
+
+        result = _annotate_interface_breeding(
+            frame,
+            [farm],
+            ids_are_prefixed=False,
+            data_source="慧牧云",
+        )
+
+        self.assertEqual(result.loc[0, "farm_code"], "1100110013")
+        self.assertEqual(result.loc[0, "API farmcode"], "1100110013")
+        self.assertEqual(result.loc[0, "牧场编号"], "0102004")
+
+    def test_multi_hmy_data_without_api_lineage_is_rejected(self):
+        frame = pd.DataFrame(
+            {
+                "cow_id": ["123", "456"],
+                "牧场编号": ["0102004", "0102007"],
+            }
+        )
+        farms = [
+            {"code": "1100110013", "name": "0102004肇东长青牧场"},
+            {"code": "1100110016", "name": "0102007杜蒙一心牧场"},
+        ]
+
+        with self.assertRaisesRegex(ValueError, "必须保留 API farmcode"):
+            _annotate_interface_cows(
+                frame,
+                farms,
+                ids_are_prefixed=False,
+                data_source="慧牧云",
+            )
+
+    def test_explicit_mismatched_hmy_api_code_is_rejected(self):
+        frame = pd.DataFrame(
+            {
+                "cow_id": ["123"],
+                "API farmcode": ["1100119999"],
+                "牧场编号": ["0102004"],
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "与当前牧场不一致"):
+            _annotate_interface_cows(
+                frame,
+                [{"code": "1100110013", "name": "0102004肇东长青牧场"}],
+                ids_are_prefixed=False,
+                data_source="慧牧云",
+            )
+
+    def test_fresh_hmy_group_download_preserves_child_identity_for_commit(self):
+        farm = {
+            "code": "1100110013",
+            "name": "0102004肇东长青牧场",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            parent = FileManager.create_group_project(
+                Path(temp_dir),
+                [farm],
+                data_source="慧牧云",
+                task_mode="data_only",
+            )
+            task = FileManager.load_project_metadata(parent)["group_tasks"][0]
+            child = parent / task["relative_path"]
+            raw_file = child / "raw_data" / "cow_data.xlsx"
+            raw_file.parent.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame(
+                {
+                    "API farmcode": ["1100110013"],
+                    "牧场编号": ["0102004"],
+                    "牧场名称": ["肇东长青牧场"],
+                    "cow_id": ["123"],
+                }
+            ).to_excel(raw_file, index=False)
+            standardized_file = (
+                child
+                / "standardized_data"
+                / "processed_cow_data.xlsx"
+            )
+            pd.DataFrame(
+                {
+                    "cow_id": ["123"],
+                    "API farmcode": ["1100110013"],
+                    "牧场编号": ["0102004"],
+                    "牧场名称": ["肇东长青牧场"],
+                }
+            ).to_excel(standardized_file, index=False)
+
+            finalize_composite_project(
+                child,
+                [FileManager._normalize_farm(farm, "慧牧云")],
+                [],
+                data_source="慧牧云",
+                ids_are_prefixed=False,
+            )
+            metadata = FileManager.load_project_metadata(child)
+            manifest = commit_child_stage(
+                child,
+                "data",
+                expected_task_id=task["task_id"],
+                expected_farm_code="1100110013",
+            )
+
+        self.assertEqual(metadata["project_type"], "group_child")
+        self.assertEqual(metadata["group_task_id"], task["task_id"])
+        self.assertEqual(metadata["group_farm_code"], "1100110013")
+        self.assertEqual(manifest["task_id"], task["task_id"])
 
     def test_composite_annotation_accepts_normalized_group_metadata(self):
         numbered = FileManager._normalize_farm(

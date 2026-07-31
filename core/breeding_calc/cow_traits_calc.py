@@ -261,7 +261,20 @@ class CowKeyTraitsPage(QWidget):
         if not main_window:
             QMessageBox.warning(self, "警告", "无法获取主窗口")
             return
-        
+
+        selected_traits = self.get_selected_traits()
+        if not selected_traits:
+            QMessageBox.warning(self, "警告", "请至少选择一个性状")
+            return
+
+        if getattr(main_window, "is_group_project", False):
+            main_window.start_group_feature_analysis(
+                operation="cow_traits",
+                parameters={"traits": selected_traits},
+                title="在群母牛关键育种性状分析",
+            )
+            return
+
         if not hasattr(main_window, 'selected_project_path') or not main_window.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
@@ -273,9 +286,6 @@ class CowKeyTraitsPage(QWidget):
             self.progress_dialog = ProgressDialog(self)
             self.progress_dialog.show()
 
-            # 获取选中的性状列表
-            selected_traits = self.get_selected_traits()
-            
             # 定义进度回调函数，能接收进度值和消息
             def progress_callback(progress_value, message=None):
                 print(f"[DEBUG-COW-CALLBACK] 收到回调: progress={progress_value}, message={message}")  # 添加调试输出

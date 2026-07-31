@@ -194,4 +194,3 @@ def sqlite_order_by_clause(
             f"CASE WHEN {sign} = 1 THEN {digits} END ASC",
         )
     return ", ".join(parts)
-

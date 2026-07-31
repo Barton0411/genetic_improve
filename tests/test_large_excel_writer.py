@@ -15,6 +15,8 @@ from utils.large_excel_writer import (
     ExcelSizeError,
     copy_file_atomic,
     normalize_identifier,
+    normalize_identifier_key,
+    read_excel_identifier_safe,
     write_dataframe_atomic,
 )
 
@@ -127,6 +129,41 @@ class LargeExcelWriterTests(unittest.TestCase):
         self.assertEqual(normalize_identifier(np.int64(123)), "123")
         self.assertEqual(normalize_identifier(None), "")
         self.assertEqual(normalize_identifier(np.nan), "")
+        self.assertEqual(normalize_identifier_key("123.0"), "123")
+        self.assertEqual(normalize_identifier_key("00123.0"), "00123.0")
+
+    def test_identifier_safe_read_preserves_lineage_and_farm_leading_zeroes(
+        self,
+    ):
+        frame = pd.DataFrame(
+            {
+                "cow_id": ["000123", "000456"],
+                "raw_dam_id": ["000001", "000002"],
+                "牧场编号": ["0101001", "0101001"],
+                "NM$": [123.45, -6.75],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            source = Path(temporary_dir) / "source.xlsx"
+            output = Path(temporary_dir) / "round-trip.xlsx"
+            frame.to_excel(source, index=False)
+
+            loaded = read_excel_identifier_safe(source)
+            write_dataframe_atomic(loaded, output)
+            reloaded = read_excel_identifier_safe(output)
+
+        self.assertEqual(reloaded["cow_id"].tolist(), ["000123", "000456"])
+        self.assertEqual(
+            reloaded["raw_dam_id"].tolist(),
+            ["000001", "000002"],
+        )
+        self.assertEqual(
+            reloaded["牧场编号"].tolist(),
+            ["0101001", "0101001"],
+        )
+        self.assertTrue(pd.api.types.is_numeric_dtype(reloaded["NM$"]))
+        self.assertEqual(reloaded["NM$"].tolist(), [123.45, -6.75])
 
     def test_atomic_copy_failure_preserves_previous_target(self):
         with tempfile.TemporaryDirectory() as temporary_dir:

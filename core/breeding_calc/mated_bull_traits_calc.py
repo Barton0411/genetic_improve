@@ -210,6 +210,19 @@ class MatedBullKeyTraitsPage(QWidget):
         if not main_window:
             return
 
+        selected_traits = self.get_selected_traits()
+        if not selected_traits:
+            QMessageBox.warning(self, "警告", "请至少选择一个性状")
+            return
+
+        if getattr(main_window, "is_group_project", False):
+            main_window.start_group_feature_analysis(
+                operation="mated_bull_traits",
+                parameters={"traits": selected_traits},
+                title="已配公牛关键育种性状分析",
+            )
+            return
+
         try:
             # 创建进度对话框
             progress_dialog = ProgressDialog(self)
@@ -248,13 +261,6 @@ class MatedBullKeyTraitsPage(QWidget):
             progress_dialog.set_task_info("获取公牛性状数据")
             progress_dialog.update_progress(30)
             
-            selected_traits = self.get_selected_traits()
-
-            if not selected_traits:
-                progress_dialog.close()
-                QMessageBox.warning(self, "警告", "请至少选择一个性状")
-                return
-
             # 检查数据库文件是否存在，如果不存在则自动下载
             import os
             if not os.path.exists(LOCAL_DB_PATH):

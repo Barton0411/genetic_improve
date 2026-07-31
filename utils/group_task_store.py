@@ -746,7 +746,14 @@ class GroupTaskStore:
         lease_seconds: float = 300,
         at: Optional[datetime] = None,
     ) -> Optional[Dict[str, Any]]:
-        """刷新仍有效且令牌匹配的租约；失效或不匹配时返回 ``None``。"""
+        """刷新令牌仍匹配的租约；令牌已被替换时返回 ``None``。
+
+        机器睡眠会同时暂停业务进程和续租线程。唤醒时墙上时钟可能已经
+        越过 ``lease_expires_at``，但只要数据库中的令牌仍是调用方原
+        令牌，就说明没有其它运行成功接管租约，可以在同一事务内安全
+        续租。若其它运行已接管，``acquire_run_lease`` 会先替换令牌，
+        本方法仍会因令牌不匹配而拒绝续租。
+        """
 
         token = str(lease_token).strip()
         if not token:
@@ -774,7 +781,6 @@ class GroupTaskStore:
             if (
                 row["lease_token"] != token
                 or not row["lease_expires_at"]
-                or str(row["lease_expires_at"]) <= timestamp
             ):
                 return None
             connection.execute(
@@ -1212,6 +1218,118 @@ class GroupTaskStore:
         task_data = self.get_task(task_id)
         assert task_data is not None
         return task_data
+
+    def set_required_stages_for_all(
+        self,
+        required_stages: Sequence[str],
+        *,
+        lease_token: str,
+    ) -> List[Dict[str, Any]]:
+        """在持有组级租约时原子调整全部子任务的必需阶段。
+
+        牧场组从 ``data_only`` 升级为 ``analysis`` 时，不能逐任务提交，
+        否则进程在中途退出会留下部分任务已升级、部分任务未升级的状态。
+        本方法在一个 SQLite 事务内完成全部任务的阶段切换，并核对调用方
+        仍持有当前组级租约。已有完成阶段会保留；只有原本 ``skipped`` 的
+        新必需阶段会转为 ``pending``。
+        """
+
+        required = set(_validate_stage_names(required_stages))
+        token = str(lease_token or "").strip()
+        if not token:
+            raise ValueError("lease_token 不能为空")
+
+        timestamp = _utc_timestamp()
+        with self._transaction() as connection:
+            control = connection.execute(
+                """
+                SELECT lease_token FROM group_run_control
+                WHERE singleton_id = 1
+                """
+            ).fetchone()
+            if control is None:
+                raise GroupTaskStoreError("牧场组运行控制记录不存在")
+            if str(control["lease_token"] or "") != token:
+                raise GroupTaskStoreError(
+                    "牧场组运行租约已失效，不能调整任务阶段"
+                )
+
+            task_rows = connection.execute(
+                """
+                SELECT task_id FROM group_tasks
+                ORDER BY sort_order, created_at, task_id
+                """
+            ).fetchall()
+            for task_row in task_rows:
+                task_id = str(task_row["task_id"])
+                for stage in GROUP_TASK_STAGES:
+                    if stage in required:
+                        connection.execute(
+                            """
+                            UPDATE group_task_stages
+                            SET required = 1,
+                                status = CASE
+                                    WHEN status = 'skipped' THEN 'pending'
+                                    ELSE status
+                                END,
+                                progress = CASE
+                                    WHEN status = 'skipped' THEN 0
+                                    ELSE progress
+                                END,
+                                error = CASE
+                                    WHEN status = 'skipped' THEN ''
+                                    ELSE error
+                                END,
+                                started_at = CASE
+                                    WHEN status = 'skipped' THEN NULL
+                                    ELSE started_at
+                                END,
+                                completed_at = CASE
+                                    WHEN status = 'skipped' THEN NULL
+                                    ELSE completed_at
+                                END,
+                                updated_at = ?
+                            WHERE task_id = ? AND stage = ?
+                              AND (
+                                  required <> 1
+                                  OR status = 'skipped'
+                              )
+                            """,
+                            (timestamp, task_id, stage),
+                        )
+                    else:
+                        connection.execute(
+                            """
+                            UPDATE group_task_stages
+                            SET required = 0, status = 'skipped',
+                                progress = 100, error = '',
+                                completed_at = ?, updated_at = ?
+                            WHERE task_id = ? AND stage = ?
+                              AND (
+                                  required <> 0
+                                  OR status <> 'skipped'
+                                  OR progress <> 100
+                                  OR error <> ''
+                              )
+                            """,
+                            (
+                                timestamp,
+                                timestamp,
+                                task_id,
+                                stage,
+                            ),
+                        )
+                self._refresh_task_state(
+                    connection,
+                    task_id,
+                    touched_stage=min(
+                        required,
+                        key=GROUP_TASK_STAGES.index,
+                    ),
+                    timestamp=timestamp,
+                )
+
+        return self.list_tasks(with_stages=True)
 
     def reset_for_retry(
         self,

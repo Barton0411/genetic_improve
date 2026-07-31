@@ -57,6 +57,7 @@ analysis_results/
 # Sensitive information (DO NOT COMMIT)
 docs/部署文档/SERVER_CREDENTIALS.md
 config/credentials.json
+config/api_config_local.json
 config/.env
 .env
 *.pem

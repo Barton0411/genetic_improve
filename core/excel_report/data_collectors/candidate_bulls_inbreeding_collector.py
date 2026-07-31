@@ -8,7 +8,46 @@ import logging
 import pandas as pd
 import glob
 
+from utils.large_excel_writer import normalize_identifier
+
 logger = logging.getLogger(__name__)
+
+_MISSING_IDENTIFIERS = {"", "nan", "none", "null", "nat", "<na>", "n/a"}
+
+
+def _normalize_pair_identifier(value) -> str:
+    """规范化配对标识符，同时兼容历史 Excel 的 ``123.0`` 文本。"""
+    normalized = normalize_identifier(value)
+    if normalized.casefold() in _MISSING_IDENTIFIERS:
+        return ""
+    if normalized.endswith(".0") and normalized[:-2].isdigit():
+        normalized = normalized[:-2]
+    return normalized.upper()
+
+
+def _deduplicate_candidate_pairs(df: pd.DataFrame) -> pd.DataFrame:
+    """按规范化母牛号、公牛号保留一条结果，避免历史结果重复计数。"""
+    normalized = df.copy()
+    normalized["母牛号"] = normalized["母牛号"].map(
+        _normalize_pair_identifier
+    )
+    normalized["备选公牛号"] = normalized["备选公牛号"].map(
+        _normalize_pair_identifier
+    )
+    before_count = len(normalized)
+    normalized = normalized.drop_duplicates(
+        subset=["母牛号", "备选公牛号"],
+        keep="first",
+    ).copy()
+    duplicate_count = before_count - len(normalized)
+    if duplicate_count:
+        logger.warning(
+            "备选公牛近交汇总检测到 %d 条重复配对记录；"
+            "已按规范化母牛号和备选公牛号去重，保留 %d 个唯一配对",
+            duplicate_count,
+            len(normalized),
+        )
+    return normalized
 
 
 def collect_candidate_bulls_inbreeding_data(analysis_folder: Path, project_folder: Path, cache=None) -> dict:
@@ -76,6 +115,10 @@ def collect_candidate_bulls_inbreeding_data(analysis_folder: Path, project_folde
             logger.warning("文件中缺少'后代近交系数'列")
             return {}
 
+        # 历史文件可能因同一公牛存在多种冻精类型等原因重复写入配对结果。
+        # 所有绝对头数均应以唯一的“母牛-备选公牛”组合为统计粒度。
+        df = _deduplicate_candidate_pairs(df)
+
         # 3. 读取processed_cow_data获取胎次和在场信息
         cow_data_file = project_folder / "standardized_data" / "processed_cow_data.xlsx"
         if not cow_data_file.exists():
@@ -89,7 +132,22 @@ def collect_candidate_bulls_inbreeding_data(analysis_folder: Path, project_folde
 
         # 提取需要的列（processed_cow_data使用cow_id作为列名）
         cow_info = cow_data[['cow_id', '是否在场', 'sex', 'lac']].copy()
-        cow_info['cow_id'] = cow_info['cow_id'].astype(str)
+        cow_info['cow_id'] = cow_info['cow_id'].map(
+            _normalize_pair_identifier
+        )
+        before_cow_info = len(cow_info)
+        cow_info = cow_info[cow_info['cow_id'] != ''].copy()
+        cow_info = cow_info.drop_duplicates(
+            subset=['cow_id'],
+            keep='first',
+        ).copy()
+        removed_cow_info = before_cow_info - len(cow_info)
+        if removed_cow_info:
+            logger.warning(
+                "备选公牛近交汇总检测到 %d 条空或重复母牛档案；"
+                "已按规范化母牛号保留唯一记录，避免合并后重复计数",
+                removed_cow_info,
+            )
         # 确保sex列正确填充（处理全NaN的情况，母牛数据默认为'母'）
         if cow_info['sex'].isna().all():
             cow_info['sex'] = '母'
@@ -97,7 +155,6 @@ def collect_candidate_bulls_inbreeding_data(analysis_folder: Path, project_folde
             cow_info['sex'] = cow_info['sex'].fillna('母')
 
         # 4. 合并数据（备选公牛文件使用母牛号，processed_cow_data使用cow_id）
-        df['母牛号'] = df['母牛号'].astype(str)
         merged = df.merge(cow_info, left_on='母牛号', right_on='cow_id', how='left')
 
         # 5. 筛选在群母牛

@@ -138,6 +138,11 @@ from gui.progress import ProgressDialog
 from core.data.update_manager import (
     LOCAL_DB_PATH, get_pedigree_db
 )
+from core.inbreeding.analysis_scope import (
+    ORIGINAL_BULL_ID_COLUMN,
+    STANDARDIZED_BULL_ID_COLUMN,
+    build_inbreeding_analysis_scope,
+)
 
 # 导入数据API客户端
 try:
@@ -2472,7 +2477,6 @@ class InbreedingPage(QWidget):
                 - 需要查询的公牛号集合 (已转换为REG格式)
                 - 公牛来源字典 {公牛号: 来源}，来源为 'sire'(母牛系谱) / 'breeding'(配种记录) / 'candidate'(备选公牛)
         """
-        required_bulls_original = set()
         required_bulls_standardized = set()
         bull_sources = {}  # 记录每个公牛的来源
 
@@ -2481,18 +2485,36 @@ class InbreedingPage(QWidget):
             from core.data.update_manager import get_pedigree_db
             pedigree_db = get_pedigree_db()
 
-            # 获取母牛父号
+            # 由自动分析和 UI 共用的纯函数确定母牛/配种/备选公牛范围。
             cow_file = project_path / "standardized_data" / "processed_cow_data.xlsx"
-            cow_df = pd.read_excel(cow_file)
-            if analysis_type == 'candidate':
-                # 备选公牛分析只考虑在群的母牛
-                cow_df = cow_df[cow_df['是否在场'] == '是']
+            cow_df = pd.read_excel(cow_file, dtype={'cow_id': str, 'sire': str})
+            if analysis_type == 'mated':
+                breeding_file = project_path / "standardized_data" / "processed_breeding_data.xlsx"
+                breeding_df = pd.read_excel(
+                    breeding_file,
+                    dtype={'耳号': str, '父号': str, '冻精编号': str},
+                )
+                scope = build_inbreeding_analysis_scope(
+                    analysis_type,
+                    cow_df,
+                    breeding_df=breeding_df,
+                )
+            else:
+                bull_file = project_path / "standardized_data" / "processed_bull_data.xlsx"
+                bull_df = pd.read_excel(bull_file, dtype={'bull_id': str})
+                scope = build_inbreeding_analysis_scope(
+                    analysis_type,
+                    cow_df,
+                    candidate_bull_df=bull_df,
+                    standardize_bull_id=lambda value: pedigree_db.standardize_animal_id(
+                        value, 'bull'
+                    ),
+                )
 
             # 收集并标准化母牛父号
-            sire_ids = cow_df['sire'].dropna().astype(str).unique()
+            sire_ids = scope.cows['sire'].dropna().astype(str).unique()
             for sire_id in sire_ids:
                 if sire_id and sire_id.strip():
-                    required_bulls_original.add(sire_id)
                     standardized_id = pedigree_db.standardize_animal_id(sire_id, 'bull')
                     if standardized_id:
                         required_bulls_standardized.add(standardized_id)
@@ -2502,13 +2524,14 @@ class InbreedingPage(QWidget):
 
             # 获取公牛号
             if analysis_type == 'mated':
-                # 从配种记录获取已配公牛
-                breeding_file = project_path / "standardized_data" / "processed_breeding_data.xlsx"
-                breeding_df = pd.read_excel(breeding_file)
-                bull_ids = breeding_df['冻精编号'].dropna().astype(str).unique()
+                bull_ids = (
+                    scope.breeding_records['冻精编号']
+                    .dropna()
+                    .astype(str)
+                    .unique()
+                )
                 for bull_id in bull_ids:
                     if bull_id and bull_id.strip():
-                        required_bulls_original.add(bull_id)
                         standardized_id = pedigree_db.standardize_animal_id(bull_id, 'bull')
                         if standardized_id:
                             required_bulls_standardized.add(standardized_id)
@@ -2516,26 +2539,16 @@ class InbreedingPage(QWidget):
                         if bull_id != standardized_id:
                             print(f"配种公牛号转换: {bull_id} -> {standardized_id}")
             else:
-                # 从备选公牛文件获取公牛号
-                bull_file = project_path / "standardized_data" / "processed_bull_data.xlsx"
-                bull_df = pd.read_excel(bull_file)
-                bull_ids = bull_df['bull_id'].dropna().astype(str).unique()
-                for bull_id in bull_ids:
-                    if bull_id and bull_id.strip():
-                        required_bulls_original.add(bull_id)
-                        standardized_id = pedigree_db.standardize_animal_id(bull_id, 'bull')
-                        if standardized_id:
-                            required_bulls_standardized.add(standardized_id)
-                            bull_sources[standardized_id] = 'candidate'  # 备选公牛
-                        if bull_id != standardized_id:
-                            print(f"备选公牛号转换: {bull_id} -> {standardized_id}")
+                for standardized_id in scope.candidate_bulls[
+                    STANDARDIZED_BULL_ID_COLUMN
+                ]:
+                    if standardized_id:
+                        required_bulls_standardized.add(standardized_id)
+                        bull_sources[standardized_id] = 'candidate'
 
             # 打印标准化结果
-            original_count = len(required_bulls_original)
             standardized_count = len(required_bulls_standardized)
-            print(f"收集到{original_count}个原始公牛ID，标准化后得到{standardized_count}个REG格式ID")
-            if original_count > standardized_count:
-                print(f"有{original_count - standardized_count}个ID转换为空或重复")
+            print(f"分析范围内收集到{standardized_count}个标准REG格式公牛ID")
 
             # 移除空字符串
             required_bulls_standardized = {bull for bull in required_bulls_standardized if bull and bull.strip()}
@@ -2920,21 +2933,22 @@ class InbreedingPage(QWidget):
                 df, project_path, animal_id_column='耳号'
             )
 
-            # 育种分析仅针对奶牛母牛：按母牛品种过滤配种记录（配种记录本身无品种列，
-            # 需借助母牛档案 processed_cow_data 的 breed/sex 建立奶牛母牛白名单）
-            try:
-                cow_data_file = project_path / "standardized_data" / "processed_cow_data.xlsx"
-                if cow_data_file.exists():
-                    from config.breed_constants import filter_dairy_cows
-                    cow_ref = pd.read_excel(cow_data_file, dtype={'cow_id': str})
-                    cow_ref = filter_dairy_cows(cow_ref, log_prefix="已配公牛分析：")
-                    if 'cow_id' in cow_ref.columns:
-                        dairy_ids = set(cow_ref['cow_id'].astype(str).str.strip())
-                        before = len(df)
-                        df = df[df['耳号'].astype(str).str.strip().isin(dairy_ids)]
-                        print(f"已配公牛分析：按奶牛母牛过滤配种记录 {before} -> {len(df)}")
-            except Exception as e:
-                print(f"已配公牛分析品种过滤失败（继续不过滤）: {e}")
+            cow_data_file = project_path / "standardized_data" / "processed_cow_data.xlsx"
+            cow_ref = pd.read_excel(
+                cow_data_file,
+                dtype={'cow_id': str, 'sire': str},
+            )
+            scope = build_inbreeding_analysis_scope(
+                'mated',
+                cow_ref,
+                breeding_df=df,
+            )
+            before = len(df)
+            df = scope.breeding_records
+            print(
+                f"已配公牛分析：按标准母牛档案奶牛ID白名单过滤配种记录 "
+                f"{before} -> {len(df)}（不要求当前在场）"
+            )
 
             print(f"读取到{len(df)}条配对记录")
             if hasattr(self, 'progress_dialog') and self.progress_dialog:
@@ -3049,30 +3063,38 @@ class InbreedingPage(QWidget):
                 self.progress_dialog.update_info(f"读取母牛数据文件: {cow_file.name}")
                 self.progress_dialog.update_info(f"读取备选公牛数据文件: {bull_file.name}")
             
-            cow_df = pd.read_excel(cow_file)
+            cow_df = pd.read_excel(cow_file, dtype={'cow_id': str, 'sire': str})
             from core.data.processor import add_farm_lineage_columns
             cow_df = add_farm_lineage_columns(
                 cow_df, project_path, animal_id_column='cow_id'
             )
-            bull_df = pd.read_excel(bull_file)
+            bull_df = pd.read_excel(bull_file, dtype={'bull_id': str})
 
-            # 育种分析仅针对奶牛母牛：排除公牛与肉牛品种
-            from config.breed_constants import filter_dairy_cows
-            cow_df = filter_dairy_cows(cow_df, log_prefix="备选公牛分析：")
+            # 获取系谱库实例用于ID转换
+            from core.data.update_manager import get_pedigree_db
+            pedigree_db = get_pedigree_db()
+
+            original_cow_count = len(cow_df)
+            original_bull_count = len(bull_df)
+            scope = build_inbreeding_analysis_scope(
+                'candidate',
+                cow_df,
+                candidate_bull_df=bull_df,
+                standardize_bull_id=lambda value: pedigree_db.standardize_animal_id(
+                    value, 'bull'
+                ),
+            )
+            cow_df = scope.cows
+            bull_df = scope.candidate_bulls
 
             print(f"读取到{len(cow_df)}条母牛记录和{len(bull_df)}条备选公牛记录")
             if hasattr(self, 'progress_dialog') and self.progress_dialog:
                 self.progress_dialog.update_info(f"成功读取 {len(cow_df)} 条母牛记录")
                 self.progress_dialog.update_info(f"成功读取 {len(bull_df)} 条备选公牛记录")
-            
-            # 获取系谱库实例用于ID转换
-            from core.data.update_manager import get_pedigree_db
-            pedigree_db = get_pedigree_db()
-            
-            # 只分析在群的母牛
-            original_cow_count = len(cow_df)
-            cow_df = cow_df[cow_df['是否在场'] == '是']
-            print(f"过滤后在群的母牛数量: {len(cow_df)}")
+            print(
+                f"备选公牛分析范围：母牛 {original_cow_count} -> {len(cow_df)}，"
+                f"公牛标准化去重 {original_bull_count} -> {len(bull_df)}"
+            )
             if hasattr(self, 'progress_dialog') and self.progress_dialog:
                 self.progress_dialog.update_info(f"过滤在群母牛: {original_cow_count} -> {len(cow_df)} 头")
             
@@ -3138,9 +3160,9 @@ class InbreedingPage(QWidget):
                     if pair_count <= 5 or pair_count % 1000 == 0:  # 只打印前5对和每1000对，避免日志过长
                         print(f"  分析第{pair_count}对组合: 母牛{cow_id} - 公牛{bull_row['bull_id']}")
                     
-                    # 标准化备选公牛ID
-                    original_bull_id = str(bull_row['bull_id'])
-                    bull_id = pedigree_db.standardize_animal_id(original_bull_id, 'bull')
+                    # 公牛号已经由共用范围函数标准化并去重；源文件保持不变。
+                    original_bull_id = str(bull_row[ORIGINAL_BULL_ID_COLUMN])
+                    bull_id = str(bull_row[STANDARDIZED_BULL_ID_COLUMN])
 
                     # 详细记录转换信息（用于调试）
                     if original_bull_id != bull_id and original_bull_id:
@@ -3741,6 +3763,34 @@ class InbreedingPage(QWidget):
         Args:
             analysis_type: 分析类型，"mated"=已配公牛分析，"candidate"=备选公牛分析，"cow_self"=母牛近交分析
         """
+        main_window = self.get_main_window()
+        group_operations = {
+            "cow_self": (
+                "cow_self_inbreeding",
+                "母牛近交系数及隐性基因分析",
+            ),
+            "mated": (
+                "mated_inbreeding",
+                "已配公牛近交系数及隐性基因分析",
+            ),
+            "candidate": (
+                "candidate_inbreeding",
+                "备选公牛近交系数及隐性基因分析",
+            ),
+        }
+        if (
+            main_window
+            and getattr(main_window, "is_group_project", False)
+            and analysis_type in group_operations
+        ):
+            operation, title = group_operations[analysis_type]
+            main_window.start_group_feature_analysis(
+                operation=operation,
+                parameters={},
+                title=title,
+            )
+            return
+
         # 保存最后的分析类型
         self._last_analysis_type = analysis_type
         print(f"开始执行{analysis_type}分析...")

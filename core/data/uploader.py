@@ -17,7 +17,13 @@ import pandas as pd
 # 设置日志配置（可选）
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def upload_and_standardize_breeding_data(input_files: list[Path], project_path: Path, progress_callback=None, source_system: str = "伊起牛") -> Path:
+def upload_and_standardize_breeding_data(
+    input_files: list[Path],
+    project_path: Path,
+    progress_callback=None,
+    source_system: str = "伊起牛",
+    require_cow: bool = True,
+) -> Path:
     """
     处理上传的配种记录数据并进行标准化。
 
@@ -26,6 +32,8 @@ def upload_and_standardize_breeding_data(input_files: list[Path], project_path: 
         project_path (Path): 当前项目的路径。
         progress_callback (callable, optional): 进度回调函数，用于更新进度条或显示信息。
         source_system (str): 数据来源系统，可选值：伊起牛、慧牧云、优源-DC305
+        require_cow (bool): 是否要求先存在母牛数据。牧场组“仅配种
+            记录”数据任务传 False；其他既有调用保持原校验。
 
     返回:
         Path: 标准化后的配种记录数据文件路径。
@@ -44,24 +52,34 @@ def upload_and_standardize_breeding_data(input_files: list[Path], project_path: 
 
     # 检查是否已经上传母牛数据
     cow_data_file = standardized_path / "processed_cow_data.xlsx"
-    if not cow_data_file.exists():
+    cow_df = None
+    if require_cow and not cow_data_file.exists():
         error_msg = "请先上传并处理母牛数据，再上传配种记录"
         print(f"[DEBUG-BREEDING-UPLOAD-ERROR] {error_msg}")
         logging.error(error_msg)
         raise ValueError(error_msg)
-    else:
+    if cow_data_file.exists():
         print(f"[DEBUG-BREEDING-UPLOAD-2] 找到母牛数据文件: {cow_data_file}")
-        
-    # 读取母牛数据
-    try:
-        print("[DEBUG-BREEDING-UPLOAD-3] 读取母牛数据...")
-        cow_df = pd.read_excel(cow_data_file, dtype={'cow_id': str, 'sire': str})
-        print(f"[DEBUG-BREEDING-UPLOAD-4] 母牛数据读取成功，形状: {cow_df.shape}")
-    except Exception as e:
-        error_msg = f"读取母牛数据时出错: {e}"
-        print(f"[DEBUG-BREEDING-UPLOAD-ERROR] {error_msg}")
-        logging.error(error_msg)
-        raise ValueError(error_msg)
+
+        # 读取母牛数据；仅配种记录任务没有该文件时保持 cow_df=None，
+        # processor 会保留配种明细，但不伪造父号匹配结果。
+        try:
+            print("[DEBUG-BREEDING-UPLOAD-3] 读取母牛数据...")
+            cow_df = pd.read_excel(
+                cow_data_file,
+                dtype={'cow_id': str, 'sire': str},
+            )
+            print(
+                "[DEBUG-BREEDING-UPLOAD-4] "
+                f"母牛数据读取成功，形状: {cow_df.shape}"
+            )
+        except Exception as e:
+            error_msg = f"读取母牛数据时出错: {e}"
+            print(f"[DEBUG-BREEDING-UPLOAD-ERROR] {error_msg}")
+            logging.error(error_msg)
+            raise ValueError(error_msg)
+    elif not require_cow:
+        logging.info("仅配种记录任务未选择母牛数据，跳过父号匹配")
 
     # 确保只上传一个文件
     if len(input_files) != 1:

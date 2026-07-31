@@ -6,6 +6,7 @@ import datetime as dt
 import math
 import numbers
 import os
+import re
 import shutil
 import stat
 import tempfile
@@ -23,30 +24,49 @@ EXCEL_MAX_COLUMNS = 16_384
 DEFAULT_TEXT_COLUMNS = frozenset(
     {
         "cow_id",
+        "raw_cow_id",
         "母牛号",
         "耳号",
         "bull_id",
+        "raw_bull_id",
         "公牛号",
         "naab",
         "sire",
+        "raw_sire_id",
         "父号",
         "父亲号",
         "dam",
+        "raw_dam_id",
         "母号",
         "母亲号",
         "mgs",
+        "raw_mgs_id",
         "外祖父",
         "外祖父号",
         "mgd",
+        "raw_mgd_id",
         "外祖母",
         "外祖母号",
         "mmgs",
+        "raw_mmgs_id",
         "外曾祖父",
         "外曾祖父号",
         "api farmcode",
         "farmcode",
         "farm_code",
+        "farm_number",
         "牧场编号",
+    }
+)
+
+# pandas 的 ``converters`` 按原始列名精确匹配。项目内标准列以
+# ``API farmcode`` 为正式写法，额外保留常见大小写写法以兼容旧结果。
+DEFAULT_IDENTIFIER_READ_COLUMNS = frozenset(
+    set(DEFAULT_TEXT_COLUMNS)
+    | {
+        "API farmcode",
+        "API Farmcode",
+        "api Farmcode",
     }
 )
 
@@ -80,12 +100,88 @@ def normalize_identifier(value) -> str:
     return str(value).strip()
 
 
+def normalize_identifier_key(value) -> str:
+    """生成标识符匹配键，统一无前导零的 ``123.0`` 文本表示。"""
+    normalized = normalize_identifier(value)
+    integer_decimal = re.fullmatch(r"^(0|[1-9]\d*)\.0+$", normalized)
+    if integer_decimal:
+        return integer_decimal.group(1)
+    return normalized
+
+
+def read_excel_identifier_safe(
+    excel_file,
+    *,
+    identifier_columns: Iterable[str] | None = None,
+    **kwargs,
+):
+    """读取 Excel，并在 pandas 类型推断前把标识符转换为文本。
+
+    转换器能保留 ``00123`` 的前导零，也能统一旧 Excel 中的
+    ``123.0`` 表示。只有牛号、谱系号和牧场号等已知标识符使用转换器，
+    性状和指数列仍按数值读取；Excel 的默认空值标记仍按缺失值处理。
+
+    返回值与 :func:`pandas.read_excel` 一致；当 ``sheet_name=None`` 或传入
+    工作表列表时，会逐个规范化返回字典中的 DataFrame。
+    """
+    requested_columns = {
+        str(column).strip()
+        for column in (identifier_columns or ())
+        if str(column).strip()
+    }
+    safe_columns = set(DEFAULT_IDENTIFIER_READ_COLUMNS) | requested_columns
+
+    converters = dict(kwargs.pop("converters", {}) or {})
+    for column in safe_columns:
+        existing_converter = converters.get(column)
+        if existing_converter is None:
+            converters[column] = normalize_identifier_key
+        else:
+            converters[column] = (
+                lambda value, converter=existing_converter:
+                normalize_identifier_key(converter(value))
+            )
+
+    # pandas 同时收到同一列的 dtype 和 converter 时会忽略 dtype 并发出
+    # ParserWarning。移除这些重复项，其余显式 dtype 保持不变。
+    dtype = kwargs.get("dtype")
+    if isinstance(dtype, dict):
+        kwargs["dtype"] = {
+            column: value
+            for column, value in dtype.items()
+            if column not in safe_columns
+        }
+
+    result = pd.read_excel(
+        excel_file,
+        converters=converters,
+        **kwargs,
+    )
+    safe_column_keys = {
+        column.casefold()
+        for column in safe_columns
+    }
+
+    def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
+        for column in frame.columns:
+            if str(column).strip().casefold() in safe_column_keys:
+                frame[column] = frame[column].map(normalize_identifier_key)
+        return frame
+
+    if isinstance(result, dict):
+        return {
+            sheet_name: _normalize_frame(frame)
+            for sheet_name, frame in result.items()
+        }
+    return _normalize_frame(result)
+
+
 def _normalize_excel_value(value, force_text: bool = False):
     """转换 pandas/numpy 标量，同时保留标识符和小数精度语义。"""
     if _is_missing(value):
         return None
     if force_text:
-        return normalize_identifier(value)
+        return normalize_identifier_key(value)
 
     if isinstance(value, np.datetime64):
         value = pd.Timestamp(value)

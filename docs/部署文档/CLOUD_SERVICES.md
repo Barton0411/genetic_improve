@@ -411,6 +411,7 @@ SELECT * FROM miss_bull ORDER BY upload_time DESC LIMIT 10;
 ### Python连接示例
 
 ```python
+import os
 import pymysql
 
 # 创建连接
@@ -418,7 +419,7 @@ connection = pymysql.connect(
     host='defectgene-new.mysql.polardb.rds.aliyuncs.com',
     port=3306,
     user='defect_genetic_checking',
-    password='Jaybz@890411',
+    password=os.environ['BULL_LIBRARY_DB_PASSWORD'],
     database='bull_library',
     charset='utf8mb4'
 )

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import List, Optional
@@ -156,6 +157,23 @@ class HMYApiClient:
             timeout=60,
         )
 
+    @staticmethod
+    def _page_fingerprint(records: List[dict]) -> bytes:
+        """生成不可逆分页指纹，用于识别上游重复返回同一页。"""
+        digest = hashlib.sha256()
+        for record in records:
+            digest.update(
+                json.dumps(
+                    record,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+            )
+            digest.update(b"\x00")
+        return digest.digest()
+
     def get_farm_list(self) -> dict:
         """读取随应用发布的慧牧云牧场编码表。"""
         config_dir = Path(__file__).resolve().parent.parent / "config"
@@ -203,6 +221,7 @@ class HMYApiClient:
 
         records: List[dict] = []
         farm_names: set[str] = set()
+        seen_pages: set[bytes] = set()
         total: Optional[int] = None
         page_num = 1
 
@@ -214,6 +233,10 @@ class HMYApiClient:
             )
             if total is None:
                 total = payload["count"]
+            elif payload["count"] != total:
+                raise ValueError(
+                    "慧牧云牛群接口分页期间总数发生变化，请稍后重试"
+                )
 
             page_records = payload["data"]
             if not page_records:
@@ -224,6 +247,9 @@ class HMYApiClient:
                 if not isinstance(source, dict):
                     raise ValueError("慧牧云牛群接口记录格式异常")
                 record = dict(source)
+                cow_id = str(record.get("cowId") or "").strip()
+                if "cowId" in record and not cow_id:
+                    raise ValueError("慧牧云牛群接口存在牛号为空的记录")
                 returned_code = str(record.get("farmCode") or "").strip()
                 if returned_code and returned_code != normalized_farm_code:
                     raise ValueError(
@@ -242,6 +268,19 @@ class HMYApiClient:
                     record["farmName"] = returned_name
                 normalized_records.append(record)
 
+            page_fingerprint = self._page_fingerprint(normalized_records)
+            if page_fingerprint in seen_pages:
+                raise ValueError(
+                    "慧牧云牛群接口重复返回同一分页，"
+                    "为避免数据缺失或串行已停止下载"
+                )
+            seen_pages.add(page_fingerprint)
+            if total is not None and (
+                len(records) + len(normalized_records) > total
+            ):
+                raise ValueError(
+                    "慧牧云牛群接口分页记录数超过报告总数，请稍后重试"
+                )
             records.extend(normalized_records)
             page_num += 1
             if page_num > 10000:
@@ -278,6 +317,7 @@ class HMYApiClient:
 
         records: List[dict] = []
         farm_names: set[str] = set()
+        seen_pages: set[bytes] = set()
         total: Optional[int] = None
         page_num = 1
         required_fields = ("cowId", "siren", "eventDate")
@@ -290,6 +330,10 @@ class HMYApiClient:
             )
             if total is None:
                 total = payload["count"]
+            elif payload["count"] != total:
+                raise ValueError(
+                    "慧牧云配种接口分页期间总数发生变化，请稍后重试"
+                )
 
             page_records = payload["data"]
             if not page_records:
@@ -329,6 +373,19 @@ class HMYApiClient:
                     )
                 normalized_records.append(record)
 
+            page_fingerprint = self._page_fingerprint(normalized_records)
+            if page_fingerprint in seen_pages:
+                raise ValueError(
+                    "慧牧云配种接口重复返回同一分页，"
+                    "为避免数据缺失或串行已停止下载"
+                )
+            seen_pages.add(page_fingerprint)
+            if total is not None and (
+                len(records) + len(normalized_records) > total
+            ):
+                raise ValueError(
+                    "慧牧云配种接口分页记录数超过报告总数，请稍后重试"
+                )
             records.extend(normalized_records)
             page_num += 1
             if page_num > 10000:

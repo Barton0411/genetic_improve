@@ -6,6 +6,7 @@ HTTP API客户端
 import requests
 import json
 import logging
+from collections.abc import Mapping
 from typing import Tuple, Optional, Dict, Any
 from pathlib import Path
 import os
@@ -13,16 +14,37 @@ import platform
 
 logger = logging.getLogger(__name__)
 
+_SENSITIVE_LOG_KEY_MARKERS = (
+    "password",
+    "passwd",
+    "token",
+    "authorization",
+    "authentication",
+    "secret",
+    "cookie",
+    "credential",
+    "apikey",
+    "accesskey",
+    "privatekey",
+    "aeskey",
+    "signingkey",
+    "sessionid",
+)
+
 
 def _sanitize_for_log(value: Any) -> Any:
-    """递归隐藏请求和响应中的凭据字段。"""
-    if isinstance(value, dict):
+    """递归隐藏请求、响应和 ``requests`` 请求头中的凭据字段。"""
+    if isinstance(value, Mapping):
         sanitized = {}
         for key, item in value.items():
-            normalized_key = str(key).lower().replace("-", "_")
+            normalized_key = "".join(
+                character
+                for character in str(key).strip().lower()
+                if character.isalnum()
+            )
             if any(
                 marker in normalized_key
-                for marker in ("password", "token", "authorization", "secret")
+                for marker in _SENSITIVE_LOG_KEY_MARKERS
             ):
                 sanitized[key] = "***"
             else:
@@ -30,6 +52,8 @@ def _sanitize_for_log(value: Any) -> Any:
         return sanitized
     if isinstance(value, list):
         return [_sanitize_for_log(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_for_log(item) for item in value)
     return value
 
 
@@ -199,7 +223,9 @@ class APIClient:
                 raise ValueError(f"不支持的HTTP方法: {method}")
 
             logger.info(f"Response status code: {response.status_code}")
-            logger.debug(f"Response headers: {response.headers}")
+            logger.debug(
+                f"Response headers: {_sanitize_for_log(response.headers)}"
+            )
 
             # 检查HTTP状态码
             response.raise_for_status()

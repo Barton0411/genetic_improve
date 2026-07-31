@@ -272,7 +272,19 @@ class IndexCalculationPage(QWidget):
             return
 
         main_window = self.get_main_window()
-        if not main_window or not main_window.selected_project_path:
+        if not main_window:
+            QMessageBox.warning(self, "警告", "请先选择一个项目")
+            return
+
+        if getattr(main_window, "is_group_project", False):
+            main_window.start_group_feature_analysis(
+                operation="cow_index",
+                parameters={"weight_name": self.current_weight_name},
+                title="母牛群指数计算排名",
+            )
+            return
+
+        if not main_window.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
 
@@ -320,7 +332,19 @@ class IndexCalculationPage(QWidget):
             return
 
         main_window = self.get_main_window()
-        if not main_window or not main_window.selected_project_path:
+        if not main_window:
+            QMessageBox.warning(self, "警告", "请先选择一个项目")
+            return
+
+        if getattr(main_window, "is_group_project", False):
+            main_window.start_group_feature_analysis(
+                operation="bull_index",
+                parameters={"weight_name": self.current_weight_name},
+                title="备选公牛指数计算排名",
+            )
+            return
+
+        if not main_window.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
 

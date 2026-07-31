@@ -15,6 +15,7 @@ from core.group_tasks.child_runner import (
     load_and_validate_request,
     main,
 )
+from core.group_tasks.stage_policy import commit_child_stage
 from utils.file_manager import FileManager
 
 
@@ -99,9 +100,18 @@ class GroupChildRunnerTests(unittest.TestCase):
             self.parent / self.task["relative_path"]
         ).resolve(strict=True)
         _write_xlsx(
+            self.child / "raw_data" / "cow_data.xlsx"
+        )
+        _write_xlsx(
             self.child
             / "standardized_data"
             / "processed_cow_data.xlsx"
+        )
+        commit_child_stage(
+            self.child,
+            "data",
+            expected_task_id=self.task["task_id"],
+            expected_farm_code="1001",
         )
         self.request_path = self.base_path / "request.json"
         self._write_request()
@@ -159,6 +169,12 @@ class GroupChildRunnerTests(unittest.TestCase):
         self.assertTrue(
             all(
                 call["kwargs"]["reliability_mode"]
+                for call in _FakeWorker.calls
+            )
+        )
+        self.assertTrue(
+            all(
+                call["kwargs"]["group_batch_mode"]
                 for call in _FakeWorker.calls
             )
         )

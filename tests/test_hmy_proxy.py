@@ -249,6 +249,88 @@ class HMYDesktopClientTests(unittest.TestCase):
             all("secret" not in call[1].get("headers", {}) for call in session.calls)
         )
 
+    def test_desktop_rejects_replayed_herd_page(self):
+        session = FakeSession(
+            [
+                FakeResponse(
+                    {
+                        "code": 200,
+                        "count": 2,
+                        "data": [{"cowId": "1001"}],
+                    }
+                ),
+                FakeResponse(
+                    {
+                        "code": 200,
+                        "count": 2,
+                        "data": [{"cowId": "1001"}],
+                    }
+                ),
+            ]
+        )
+        client = HMYApiClient(
+            auth_token=TEST_CLIENT_CREDENTIAL,
+            proxy_base_url="https://api.example.test",
+            session=session,
+        )
+
+        with self.assertRaisesRegex(ValueError, "重复返回同一分页"):
+            client.get_farm_herd("farm-1", page_size=1)
+
+    def test_desktop_keeps_source_duplicate_cow_rows_in_one_page(self):
+        session = FakeSession(
+            [
+                FakeResponse(
+                    {
+                        "code": 200,
+                        "count": 2,
+                        "data": [
+                            {"id": "record-1", "cowId": "1001"},
+                            {"id": "record-1", "cowId": "1001"},
+                        ],
+                    }
+                )
+            ]
+        )
+        client = HMYApiClient(
+            auth_token=TEST_CLIENT_CREDENTIAL,
+            proxy_base_url="https://api.example.test",
+            session=session,
+        )
+
+        payload = client.get_farm_herd("farm-1", page_size=2000)
+
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(len(payload["data"]), 2)
+
+    def test_desktop_rejects_herd_count_change_during_pagination(self):
+        session = FakeSession(
+            [
+                FakeResponse(
+                    {
+                        "code": 200,
+                        "count": 2,
+                        "data": [{"cowId": "1001"}],
+                    }
+                ),
+                FakeResponse(
+                    {
+                        "code": 200,
+                        "count": 3,
+                        "data": [{"cowId": "1002"}],
+                    }
+                ),
+            ]
+        )
+        client = HMYApiClient(
+            auth_token=TEST_CLIENT_CREDENTIAL,
+            proxy_base_url="https://api.example.test",
+            session=session,
+        )
+
+        with self.assertRaisesRegex(ValueError, "分页期间总数发生变化"):
+            client.get_farm_herd("farm-1", page_size=1)
+
     def test_desktop_maps_forbidden_without_exposing_response(self):
         session = FakeSession([FakeResponse({"detail": "forbidden"}, 403)])
         client = HMYApiClient(
@@ -351,6 +433,33 @@ class HMYDesktopClientTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "siren"):
+            client.get_breeding_records("farm-1", page_size=1)
+
+    def test_desktop_breeding_rejects_replayed_page(self):
+        record = {
+            "farmCode": "farm-1",
+            "farmName": "0101001测试牧场",
+            "cowId": "1001",
+            "siren": "291HO23025",
+            "eventDate": "2026-07-01",
+        }
+        session = FakeSession(
+            [
+                FakeResponse(
+                    {"code": 200, "count": 2, "data": [record]}
+                ),
+                FakeResponse(
+                    {"code": 200, "count": 2, "data": [record]}
+                ),
+            ]
+        )
+        client = HMYApiClient(
+            auth_token=TEST_CLIENT_CREDENTIAL,
+            proxy_base_url="https://api.example.test",
+            session=session,
+        )
+
+        with self.assertRaisesRegex(ValueError, "重复返回同一分页"):
             client.get_breeding_records("farm-1", page_size=1)
 
     def test_yqn_exchange_establishes_current_software_session(self):

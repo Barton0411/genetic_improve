@@ -153,8 +153,22 @@ class FileManager:
         farms: List[Dict],
         data_source: str,
         task_mode: str = "analysis",
+        dataset_selection: Optional[Dict] = None,
     ) -> Path:
         """创建牧场组父项目，并为每个牧场创建独立子项目。"""
+        from core.group_tasks.dataset_plan import (
+            normalize_dataset_selection,
+        )
+
+        normalized_dataset_selection = normalize_dataset_selection(
+            dataset_selection,
+            task_mode=task_mode,
+            has_local_farms=any(
+                str(farm.get("source_kind") or "api") == "local"
+                for farm in farms
+            ),
+        )
+        dataset_selection_explicit = dataset_selection is not None
         timestamp = datetime.now().strftime("%Y%m%d")
         project_path = Path(base_path) / f"牧场组_{timestamp}"
         counter = 1
@@ -223,6 +237,10 @@ class FileManager:
                         "farm_number", ""
                     ),
                     "group_task_id": task_id,
+                    "dataset_selection": normalized_dataset_selection,
+                    "dataset_selection_explicit": (
+                        dataset_selection_explicit
+                    ),
                 },
             )
             tasks.append(
@@ -244,6 +262,10 @@ class FileManager:
                         "source_farm_name": normalized.get(
                             "source_farm_name", name
                         ),
+                        "dataset_selection": normalized_dataset_selection,
+                        "dataset_selection_explicit": (
+                            dataset_selection_explicit
+                        ),
                     },
                     "included_in_summary": True,
                     "required_stages": list(required_stages),
@@ -263,6 +285,8 @@ class FileManager:
             "data_source": data_source,
             "interface_source": data_source,
             "task_mode": task_mode,
+            "dataset_selection": normalized_dataset_selection,
+            "dataset_selection_explicit": dataset_selection_explicit,
             "farms": [FileManager._normalize_farm(f, data_source) for f in farms],
             "group_tasks": tasks,
             "all_tasks_complete": False,
@@ -292,6 +316,187 @@ class FileManager:
         from utils.group_task_store import GroupTaskStore
 
         return GroupTaskStore(database_path)
+
+    @staticmethod
+    def ensure_group_analysis_mode(project_path: Path) -> Dict:
+        """幂等地把只准备数据的牧场组升级为批量分析模式。
+
+        升级只改变任务编排口径：已完成的数据阶段及其产物保持不变，
+        原先按需跳过的 ``analysis`` 和 ``child_excel`` 阶段转为必需且
+        待处理。全部 SQLite 子任务在一个事务内切换；父项目 JSON 使用
+        ``analysis_mode_upgrade`` 标记记录跨文件提交进度，因此进程在
+        SQLite 与 JSON 两次提交之间退出后，再次调用仍可安全完成升级。
+        """
+
+        project_path = Path(project_path)
+        metadata_file = project_path / "project_metadata.json"
+        try:
+            with metadata_file.open("r", encoding="utf-8") as handle:
+                metadata = json.load(handle)
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("牧场组项目描述不存在或不可读") from exc
+        if metadata.get("project_type") != "multi_farm_group":
+            raise ValueError("当前项目不是牧场组项目，不能启动批量分析")
+
+        store = FileManager._group_task_store(project_path)
+        if store is None:
+            raise RuntimeError("牧场组任务状态库不存在，不能启动批量分析")
+
+        from core.group_tasks.dataset_plan import (
+            normalize_dataset_selection,
+        )
+
+        def validate_selection(payload: Dict) -> Dict[str, bool]:
+            tasks = payload.get("group_tasks") or []
+            return normalize_dataset_selection(
+                payload.get("dataset_selection"),
+                task_mode="analysis",
+                has_local_farms=any(
+                    str(task.get("source_kind") or "api") == "local"
+                    for task in tasks
+                ),
+            )
+
+        # 在获取写租约前先做一次无副作用校验，使“只下载配种记录”的
+        # 牧场组得到直接、可展示的错误，同时保证失败不改变任何状态。
+        validate_selection(metadata)
+
+        selection_revision = store.get_selection_revision()
+        lease = store.acquire_run_lease(
+            f"analysis-mode-upgrade:{os.getpid()}:{uuid.uuid4()}",
+            run_kind="group_analysis_mode_upgrade",
+            lease_seconds=120,
+            expected_selection_revision=selection_revision,
+        )
+        if lease is None:
+            raise RuntimeError(
+                "该牧场组正在处理或生成汇总报告，请结束后再启动批量分析"
+            )
+
+        lease_token = str(lease["lease_token"])
+        required_stages = ["data", "analysis", "child_excel"]
+        try:
+            # 获取租约后重新读取，避免根据取得租约前的旧 JSON 做升级。
+            try:
+                with metadata_file.open("r", encoding="utf-8") as handle:
+                    metadata = json.load(handle)
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError("牧场组项目描述不存在或不可读") from exc
+            if metadata.get("project_type") != "multi_farm_group":
+                raise ValueError("当前项目不是牧场组项目，不能启动批量分析")
+            validate_selection(metadata)
+
+            stored_tasks = store.list_tasks(with_stages=True)
+            if not stored_tasks:
+                raise RuntimeError("牧场组没有可分析的牧场子任务")
+
+            store_needs_upgrade = any(
+                not all(
+                    bool(task.get("stages", {}).get(stage, {}).get("required"))
+                    for stage in required_stages
+                )
+                for task in stored_tasks
+            )
+            mode_needs_upgrade = (
+                str(metadata.get("task_mode") or "data_only") != "analysis"
+            )
+            semantic_upgrade = store_needs_upgrade or mode_needs_upgrade
+            raw_tasks = metadata.get("group_tasks") or []
+            completion = store.completion_state()
+            metadata_needs_normalization = (
+                metadata.get("required_stages") != required_stages
+                or any(
+                    task.get("required_stages") != required_stages
+                    for task in raw_tasks
+                )
+                or metadata.get("all_tasks_complete")
+                != completion["is_complete"]
+                or metadata.get("active_task_count")
+                != completion["included_count"]
+                or metadata.get("excluded_task_count")
+                != completion["excluded_count"]
+                or (
+                    metadata.get("analysis_mode_upgrade") or {}
+                ).get("state")
+                != "ready"
+            )
+
+            if semantic_upgrade:
+                now = datetime.now().isoformat()
+                previous_upgrade = metadata.get("analysis_mode_upgrade") or {}
+                metadata["analysis_mode_upgrade"] = {
+                    "state": "in_progress",
+                    "target_mode": "analysis",
+                    "started_at": (
+                        previous_upgrade.get("started_at") or now
+                    ),
+                    "updated_at": now,
+                }
+                FileManager._write_json_atomic(metadata_file, metadata)
+                stored_tasks = store.set_required_stages_for_all(
+                    required_stages,
+                    lease_token=lease_token,
+                )
+                completion = store.completion_state()
+
+            if semantic_upgrade or metadata_needs_normalization:
+                now = datetime.now().isoformat()
+                tasks_by_id = {
+                    str(task.get("task_id") or ""): task
+                    for task in stored_tasks
+                }
+                for raw_task in raw_tasks:
+                    raw_task["required_stages"] = list(required_stages)
+                    current = tasks_by_id.get(
+                        str(raw_task.get("task_id") or "")
+                    )
+                    if current is None:
+                        continue
+                    raw_task["status"] = current.get("status", "pending")
+                    raw_task["progress"] = current.get("progress", 0)
+                    raw_task["error"] = current.get("error", "")
+                    raw_task["updated_at"] = current.get(
+                        "updated_at", now
+                    )
+                    raw_task["stage"] = (
+                        current.get("metadata", {}).get("display_stage")
+                        or current.get("current_stage")
+                        or (
+                            "已完成"
+                            if current.get("status")
+                            in {"completed", "completed_with_warning"}
+                            else "等待处理"
+                        )
+                    )
+
+                metadata["task_mode"] = "analysis"
+                metadata["required_stages"] = list(required_stages)
+                metadata["all_tasks_complete"] = completion["is_complete"]
+                metadata["active_task_count"] = completion[
+                    "included_count"
+                ]
+                metadata["excluded_task_count"] = completion[
+                    "excluded_count"
+                ]
+                metadata["analysis_mode_upgrade"] = {
+                    "state": "ready",
+                    "target_mode": "analysis",
+                    "updated_at": now,
+                }
+                if semantic_upgrade and "group_results" in metadata:
+                    group_results = metadata.get("group_results")
+                    if not isinstance(group_results, dict):
+                        group_results = {}
+                        metadata["group_results"] = group_results
+                    if group_results.get("status") != "stale":
+                        group_results["status"] = "stale"
+                        group_results["stale_at"] = now
+                metadata["updated_at"] = now
+                FileManager._write_json_atomic(metadata_file, metadata)
+
+            return FileManager.load_project_metadata(project_path)
+        finally:
+            store.release_run_lease(lease_token)
 
     @staticmethod
     def _resolve_group_task(metadata: Dict, identifier: str) -> Dict:
@@ -618,6 +823,27 @@ class FileManager:
         project_path = Path(project_path)
         metadata = FileManager.load_project_metadata(project_path)
         task_mode = metadata.get("task_mode", "analysis")
+        from core.group_tasks.dataset_plan import (
+            BREEDING_RAW_RECEIPT,
+            BREEDING_STANDARDIZED_RECEIPT,
+            normalize_dataset_selection,
+            validate_empty_breeding_receipt_pair,
+        )
+
+        dataset_selection = normalize_dataset_selection(
+            metadata.get("dataset_selection"),
+            task_mode=task_mode,
+            has_local_farms=any(
+                str(task.get("source_kind") or "api") == "local"
+                for task in metadata.get("group_tasks", [])
+            ),
+        )
+        dataset_selection_explicit = bool(
+            metadata.get(
+                "dataset_selection_explicit",
+                "dataset_selection" in metadata,
+            )
+        )
         store = FileManager._group_task_store(project_path)
         manifest_invalidated = False
         for task in metadata.get("group_tasks", []):
@@ -708,8 +934,133 @@ class FileManager:
             cow_path = (
                 child_path / "standardized_data" / "processed_cow_data.xlsx"
             )
-            cow_ready = FileManager._valid_xlsx_file(cow_path)
-            if cow_ready and task.get("source_kind") == "local":
+            task_is_local = (
+                str(task.get("source_kind") or "api") == "local"
+            )
+            task_metadata = task.get("metadata") or {}
+            task_selection_explicit = bool(
+                task_metadata.get(
+                    "dataset_selection_explicit",
+                    "dataset_selection" in task_metadata,
+                )
+            )
+            child_metadata = FileManager.load_project_metadata(child_path)
+            child_selection_explicit = bool(
+                child_metadata.get(
+                    "dataset_selection_explicit",
+                    "dataset_selection" in child_metadata,
+                )
+            )
+            selection_consistent = (
+                task_selection_explicit
+                == child_selection_explicit
+                == dataset_selection_explicit
+            )
+            try:
+                task_selection = normalize_dataset_selection(
+                    task_metadata.get("dataset_selection"),
+                    task_mode=task_mode,
+                    has_local_farms=task_is_local,
+                )
+                child_selection = normalize_dataset_selection(
+                    child_metadata.get("dataset_selection"),
+                    task_mode=task_mode,
+                    has_local_farms=task_is_local,
+                )
+                selection_consistent = (
+                    selection_consistent
+                    and task_selection == dataset_selection
+                    and child_selection == dataset_selection
+                )
+            except Exception:
+                selection_consistent = False
+
+            child_farms = child_metadata.get("farms")
+            child_farm_code = ""
+            if isinstance(child_farms, list) and len(child_farms) == 1:
+                child_farm_code = str(
+                    child_farms[0].get("code")
+                    or child_farms[0].get("farmCode")
+                    or ""
+                ).strip()
+            expected_farm_code = str(
+                task.get("farm_code") or ""
+            ).strip()
+            identity_consistent = (
+                child_metadata.get("project_type") == "group_child"
+                and str(
+                    child_metadata.get("group_task_id") or ""
+                ).strip()
+                == str(task.get("task_id") or "").strip()
+                and str(
+                    child_metadata.get("group_farm_code") or ""
+                ).strip()
+                == expected_farm_code
+                and child_farm_code == expected_farm_code
+            )
+
+            raw_cow_path = child_path / "raw_data" / "cow_data.xlsx"
+            if dataset_selection_explicit and dataset_selection["herd"]:
+                cow_ready = (
+                    FileManager._valid_xlsx_file(raw_cow_path)
+                    and FileManager._valid_xlsx_file(cow_path)
+                )
+            elif dataset_selection["herd"] or not dataset_selection_explicit:
+                cow_ready = FileManager._valid_xlsx_file(cow_path)
+            else:
+                cow_ready = True
+            breeding_ready = True
+            if (
+                dataset_selection_explicit
+                and dataset_selection["breeding"]
+            ):
+                raw_breeding_path = (
+                    child_path / "raw_data" / "breeding_records.xlsx"
+                )
+                breeding_path = (
+                    child_path
+                    / "standardized_data"
+                    / "processed_breeding_data.xlsx"
+                )
+                raw_receipt_path = (
+                    child_path / BREEDING_RAW_RECEIPT
+                )
+                receipt_path = (
+                    child_path / BREEDING_STANDARDIZED_RECEIPT
+                )
+                breeding_ready = (
+                    FileManager._valid_xlsx_file(raw_breeding_path)
+                    and FileManager._valid_xlsx_file(breeding_path)
+                )
+                if (
+                    not breeding_ready
+                    and not raw_breeding_path.exists()
+                    and not breeding_path.exists()
+                    and raw_receipt_path.is_file()
+                    and receipt_path.is_file()
+                ):
+                    try:
+                        validate_empty_breeding_receipt_pair(
+                            raw_receipt_path,
+                            receipt_path,
+                            expected_data_source=str(
+                                child_metadata.get("data_source")
+                                or child_metadata.get("interface_source")
+                                or metadata.get("data_source")
+                                or ""
+                            ).strip(),
+                            expected_farm_codes=[expected_farm_code],
+                        )
+                        breeding_ready = True
+                    except Exception:
+                        breeding_ready = False
+            data_ready = (
+                selection_consistent
+                and identity_consistent
+                and cow_ready
+                and breeding_ready
+            )
+            if data_ready and task_is_local:
                 try:
                     from core.data.composite_farm_manager import (
                         validate_local_data_commit,
@@ -719,9 +1070,14 @@ class FileManager:
                         child_path,
                         expected_task_id=task.get("task_id") or None,
                         expected_farm_code=task.get("farm_code") or None,
+                        expected_dataset_selection=(
+                            dataset_selection
+                            if dataset_selection_explicit
+                            else None
+                        ),
                     )
                 except Exception:
-                    cow_ready = False
+                    data_ready = False
             analysis_paths = [
                 child_path
                 / "analysis_results"
@@ -748,7 +1104,7 @@ class FileManager:
                 if FileManager._valid_xlsx_file(path)
             ]
             report_ready = bool(valid_reports)
-            ready = cow_ready and (
+            ready = data_ready and (
                 task_mode != "analysis"
                 or (analysis_ready and report_ready)
             )

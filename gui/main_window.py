@@ -48,6 +48,7 @@ from core.breeding_calc.bull_traits_calc import BullKeyTraitsPage
 from core.breeding_calc.index_page import IndexCalculationPage
 from core.breeding_calc.mated_bull_traits_calc import MatedBullKeyTraitsPage
 from core.api.mating_result_pusher import MatingResultPusher  
+from core.matching.scope_policy import individual_mating_restriction_reason
 # from gui.matching_worker import MatchingWorker  # DEPRECATED - 使用 CycleBasedMatcher 替代
 from gui.recommendation_worker import RecommendationWorker
 from gui.theme_manager import theme_manager
@@ -1346,15 +1347,56 @@ class MainWindow(QMainWindow):
             )
         if hasattr(self, "excel_report_button"):
             self.excel_report_button.setText(
-                "生成牧场组汇总Excel"
+                "自动分析并生成牧场组汇总Excel"
                 if self.is_group_project
                 else "生成Excel报告"
             )
+            self.excel_report_button.setToolTip(
+                (
+                    "按牧场逐一完成全部育种分析和单场Excel，"
+                    "最后生成牧场组汇总Excel"
+                )
+                if self.is_group_project
+                else "生成Excel综合报告（包含9个分析sheet）"
+            )
+        if hasattr(self, "automation_info_label"):
+            self.automation_info_label.setText(
+                (
+                    "按牧场逐一完成全部分析和单场Excel，"
+                    "全部完成后再生成牧场组汇总Excel。"
+                )
+                if self.is_group_project
+                else (
+                    "根据您已完成的分析数据，自动生成综合报告。\n"
+                    "报告将包含系谱分析、关键性状评估、"
+                    "育种指数分布和选配推荐等内容。"
+                )
+            )
+        if hasattr(self, "automation_tip_label"):
+            self.automation_tip_label.setText(
+                (
+                    "提示：左侧分析页面只按当前参数逐场计算，"
+                    "不会生成组汇总；组汇总统一在这里生成。"
+                )
+                if self.is_group_project
+                else (
+                    "提示：生成PPT报告前，请确保已完成以下分析：\n"
+                    "• 系谱识别情况分析\n"
+                    "• 母牛关键性状指数计算\n"
+                    "• 母牛育种指数计算"
+                )
+            )
         if hasattr(self, "ppt_report_button"):
             self.ppt_report_button.setText(
-                "生成牧场组汇报PPT"
+                "牧场组不生成PPT"
                 if self.is_group_project
                 else "生成PPT报告"
+            )
+            self.ppt_report_button.setEnabled(not self.is_group_project)
+            self.ppt_report_button.setToolTip(
+                "牧场组仅生成汇总Excel；PPT请进入单牧场子项目按需生成"
+                if self.is_group_project
+                else ""
             )
         if hasattr(self, "group_task_manage_button"):
             self.group_task_manage_button.setVisible(self.is_group_project)
@@ -1364,18 +1406,37 @@ class MainWindow(QMainWindow):
             / "standardized_data"
             / "processed_breeding_data.xlsx"
         )
+        group_breeding_selected = bool(
+            self.is_group_project
+            and (
+                metadata.get("dataset_selection") or {}
+            ).get("breeding", True)
+        )
+        breeding_available = (
+            group_breeding_selected
+            if self.is_group_project
+            else breeding_file.exists()
+        )
         if hasattr(self, "mated_bull_btn"):
-            self.mated_bull_btn.setEnabled(breeding_file.exists())
+            self.mated_bull_btn.setEnabled(breeding_available)
             self.mated_bull_btn.setToolTip(
-                "" if breeding_file.exists() else "当前项目没有可用的配种记录"
+                ""
+                if breeding_available
+                else "当前项目创建时未选择配种记录"
+                if self.is_group_project
+                else "当前项目没有可用的配种记录"
             )
         inbreeding_mated_btn = getattr(
             getattr(self, "inbreeding_page", None), "mated_bull_btn", None
         )
         if inbreeding_mated_btn is not None:
-            inbreeding_mated_btn.setEnabled(breeding_file.exists())
+            inbreeding_mated_btn.setEnabled(breeding_available)
             inbreeding_mated_btn.setToolTip(
-                "" if breeding_file.exists() else "当前项目没有可用的配种记录"
+                ""
+                if breeding_available
+                else "当前项目创建时未选择配种记录"
+                if self.is_group_project
+                else "当前项目没有可用的配种记录"
             )
         if hasattr(self, "push_result_btn"):
             self.push_result_btn.setEnabled(False)
@@ -1398,14 +1459,21 @@ class MainWindow(QMainWindow):
         返回:
             True 表示允许使用，False 表示被禁用
         """
+        if feature_name == "个体选配":
+            reason = individual_mating_restriction_reason(
+                is_group_project=self.is_group_project,
+                is_merged_project=self.is_merged_project,
+                farm_count=len(self.merged_farms),
+            )
+            if reason:
+                QMessageBox.warning(self, "个体选配仅支持单牧场", reason)
+                return False
+            return True
+
         if not self.is_merged_project:
             return True
 
-        # 慧牧云多牧场已通过“牧场编码+牛号/母号”隔离，允许继续个体选配。
-        if self.project_data_source == "慧牧云" and feature_name == "个体选配":
-            return True
-
-        restricted_features = ["基因组检测数据", "体型外貌数据", "个体选配"]
+        restricted_features = ["基因组检测数据", "体型外貌数据"]
 
         if feature_name in restricted_features:
             QMessageBox.warning(
@@ -1546,6 +1614,292 @@ class MainWindow(QMainWindow):
         )
         return item if ok else None
 
+    @staticmethod
+    def _worker_is_running(worker) -> bool:
+        if worker is None:
+            return False
+        try:
+            return bool(worker.isRunning())
+        except RuntimeError:
+            return False
+
+    def _group_batch_is_running(self) -> bool:
+        return self._worker_is_running(
+            getattr(
+                getattr(self, "farm_selection_page", None),
+                "group_worker",
+                None,
+            )
+        ) or self._worker_is_running(
+            getattr(self, "group_feature_worker", None)
+        )
+
+    def _set_group_feature_dialog_close_mode(
+        self,
+        dialog,
+        *,
+        button_text: str = "关闭",
+    ) -> None:
+        try:
+            dialog.cancel_button.clicked.disconnect()
+        except (TypeError, RuntimeError):
+            pass
+        dialog.cancel_button.setText(button_text)
+        dialog.cancel_button.setEnabled(True)
+        dialog.cancel_button.clicked.connect(dialog.close)
+
+    def _on_group_feature_finished(self, dialog, result: dict) -> None:
+        completed = list(result.get("completed") or [])
+        skipped = list(result.get("skipped") or [])
+        failed = list(result.get("failed") or [])
+        title = result.get("title", "批量分析")
+        interrupted = bool(result.get("interrupted"))
+        paused_for_memory = bool(result.get("paused_for_memory"))
+        dialog.update_progress(100)
+        if interrupted:
+            status_text = "已停止"
+        elif paused_for_memory:
+            status_text = "已暂停"
+        elif not skipped and not failed:
+            status_text = "已完成"
+        else:
+            status_text = "处理完成（有异常）"
+        dialog.title_label.setText(f"{title}（{status_text}）")
+        dialog.set_task_info(
+            f"{title}{status_text}："
+            f"成功 {len(completed)} 个，跳过 {len(skipped)} 个，"
+            f"失败 {len(failed)} 个。"
+        )
+        if skipped:
+            dialog.update_info("跳过说明：")
+            for item in skipped:
+                dialog.update_info(
+                    f"• {item.get('farm_name', '')}："
+                    f"{item.get('message', '')}"
+                )
+        if failed:
+            dialog.update_info("失败说明：")
+            for item in failed:
+                dialog.update_info(
+                    f"• {item.get('farm_name', '')}："
+                    f"{item.get('error', '')}"
+                )
+        dialog.update_info(
+            "本次仅保存各牧场分析结果；未生成单场综合报告或牧场组汇总。"
+            "牧场组汇总请在“自动化生成”中执行。"
+        )
+        self._set_group_feature_dialog_close_mode(
+            dialog,
+            button_text=(
+                "已完成"
+                if status_text == "已完成"
+                else "关闭"
+            ),
+        )
+
+    def _on_group_feature_error(self, dialog, error: str) -> None:
+        dialog.set_task_info("牧场组批量分析未能启动")
+        dialog.update_info(str(error))
+        self._set_group_feature_dialog_close_mode(dialog)
+
+    def start_group_feature_analysis(
+        self,
+        *,
+        operation: str,
+        parameters: dict | None = None,
+        title: str = "",
+    ) -> None:
+        """按当前页面参数逐场运行一项分析，不生成任何汇总 Excel。"""
+        project_path = (
+            Path(self.selected_project_path)
+            if self.selected_project_path
+            else None
+        )
+        if project_path is None or not self.is_group_project:
+            QMessageBox.warning(self, "提示", "请先选择一个牧场组项目。")
+            return
+        if self._group_batch_is_running():
+            QMessageBox.information(
+                self,
+                "牧场组正在处理",
+                "该牧场组已有任务正在运行，请先等待当前任务结束。",
+            )
+            return
+
+        metadata = FileManager.load_project_metadata(project_path)
+        active_tasks = [
+            task
+            for task in metadata.get("group_tasks", [])
+            if task.get("included_in_summary", True)
+        ]
+        if not active_tasks:
+            QMessageBox.warning(
+                self,
+                "没有可分析的牧场",
+                "当前牧场组没有纳入处理范围的牧场。",
+            )
+            return
+
+        selected = metadata.get("dataset_selection") or {}
+        herd_required = operation in {
+            "cow_traits",
+            "cow_index",
+            "cow_self_inbreeding",
+            "mated_inbreeding",
+            "candidate_inbreeding",
+        }
+        breeding_required = operation in {
+            "mated_bull_traits",
+            "mated_inbreeding",
+        }
+        if herd_required and selected.get("herd") is False:
+            QMessageBox.warning(
+                self,
+                "缺少牛群/系谱数据",
+                "创建该牧场组时未选择牛群/系谱数据，不能执行此分析。",
+            )
+            return
+        if breeding_required and selected.get("breeding") is False:
+            QMessageBox.warning(
+                self,
+                "缺少配种记录",
+                "创建该牧场组时未选择配种记录，不能执行此分析。",
+            )
+            return
+
+        parameters = dict(parameters or {})
+        if operation in {"cow_index", "bull_index"}:
+            from core.breeding_calc.index_calculation import IndexCalculation
+
+            weight_name = str(parameters.get("weight_name") or "").strip()
+            weights = IndexCalculation().load_weights()
+            weight_values = weights.get(weight_name)
+            if not isinstance(weight_values, dict) or not weight_values:
+                QMessageBox.warning(
+                    self,
+                    "权重配置不可用",
+                    f"找不到权重配置“{weight_name}”，请重新选择。",
+                )
+                return
+            # 固化数值快照，避免长任务运行期间配置被修改后各牧场口径不同。
+            parameters["weight_values"] = {
+                str(key): float(value)
+                for key, value in weight_values.items()
+                if float(value) != 0
+            }
+
+        try:
+            from core.group_tasks.feature_policy import FEATURE_TITLES
+            from gui.group_feature_analysis_worker import (
+                GroupFeatureAnalysisWorker,
+            )
+
+            display_title = title or FEATURE_TITLES.get(
+                operation, "牧场组批量分析"
+            )
+            dialog = ProgressDialog(self)
+            dialog.setWindowTitle(display_title)
+            dialog.title_label.setText(display_title)
+            dialog.setWindowModality(Qt.WindowModality.WindowModal)
+            dialog.setMinimumWidth(760)
+            dialog.set_task_info(
+                f"准备按当前参数逐场处理 {len(active_tasks)} 个牧场..."
+            )
+            try:
+                dialog.cancel_button.clicked.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            worker = GroupFeatureAnalysisWorker(
+                project_path,
+                operation,
+                parameters,
+            )
+
+            def request_stop():
+                worker.requestInterruption()
+                dialog.cancel_button.setEnabled(False)
+                dialog.cancel_button.setText("正在停止...")
+                dialog.set_task_info(
+                    "将在当前单牧场子进程安全退出后停止；已完成结果会保留。"
+                )
+
+            dialog.cancel_button.setText("停止")
+            dialog.cancel_button.clicked.connect(request_stop)
+            worker.progress.connect(
+                lambda pct, message: (
+                    dialog.update_progress(pct),
+                    dialog.set_task_info(message),
+                )
+            )
+            worker.parallel_start.connect(dialog.show_sub_tasks)
+            worker.sub_task_progress.connect(dialog.update_sub_task)
+            worker.sub_task_done.connect(dialog.complete_sub_task)
+            worker.finished.connect(
+                lambda result: self._on_group_feature_finished(
+                    dialog,
+                    result,
+                )
+            )
+            worker.error.connect(
+                lambda error: self._on_group_feature_error(dialog, error)
+            )
+            self.group_feature_worker = worker
+            self.group_feature_dialog = dialog
+            dialog.show()
+            worker.start()
+        except Exception as exc:
+            logging.exception("启动牧场组页面分析失败")
+            QMessageBox.critical(
+                self,
+                "无法启动批量分析",
+                str(exc),
+            )
+
+    def _start_group_full_report(self) -> None:
+        """自动化生成入口：完整逐场分析、单场 Excel、最终组汇总。"""
+        project_path = (
+            Path(self.selected_project_path)
+            if self.selected_project_path
+            else None
+        )
+        if project_path is None or not self.is_group_project:
+            QMessageBox.warning(self, "提示", "请先选择一个牧场组项目。")
+            return
+        if self._group_batch_is_running():
+            QMessageBox.information(
+                self,
+                "牧场组正在处理",
+                "该牧场组已有任务正在运行，请先等待当前任务结束。",
+            )
+            return
+        metadata = FileManager.load_project_metadata(project_path)
+        active_tasks = [
+            task
+            for task in metadata.get("group_tasks", [])
+            if task.get("included_in_summary", True)
+        ]
+        if not active_tasks:
+            QMessageBox.warning(self, "提示", "当前没有纳入汇总的牧场。")
+            return
+        if (metadata.get("dataset_selection") or {}).get("herd") is False:
+            QMessageBox.warning(
+                self,
+                "缺少牛群/系谱数据",
+                "创建该牧场组时未选择牛群/系谱数据，不能生成育种分析汇总。",
+            )
+            return
+        try:
+            FileManager.ensure_group_analysis_mode(project_path)
+            self._load_project_metadata()
+            self.farm_selection_page.continue_group_project(project_path)
+        except Exception as exc:
+            logging.exception("启动牧场组自动化生成失败")
+            QMessageBox.critical(self, "无法启动自动化生成", str(exc))
+
+    def _start_group_batch_analysis(self, feature_name: str = "") -> None:
+        """兼容旧入口；完整批量与汇总现在只由自动化生成使用。"""
+        self._start_group_full_report()
+
     def on_nav_item_changed(self, index):
         current_item = self.nav_list.item(index)
         if current_item:
@@ -1553,16 +1907,25 @@ class MainWindow(QMainWindow):
 
             if self.is_group_project and text in {
                 "数据上传",
-                "关键育种性状分析",
-                "牛只指数计算排名",
-                "近交系数及隐性基因分析",
                 "个体选配",
             }:
+                if text == "个体选配":
+                    message = individual_mating_restriction_reason(
+                        is_group_project=True,
+                        is_merged_project=False,
+                        farm_count=len(self.merged_farms),
+                    )
+                else:
+                    message = (
+                        "牧场组父项目的数据由各牧场子项目独立保存，"
+                        "不能向父项目直接上传单场数据。\n\n"
+                        "如需补充数据，请在“育种项目管理”中进入对应"
+                        "牧场子项目。"
+                    )
                 QMessageBox.information(
                     self,
                     "牧场组项目",
-                    "牧场组父项目只用于查看子任务和生成最终汇总报告。\n\n"
-                    "请在“育种项目管理”中打开对应牧场子项目后再进行单牧场分析。",
+                    message,
                 )
                 self.content_stack.setCurrentIndex(1)
                 return
@@ -1726,6 +2089,7 @@ class MainWindow(QMainWindow):
         """)
         info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         info_label.setWordWrap(True)
+        self.automation_info_label = info_label
         layout.addWidget(info_label)
 
         # 按钮容器
@@ -1826,6 +2190,7 @@ class MainWindow(QMainWindow):
                 margin-top: 30px;
             }
         """)
+        self.automation_tip_label = tip_label
         tip_label.setWordWrap(True)
         layout.addWidget(tip_label)
 
@@ -3275,6 +3640,8 @@ class MainWindow(QMainWindow):
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
+        if not self._check_merged_project_restriction("个体选配"):
+            return
         
         # 检查必要文件是否存在
         index_file = self.selected_project_path / "analysis_results" / "processed_index_cow_index_scores.xlsx"
@@ -3878,6 +4245,8 @@ class MainWindow(QMainWindow):
         """生成选配推荐按钮点击事件"""
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
+            return
+        if not self._check_merged_project_restriction("个体选配"):
             return
         
         # 检查必要文件是否存在
@@ -4573,6 +4942,8 @@ class MainWindow(QMainWindow):
         if not self.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
+        if not self._check_merged_project_restriction("个体选配"):
+            return
         
         # 检查必要文件是否存在
         report_file = self.selected_project_path / "analysis_results" / "individual_mating_report.xlsx"
@@ -4715,7 +5086,7 @@ class MainWindow(QMainWindow):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("牧场组子任务管理")
-        dialog.resize(1320, 680)
+        dialog.resize(1680, 760)
         layout = QVBoxLayout(dialog)
         summary_label = QLabel()
         summary_label.setWordWrap(True)
@@ -4732,15 +5103,27 @@ class MainWindow(QMainWindow):
             if show_hmy_identity
             else ["牧场编号", "牧场名称"]
         )
+        headers = [
+            "纳入汇总",
+            *identity_headers,
+            "任务状态",
+            "数据",
+            "完整报告分析",
+            "分析明细",
+            "已完成分析",
+            "未完成分析",
+            "按需/不适用",
+            "单场Excel",
+            "进度",
+            "当前阶段",
+            "错误/提示",
+        ]
+        column_indexes = {
+            name: index for index, name in enumerate(headers)
+        }
         table = QTableWidget()
-        table.setColumnCount(8 + len(identity_headers))
-        table.setHorizontalHeaderLabels(
-            [
-                "纳入汇总", *identity_headers, "任务状态",
-                "数据", "分析", "单场Excel", "进度", "当前阶段",
-                "错误/提示",
-            ]
-        )
+        table.setColumnCount(len(headers))
+        table.setHorizontalHeaderLabels(headers)
         table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
         )
@@ -4750,14 +5133,27 @@ class MainWindow(QMainWindow):
         table.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers
         )
-        table.horizontalHeader().setSectionResizeMode(
-            len(identity_headers), QHeaderView.ResizeMode.Stretch
+        table.setWordWrap(True)
+        table.verticalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents
         )
         table.horizontalHeader().setSectionResizeMode(
-            6 + len(identity_headers), QHeaderView.ResizeMode.Stretch
+            QHeaderView.ResizeMode.ResizeToContents
         )
+        for name in (
+            "已完成分析",
+            "未完成分析",
+            "按需/不适用",
+        ):
+            column = column_indexes[name]
+            table.horizontalHeader().setSectionResizeMode(
+                column,
+                QHeaderView.ResizeMode.Interactive,
+            )
+            table.setColumnWidth(column, 230)
         table.horizontalHeader().setSectionResizeMode(
-            7 + len(identity_headers), QHeaderView.ResizeMode.Stretch
+            column_indexes["错误/提示"],
+            QHeaderView.ResizeMode.Stretch,
         )
         layout.addWidget(table, 1)
 
@@ -4794,6 +5190,12 @@ class MainWindow(QMainWindow):
                 FileManager.refresh_group_task_statuses(
                     self.selected_project_path
                 )
+            from core.group_tasks.analysis_status import (
+                analysis_status_tooltip,
+                format_analysis_status_cells,
+                resolve_child_analysis_status,
+            )
+
             metadata = FileManager.load_project_metadata(
                 self.selected_project_path
             )
@@ -4807,6 +5209,10 @@ class MainWindow(QMainWindow):
                 "analysis": 0,
                 "child_excel": 0,
             }
+            analysis_detail_completed = 0
+            analysis_detail_applicable = 0
+            analysis_detail_pending = 0
+            analysis_detail_not_applicable = 0
             for row, task in enumerate(tasks):
                 included = task.get("included_in_summary", True)
                 if included:
@@ -4823,6 +5229,81 @@ class MainWindow(QMainWindow):
                             "completed_with_warning",
                         }:
                             stage_completed[stage_name] += 1
+                child_path = (
+                    self.selected_project_path
+                    / task.get("relative_path", "")
+                )
+                task_selection = (
+                    (task.get("metadata") or {}).get("dataset_selection")
+                    or metadata.get("dataset_selection")
+                )
+                try:
+                    inventory = resolve_child_analysis_status(
+                        child_path,
+                        expected_task_id=str(task.get("task_id") or ""),
+                        expected_farm_code=str(
+                            task.get("farm_code") or ""
+                        ),
+                        dataset_selection=task_selection,
+                        verification="stat",
+                    )
+                    analysis_cells = format_analysis_status_cells(
+                        inventory
+                    )
+                    analysis_tooltips = {
+                        "已完成分析": analysis_status_tooltip(
+                            inventory["completed"],
+                            empty="尚无通过清单校验的分析结果。",
+                        ),
+                        "未完成分析": analysis_status_tooltip(
+                            inventory["pending"],
+                            empty="当前有数据可分析的项目均已完成。",
+                        ),
+                        "按需/不适用": analysis_status_tooltip(
+                            inventory["not_applicable"],
+                            empty="没有按需或不适用的分析项目。",
+                        ),
+                    }
+                except Exception as exc:
+                    logging.warning(
+                        "读取牧场组逐项分析状态失败：%s",
+                        exc,
+                    )
+                    inventory = {
+                        "completed": [],
+                        "pending": [],
+                        "not_applicable": [],
+                        "completed_count": 0,
+                        "applicable_count": 0,
+                        "pending_count": 0,
+                        "not_applicable_count": 0,
+                    }
+                    analysis_cells = {
+                        "progress": "检查失败",
+                        "completed": "暂无",
+                        "pending": "状态检查失败",
+                        "not_applicable": "—",
+                    }
+                    analysis_tooltips = {
+                        "已完成分析": "逐项分析状态检查失败。",
+                        "未完成分析": (
+                            f"无法读取逐项分析状态：{type(exc).__name__}"
+                        ),
+                        "按需/不适用": "请点击“重新检查子项目结果”后重试。",
+                    }
+                if included:
+                    analysis_detail_completed += int(
+                        inventory.get("completed_count", 0) or 0
+                    )
+                    analysis_detail_applicable += int(
+                        inventory.get("applicable_count", 0) or 0
+                    )
+                    analysis_detail_pending += int(
+                        inventory.get("pending_count", 0) or 0
+                    )
+                    analysis_detail_not_applicable += int(
+                        inventory.get("not_applicable_count", 0) or 0
+                    )
                 identity_values = (
                     [
                         task.get("api_farmcode", ""),
@@ -4854,6 +5335,10 @@ class MainWindow(QMainWindow):
                         .get("status", ""),
                         "",
                     ),
+                    analysis_cells["progress"],
+                    analysis_cells["completed"],
+                    analysis_cells["pending"],
+                    analysis_cells["not_applicable"],
                     stage_status_labels.get(
                         task.get("stages", {})
                         .get("child_excel", {})
@@ -4870,15 +5355,70 @@ class MainWindow(QMainWindow):
                         Qt.ItemDataRole.UserRole,
                         task.get("task_id"),
                     )
+                    header = headers[column]
+                    if header in analysis_tooltips:
+                        item.setToolTip(analysis_tooltips[header])
+                        item.setTextAlignment(
+                            Qt.AlignmentFlag.AlignLeft
+                            | Qt.AlignmentFlag.AlignTop
+                        )
+                    elif header == "分析明细":
+                        item.setToolTip(
+                            "已完成数/当前有数据可执行的分析数。"
+                            "页面单项分析完成不等于完整报告分析阶段已提交。"
+                        )
+                    if (
+                        header == "已完成分析"
+                        and inventory.get("completed")
+                    ):
+                        item.setForeground(QBrush(QColor("#16803C")))
+                    elif (
+                        header == "未完成分析"
+                        and inventory.get("pending")
+                    ):
+                        has_required = any(
+                            entry.get("required_for_report")
+                            for entry in inventory["pending"]
+                        )
+                        item.setForeground(
+                            QBrush(
+                                QColor(
+                                    "#B42318"
+                                    if has_required
+                                    else "#B45309"
+                                )
+                            )
+                        )
+                    elif header == "按需/不适用":
+                        item.setForeground(QBrush(QColor("#667085")))
                     table.setItem(row, column, item)
+            table.resizeRowsToContents()
             summary_label.setText(
                 f"纳入汇总 {active} 个｜数据完成 "
-                f"{stage_completed['data']}/{active}｜单场分析 "
+                f"{stage_completed['data']}/{active}｜完整报告分析 "
                 f"{stage_completed['analysis']}/{active}｜单场Excel "
-                f"{stage_completed['child_excel']}/{active}。\n"
+                f"{stage_completed['child_excel']}/{active}｜"
+                f"分析明细完成 {analysis_detail_completed}/"
+                f"{analysis_detail_applicable}"
+                f"（未完成 {analysis_detail_pending}，按需/不适用 "
+                f"{analysis_detail_not_applicable}）。\n"
                 f"本次模式任务完成 {completed}/{active}；排除只影响最终汇总，"
-                f"不删除子项目或已有结果。"
+                f"不删除子项目或已有结果。页面单项完成不等于完整报告分析"
+                f"已提交；按需/不适用项目不阻塞最终汇总。"
             )
+            task_mode = str(metadata.get("task_mode") or "data_only")
+            continue_button.setText(
+                "继续自动化生成（补齐并汇总）"
+                if task_mode == "analysis"
+                else "继续数据准备任务"
+            )
+            continue_button.setToolTip(
+                "逐场补齐完整报告分析和单场 Excel，"
+                "全部有效后生成牧场组汇总 Excel。"
+                if task_mode == "analysis"
+                else "继续完成尚未结束的数据下载与标准化任务。"
+            )
+            continue_button.setEnabled(bool(active))
             self._load_project_metadata()
 
         buttons = QHBoxLayout()
@@ -4992,28 +5532,13 @@ class MainWindow(QMainWindow):
             return
 
         if self.is_group_project:
-            metadata = FileManager.load_project_metadata(self.selected_project_path)
-            readiness = FileManager.get_group_summary_readiness(
-                self.selected_project_path
+            QMessageBox.information(
+                self,
+                "牧场组不生成PPT",
+                "牧场组仅生成育种分析汇总Excel，不生成PPT。\n\n"
+                "如需PPT，请进入对应的单牧场子项目按需生成。",
             )
-            if not readiness.get("ready"):
-                QMessageBox.warning(
-                    self,
-                    "最终汇总尚未就绪",
-                    f"当前有 {readiness.get('ready_count', 0)}/"
-                    f"{readiness.get('included_count', 0)} 个纳入牧场"
-                    "具备核心分析结果和单场Excel。\n\n"
-                    "请在“管理牧场子任务”中进入未完成子项目继续计算，"
-                    "再重新检查结果。",
-                )
-                return
-            if metadata.get("group_results", {}).get("status") == "stale":
-                QMessageBox.warning(
-                    self,
-                    "汇总结果已失效",
-                    "牧场任务或汇总范围已发生变化，请先重新生成牧场组汇总Excel。",
-                )
-                return
+            return
 
         # 情况1: PPT已生成完成
         if self.ppt_output_path and Path(self.ppt_output_path).exists():
@@ -5175,22 +5700,10 @@ class MainWindow(QMainWindow):
                 self.selected_project_path
             )
             if not readiness.get("ready"):
-                examples = []
-                for item in readiness.get("missing_tasks", [])[:3]:
-                    name = item.get("farm_name") or item.get("farm_code")
-                    examples.append(
-                        f"• {name}：{'、'.join(item.get('missing', [])[:3])}"
-                    )
-                details = "\n".join(examples)
-                QMessageBox.warning(
-                    self,
-                    "最终汇总尚未就绪",
-                    f"当前有 {readiness.get('ready_count', 0)}/"
-                    f"{readiness.get('included_count', 0)} 个纳入牧场"
-                    "具备核心分析结果和单场Excel。\n\n"
-                    "数据准备完成不等于汇总就绪；不生成阶段性汇总Excel。"
-                    + (f"\n\n{details}" if details else ""),
-                )
+                # “自动化生成”是牧场组完整流程的唯一启动入口：
+                # 先逐场完成全套分析和单场 Excel，全部成功后由组任务
+                # Worker 自动生成最终汇总。分析参数页不会触发该汇总。
+                self._start_group_full_report()
                 return
         else:
             # 单牧场报告沿用对比牧场确认。
@@ -5269,7 +5782,7 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     QMessageBox.warning(self, "打开失败", f"无法打开文件: {str(e)}")
 
-            # 单牧场沿用自动生成PPT；牧场组PPT由用户按需点击生成。
+            # PPT 只按单牧场生成；牧场组仅保留汇总 Excel。
             if not self.is_group_project:
                 self._start_ppt_background_generation()
         else:

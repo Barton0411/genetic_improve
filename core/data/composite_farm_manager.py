@@ -21,6 +21,13 @@ from core.data.uploader import (
     upload_and_standardize_breeding_data,
     upload_and_standardize_cow_data,
 )
+from core.group_tasks.dataset_plan import (
+    BREEDING_RAW_RECEIPT,
+    BREEDING_STANDARDIZED_RECEIPT,
+    normalize_dataset_selection,
+    validate_empty_breeding_receipt_pair,
+    write_empty_breeding_receipts,
+)
 from utils.file_manager import FileManager
 
 
@@ -42,8 +49,20 @@ _COW_READ_DTYPES = {
     "sire": str,
     "mgs": str,
     "mmgs": str,
+    "API farmcode": str,
+    "farm_code": str,
+    "牧场编号": str,
+    "牧场名称": str,
 }
-_BREEDING_READ_DTYPES = {"耳号": str, "父号": str, "冻精编号": str}
+_BREEDING_READ_DTYPES = {
+    "耳号": str,
+    "父号": str,
+    "冻精编号": str,
+    "API farmcode": str,
+    "farm_code": str,
+    "牧场编号": str,
+    "牧场名称": str,
+}
 _FARM_CODE_ALIASES = (
     "API farmcode",
     "牧场编号",
@@ -206,6 +225,7 @@ def _validate_bundle_directory(
     *,
     expected_task_id: Optional[str] = None,
     expected_farm_code: Optional[str] = None,
+    dataset_selection: Optional[Dict] = None,
 ) -> Dict:
     bundle_path = Path(bundle_path)
     manifest_path = bundle_path / "manifest.json"
@@ -234,6 +254,14 @@ def _validate_bundle_directory(
     if expected_farm_code and farm_code != str(expected_farm_code):
         raise ValueError("本地输入包牧场编号与当前子任务不一致")
 
+    selection = (
+        normalize_dataset_selection(
+            dataset_selection,
+            has_local_farms=True,
+        )
+        if dataset_selection is not None
+        else None
+    )
     entries = manifest.get("files")
     if not isinstance(entries, list) or not entries:
         raise ValueError("本地输入包 manifest 没有文件清单")
@@ -246,7 +274,14 @@ def _validate_bundle_directory(
         if not relative or relative in seen_paths:
             raise ValueError("本地输入包包含空路径或重复路径")
         seen_paths.add(relative)
-        roles.add(str(entry.get("role") or ""))
+        role = str(entry.get("role") or "")
+        roles.add(role)
+        if (
+            selection is not None
+            and not selection["breeding"]
+            and role.startswith("breeding_")
+        ):
+            continue
         member = _safe_bundle_member(bundle_path, relative)
         if member.is_symlink() or not member.is_file():
             raise FileNotFoundError(f"本地输入包文件缺失：{relative}")
@@ -262,7 +297,9 @@ def _validate_bundle_directory(
         )
 
     has_breeding = bool(manifest.get("has_breeding_records"))
-    if has_breeding:
+    if has_breeding and (
+        selection is None or selection["breeding"]
+    ):
         missing_breeding = set(_LOCAL_BUNDLE_BREEDING_PATHS) - seen_paths
         if missing_breeding:
             raise FileNotFoundError(
@@ -272,7 +309,11 @@ def _validate_bundle_directory(
     if manifest.get("original_source_preserved"):
         if "cow_original" not in roles:
             raise FileNotFoundError("本地输入包缺少原始母牛文件")
-        if has_breeding and "breeding_original" not in roles:
+        if (
+            has_breeding
+            and (selection is None or selection["breeding"])
+            and "breeding_original" not in roles
+        ):
             raise FileNotFoundError("本地输入包缺少原始配种记录文件")
 
     manifest["manifest_sha256"] = actual_digest
@@ -439,7 +480,7 @@ def stage_local_farm(
             "name": farm_name,
             "cow_count": len(cow_df),
             "breeding_count": breeding_count,
-            "has_breeding_records": bool(breeding_file),
+            "has_breeding_records": breeding_count > 0,
             "source_kind": "local",
             "source_system": source_system,
             "staging_path": str(staging_path),
@@ -649,6 +690,7 @@ def validate_local_input_bundle(
     *,
     expected_task_id: Optional[str] = None,
     expected_farm_code: Optional[str] = None,
+    dataset_selection: Optional[Dict] = None,
 ) -> Dict:
     """完整校验子项目本地输入包并返回 manifest。"""
     bundle_path = Path(project_path) / LOCAL_INPUT_BUNDLE_RELATIVE_PATH
@@ -656,14 +698,25 @@ def validate_local_input_bundle(
         bundle_path,
         expected_task_id=expected_task_id,
         expected_farm_code=expected_farm_code,
+        dataset_selection=dataset_selection,
     )
 
 
-def _local_data_output_entries(project_path: Path) -> List[Dict]:
-    output_paths = (
-        Path("standardized_data") / "processed_cow_data.xlsx",
-        Path("standardized_data") / "processed_breeding_data.xlsx",
-    )
+def _local_data_output_entries(
+    project_path: Path,
+    dataset_selection: Optional[Dict] = None,
+) -> List[Dict]:
+    selection = normalize_dataset_selection(dataset_selection)
+    output_paths = []
+    if selection["herd"]:
+        output_paths.append(
+            Path("standardized_data") / "processed_cow_data.xlsx"
+        )
+    if selection["breeding"]:
+        output_paths.append(
+            Path("standardized_data")
+            / "processed_breeding_data.xlsx"
+        )
     entries = []
     for relative in output_paths:
         path = project_path / relative
@@ -690,6 +743,7 @@ def validate_local_data_commit(
     expected_input_manifest_sha256: Optional[str] = None,
     expected_farm_code: Optional[str] = None,
     expected_task_id: Optional[str] = None,
+    expected_dataset_selection: Optional[Dict] = None,
 ) -> Dict:
     """校验本地数据阶段提交标记及其全部输出。"""
     project_path = Path(project_path)
@@ -718,6 +772,16 @@ def validate_local_data_commit(
         and input_digest != str(expected_input_manifest_sha256)
     ):
         raise ValueError("本地数据阶段引用的输入包摘要不一致")
+    commit_selection = normalize_dataset_selection(
+        commit.get("dataset_selection")
+    )
+    if expected_dataset_selection is not None:
+        expected_selection = normalize_dataset_selection(
+            expected_dataset_selection,
+            has_local_farms=True,
+        )
+        if commit_selection != expected_selection:
+            raise ValueError("本地数据阶段的数据集选择不一致")
 
     bundle_path = project_path / LOCAL_INPUT_BUNDLE_RELATIVE_PATH
     if bundle_path.exists():
@@ -725,6 +789,7 @@ def validate_local_data_commit(
             project_path,
             expected_task_id=expected_task_id,
             expected_farm_code=expected_farm_code,
+            dataset_selection=commit_selection,
         )
         if input_digest != bundle["manifest_sha256"]:
             raise ValueError("本地数据阶段未引用当前输入包")
@@ -733,9 +798,11 @@ def validate_local_data_commit(
             != str(bundle.get("task_id") or "")
         ):
             raise ValueError("本地数据阶段与输入包 task_id 不一致")
-        if bool(commit.get("has_breeding_records")) != bool(
-            bundle.get("has_breeding_records")
-        ):
+        selected_bundle_breeding = bool(
+            commit_selection["breeding"]
+            and int(bundle.get("breeding_count") or 0) > 0
+        )
+        if bool(commit.get("has_breeding_records")) != selected_bundle_breeding:
             raise ValueError("本地数据阶段与输入包的配种记录状态不一致")
 
     entries = commit.get("files")
@@ -759,10 +826,11 @@ def validate_local_data_commit(
         if _sha256_file(member) != str(entry.get("sha256") or "").lower():
             raise ValueError(f"本地数据阶段输出摘要不一致：{relative}")
 
-    if "cow_standardized" not in roles:
+    if commit_selection["herd"] and "cow_standardized" not in roles:
         raise FileNotFoundError("本地数据阶段缺少母牛标准化输出")
     if (
-        commit.get("has_breeding_records")
+        commit_selection["breeding"]
+        and commit.get("has_breeding_records")
         and "breeding_standardized" not in roles
     ):
         raise FileNotFoundError("本地数据阶段缺少配种记录标准化输出")
@@ -774,14 +842,25 @@ def materialize_single_local_project(
     farm: Dict,
     data_source: str,
     progress_callback: Optional[Callable] = None,
+    dataset_selection: Optional[Dict] = None,
 ) -> Dict:
     """把已暂存的本地牧场复制为一个独立、可继续计算的子项目。"""
     project_path = Path(project_path)
+    existing_metadata = FileManager.load_project_metadata(project_path)
     code = str(farm.get("code") or farm.get("farmCode") or "").strip()
     name = str(farm.get("name") or code).strip()
     group_task_id = str(
         farm.get("task_id") or farm.get("group_task_id") or ""
     ).strip()
+    selection = normalize_dataset_selection(
+        dataset_selection,
+        has_local_farms=True,
+    )
+    _validate_existing_dataset_selection(
+        existing_metadata,
+        selection,
+        has_local_farms=True,
+    )
     bundle_path = project_path / LOCAL_INPUT_BUNDLE_RELATIVE_PATH
     input_manifest = None
     if bundle_path.exists():
@@ -789,6 +868,7 @@ def materialize_single_local_project(
             project_path,
             expected_task_id=group_task_id or None,
             expected_farm_code=code or None,
+            dataset_selection=selection,
         )
         source_root = bundle_path
     else:
@@ -801,11 +881,12 @@ def materialize_single_local_project(
     breeding_source = (
         source_root / "standardized_data" / "processed_breeding_data.xlsx"
     )
-    has_breeding_records = bool(
+    source_has_breeding_records = bool(
         input_manifest.get("has_breeding_records")
         if input_manifest is not None
         else farm.get("has_breeding_records") or breeding_source.exists()
     )
+    has_breeding_records = False
 
     _emit(progress_callback, 5, "正在复制本地牧场原始文件...")
     raw_target = project_path / "raw_data"
@@ -816,7 +897,10 @@ def materialize_single_local_project(
     if commit_path.exists():
         commit_path.unlink()
 
-    for filename in ("cow_data.xlsx", "breeding_records.xlsx"):
+    selected_raw_files = ["cow_data.xlsx"]
+    if selection["breeding"]:
+        selected_raw_files.append("breeding_records.xlsx")
+    for filename in selected_raw_files:
         source = source_root / "raw_data" / filename
         if source.exists():
             _copy_file_atomic(source, raw_target / filename)
@@ -824,6 +908,10 @@ def materialize_single_local_project(
             stale_target = raw_target / filename
             if stale_target.exists():
                 stale_target.unlink()
+    if not selection["breeding"]:
+        stale_breeding_raw = raw_target / "breeding_records.xlsx"
+        if stale_breeding_raw.exists():
+            stale_breeding_raw.unlink()
 
     _emit(progress_callback, 30, "正在写入牧场归属信息...")
     cow_source = source_root / "standardized_data" / "processed_cow_data.xlsx"
@@ -845,11 +933,15 @@ def materialize_single_local_project(
     )
 
     breeding_count = 0
-    if has_breeding_records and not breeding_source.is_file():
+    if (
+        selection["breeding"]
+        and source_has_breeding_records
+        and not breeding_source.is_file()
+    ):
         raise FileNotFoundError(
             "本地牧场声明含配种记录，但缺少标准化配种记录"
         )
-    if breeding_source.exists():
+    if selection["breeding"] and breeding_source.exists():
         _emit(progress_callback, 70, "正在复制并标记配种记录...")
         breeding_frame = _read_excel(breeding_source, _BREEDING_READ_DTYPES)
         breeding_frame["raw_cow_id"] = breeding_frame["耳号"].apply(_clean_id)
@@ -861,17 +953,46 @@ def materialize_single_local_project(
         breeding_frame["source_system"] = farm.get(
             "source_system", data_source
         )
-        _atomic_write_excel(
-            breeding_frame,
-            standardized_target / "processed_breeding_data.xlsx",
-        )
         breeding_count = len(breeding_frame)
+        if breeding_count:
+            _atomic_write_excel(
+                breeding_frame,
+                standardized_target / "processed_breeding_data.xlsx",
+            )
+            has_breeding_records = True
+            for receipt in (
+                project_path / BREEDING_RAW_RECEIPT,
+                project_path / BREEDING_STANDARDIZED_RECEIPT,
+            ):
+                receipt.unlink(missing_ok=True)
+        else:
+            (
+                standardized_target
+                / "processed_breeding_data.xlsx"
+            ).unlink(missing_ok=True)
+            write_empty_breeding_receipts(
+                project_path,
+                data_source=data_source,
+                farms=[farm],
+            )
     else:
         stale_breeding_output = (
             standardized_target / "processed_breeding_data.xlsx"
         )
         if stale_breeding_output.exists():
             stale_breeding_output.unlink()
+        if selection["breeding"]:
+            write_empty_breeding_receipts(
+                project_path,
+                data_source=data_source,
+                farms=[farm],
+            )
+        else:
+            for receipt in (
+                project_path / BREEDING_RAW_RECEIPT,
+                project_path / BREEDING_STANDARDIZED_RECEIPT,
+            ):
+                receipt.unlink(missing_ok=True)
 
     normalized = dict(farm)
     normalized["code"] = code
@@ -898,6 +1019,13 @@ def materialize_single_local_project(
             ),
             "manifest_sha256": input_manifest_sha256,
         },
+        "dataset_selection": selection,
+        "dataset_selection_explicit": bool(
+            existing_metadata.get(
+                "dataset_selection_explicit",
+                "dataset_selection" in existing_metadata,
+            )
+        ),
     }
     FileManager.save_project_metadata(
         project_path,
@@ -907,7 +1035,10 @@ def materialize_single_local_project(
         extra=metadata_extra,
     )
 
-    output_entries = _local_data_output_entries(project_path)
+    output_entries = _local_data_output_entries(
+        project_path,
+        selection,
+    )
     data_commit = {
         "schema_version": LOCAL_DATA_COMMIT_SCHEMA_VERSION,
         "completed_at": _utc_now(),
@@ -916,6 +1047,7 @@ def materialize_single_local_project(
         "farm_name": name,
         "input_manifest_sha256": input_manifest_sha256,
         "has_breeding_records": has_breeding_records,
+        "dataset_selection": selection,
         "cow_count": len(cow_frame),
         "breeding_count": breeding_count,
         "files": output_entries,
@@ -926,6 +1058,7 @@ def materialize_single_local_project(
         expected_input_manifest_sha256=(
             input_manifest_sha256 or None
         ),
+        expected_dataset_selection=selection,
         expected_farm_code=code or None,
         expected_task_id=group_task_id or None,
     )
@@ -1016,36 +1149,56 @@ def _annotate_interface_cows(
         for farm in interface_farms
     }
 
+    code_columns = (
+        ("API farmcode", "farm_code")
+        if data_source == "慧牧云"
+        else ("API farmcode", "farm_code", "牧场编号")
+    )
     existing_code_column = next(
         (
             column
-            for column in ("API farmcode", "farm_code", "牧场编号")
+            for column in code_columns
             if column in result.columns
         ),
         None,
     )
     if existing_code_column:
         result["farm_code"] = result[existing_code_column].apply(_clean_id)
-    elif ids_are_prefixed:
-        result["farm_code"] = result["cow_id"].apply(
-            lambda value: _match_farm_code(value, codes)
-        )
-    elif len(interface_farms) == 1:
-        result["farm_code"] = codes[0]
     else:
-        raise ValueError("多牧场接口数据缺少牧场归属，无法安全合并")
+        result["farm_code"] = ""
 
     invalid_code_mask = ~result["farm_code"].isin(codes)
+    if (
+        data_source == "慧牧云"
+        and existing_code_column
+        and (result["farm_code"].ne("") & invalid_code_mask).any()
+    ):
+        missing = int(
+            (result["farm_code"].ne("") & invalid_code_mask).sum()
+        )
+        raise ValueError(
+            f"有 {missing} 条接口母牛记录的 API farmcode "
+            "与当前牧场不一致"
+        )
     if invalid_code_mask.any():
         if ids_are_prefixed:
             inferred_codes = result.loc[invalid_code_mask, "cow_id"].apply(
                 lambda value: _match_farm_code(value, codes)
             )
-            result.loc[invalid_code_mask, "farm_code"] = inferred_codes
+            inferred_mask = inferred_codes.ne("")
+            result.loc[
+                inferred_codes.index[inferred_mask], "farm_code"
+            ] = inferred_codes[inferred_mask]
+        invalid_code_mask = ~result["farm_code"].isin(codes)
+    if invalid_code_mask.any() and len(interface_farms) == 1:
+        result.loc[invalid_code_mask, "farm_code"] = codes[0]
         invalid_code_mask = ~result["farm_code"].isin(codes)
     if invalid_code_mask.any():
         missing = int(invalid_code_mask.sum())
-        raise ValueError(f"有 {missing} 条接口母牛记录无法识别所属牧场")
+        raise ValueError(
+            f"有 {missing} 条接口母牛记录无法识别所属牧场；"
+            "多牧场数据必须保留 API farmcode"
+        )
 
     if data_source == "慧牧云":
         result["API farmcode"] = result["farm_code"]
@@ -1134,35 +1287,55 @@ def _annotate_interface_breeding(
         str(farm.get("code", "")): _hmy_farm_identity(farm)
         for farm in interface_farms
     }
+    code_columns = (
+        ("API farmcode", "farm_code")
+        if data_source == "慧牧云"
+        else ("API farmcode", "farm_code", "牧场编号")
+    )
     existing_code_column = next(
         (
             column
-            for column in ("API farmcode", "farm_code", "牧场编号")
+            for column in code_columns
             if column in result.columns
         ),
         None,
     )
     if existing_code_column:
         result["farm_code"] = result[existing_code_column].apply(_clean_id)
-    elif ids_are_prefixed:
-        result["farm_code"] = result["耳号"].apply(
-            lambda value: _match_farm_code(value, codes)
-        )
-    elif len(interface_farms) == 1:
-        result["farm_code"] = codes[0]
     else:
-        raise ValueError("多牧场接口配种记录缺少牧场归属")
+        result["farm_code"] = ""
 
     invalid_code_mask = ~result["farm_code"].isin(codes)
+    if (
+        data_source == "慧牧云"
+        and existing_code_column
+        and (result["farm_code"].ne("") & invalid_code_mask).any()
+    ):
+        missing = int(
+            (result["farm_code"].ne("") & invalid_code_mask).sum()
+        )
+        raise ValueError(
+            f"有 {missing} 条接口配种记录的 API farmcode "
+            "与当前牧场不一致"
+        )
     if invalid_code_mask.any() and ids_are_prefixed:
         inferred_codes = result.loc[invalid_code_mask, "耳号"].apply(
             lambda value: _match_farm_code(value, codes)
         )
-        result.loc[invalid_code_mask, "farm_code"] = inferred_codes
+        inferred_mask = inferred_codes.ne("")
+        result.loc[
+            inferred_codes.index[inferred_mask], "farm_code"
+        ] = inferred_codes[inferred_mask]
+        invalid_code_mask = ~result["farm_code"].isin(codes)
+    if invalid_code_mask.any() and len(interface_farms) == 1:
+        result.loc[invalid_code_mask, "farm_code"] = codes[0]
         invalid_code_mask = ~result["farm_code"].isin(codes)
     if invalid_code_mask.any():
         missing = int(invalid_code_mask.sum())
-        raise ValueError(f"有 {missing} 条接口配种记录无法识别所属牧场")
+        raise ValueError(
+            f"有 {missing} 条接口配种记录无法识别所属牧场；"
+            "多牧场数据必须保留 API farmcode"
+        )
     if data_source == "慧牧云":
         result["API farmcode"] = result["farm_code"]
         mapped_identities = result["farm_code"].map(hmy_identities)
@@ -1216,14 +1389,74 @@ def _prepare_local_breeding(farm: Dict, valid_cow_ids: set) -> Optional[pd.DataF
     return frame
 
 
-def _copy_local_raw_files(project_path: Path, farm: Dict) -> None:
+def _copy_local_raw_files(
+    project_path: Path,
+    farm: Dict,
+    dataset_selection: Optional[Dict] = None,
+) -> None:
+    selection = normalize_dataset_selection(
+        dataset_selection,
+        has_local_farms=True,
+    )
     staging_path = Path(farm["staging_path"])
     target = project_path / "raw_data" / "farms" / str(farm["code"])
     target.mkdir(parents=True, exist_ok=True)
-    for filename in ("cow_data.xlsx", "breeding_records.xlsx"):
+    filenames = ["cow_data.xlsx"]
+    if selection["breeding"]:
+        filenames.append("breeding_records.xlsx")
+    for filename in filenames:
         source = staging_path / "raw_data" / filename
         if source.exists():
             shutil.copy2(source, target / filename)
+
+
+def _group_child_metadata_extra(
+    existing_metadata: Dict,
+    dataset_selection: Dict,
+) -> Optional[Dict]:
+    if existing_metadata.get("project_type") != "group_child":
+        return None
+    extra = {
+        key: existing_metadata.get(key)
+        for key in (
+            "parent_group",
+            "group_farm_code",
+            "group_api_farmcode",
+            "group_farm_number",
+            "group_task_id",
+            "created_at",
+            "dataset_selection_explicit",
+        )
+        if existing_metadata.get(key) not in (None, "")
+    }
+    extra["dataset_selection"] = dict(dataset_selection)
+    return extra
+
+
+def _validate_existing_dataset_selection(
+    existing_metadata: Dict,
+    dataset_selection: Dict,
+    *,
+    has_local_farms: bool = False,
+) -> None:
+    """显式创建的组子项目不得在低层写入时改变数据选择。"""
+
+    if existing_metadata.get("project_type") != "group_child":
+        return
+    explicit = bool(
+        existing_metadata.get(
+            "dataset_selection_explicit",
+            "dataset_selection" in existing_metadata,
+        )
+    )
+    if not explicit:
+        return
+    persisted = normalize_dataset_selection(
+        existing_metadata.get("dataset_selection"),
+        has_local_farms=has_local_farms,
+    )
+    if persisted != dataset_selection:
+        raise ValueError("本次数据集选择与子项目创建时不一致")
 
 
 def finalize_composite_project(
@@ -1233,9 +1466,22 @@ def finalize_composite_project(
     data_source: str,
     ids_are_prefixed: bool,
     progress_callback: Optional[Callable] = None,
+    dataset_selection: Optional[Dict] = None,
 ) -> List[Dict]:
     """把暂存的本地牧场合并进接口项目，并保存可追踪的牧场归属。"""
     project_path = Path(project_path)
+    existing_metadata = FileManager.load_project_metadata(project_path)
+    selection = normalize_dataset_selection(
+        dataset_selection,
+        has_local_farms=bool(local_farms),
+    )
+    _validate_existing_dataset_selection(
+        existing_metadata,
+        selection,
+        has_local_farms=bool(local_farms),
+    )
+    if not selection["herd"]:
+        raise ValueError("复合母牛项目必须选择牛群/系谱数据")
     cow_output = project_path / "standardized_data" / "processed_cow_data.xlsx"
     if not cow_output.exists():
         raise ValueError("接口母牛数据尚未生成，无法合并本地牧场")
@@ -1261,7 +1507,7 @@ def finalize_composite_project(
         farm_copy["cow_count"] = len(local_frame)
         cow_frames.append(local_frame)
         all_farms.append(farm_copy)
-        _copy_local_raw_files(project_path, farm)
+        _copy_local_raw_files(project_path, farm, selection)
 
     combined_cows = pd.concat(cow_frames, ignore_index=True, sort=False)
     duplicate_mask = combined_cows["cow_id"].duplicated(keep=False)
@@ -1280,7 +1526,7 @@ def finalize_composite_project(
         project_path / "standardized_data" / "processed_breeding_data.xlsx"
     )
     breeding_frames = []
-    if breeding_output.exists():
+    if selection["breeding"] and breeding_output.exists():
         interface_breeding = _annotate_interface_breeding(
             _read_excel(breeding_output, _BREEDING_READ_DTYPES),
             interface_farms,
@@ -1297,12 +1543,13 @@ def finalize_composite_project(
         }
         for code, group in combined_cows.groupby("farm_code")
     }
-    for farm in local_farms:
-        local_breeding = _prepare_local_breeding(
-            farm, valid_ids_by_farm.get(str(farm["code"]), set())
-        )
-        if local_breeding is not None:
-            breeding_frames.append(local_breeding)
+    if selection["breeding"]:
+        for farm in local_farms:
+            local_breeding = _prepare_local_breeding(
+                farm, valid_ids_by_farm.get(str(farm["code"]), set())
+            )
+            if local_breeding is not None:
+                breeding_frames.append(local_breeding)
 
     if breeding_frames:
         _emit(progress_callback, 80, "正在保存合并配种记录...")
@@ -1315,6 +1562,25 @@ def finalize_composite_project(
         )
     else:
         breeding_counts = {}
+        breeding_output.unlink(missing_ok=True)
+        if selection["breeding"]:
+            write_empty_breeding_receipts(
+                project_path,
+                data_source=data_source,
+                farms=all_farms,
+            )
+    if breeding_frames:
+        for receipt in (
+            project_path / BREEDING_RAW_RECEIPT,
+            project_path / BREEDING_STANDARDIZED_RECEIPT,
+        ):
+            receipt.unlink(missing_ok=True)
+    elif not selection["breeding"]:
+        for receipt in (
+            project_path / BREEDING_RAW_RECEIPT,
+            project_path / BREEDING_STANDARDIZED_RECEIPT,
+        ):
+            receipt.unlink(missing_ok=True)
 
     for farm in all_farms:
         breeding_count = int(
@@ -1327,9 +1593,138 @@ def finalize_composite_project(
         farm["source_system"] = farm.get("source_system", data_source)
 
     _emit(progress_callback, 90, "正在保存复合牧场项目元数据...")
+    project_type = None
+    metadata_extra = None
+    if existing_metadata.get("project_type") == "group_child":
+        if len(all_farms) != 1:
+            raise ValueError("牧场组子项目只能保存一个牧场")
+        expected_code = str(
+            existing_metadata.get("group_farm_code") or ""
+        ).strip()
+        actual_code = str(all_farms[0].get("code") or "").strip()
+        if expected_code and actual_code != expected_code:
+            raise ValueError("下载结果牧场编码与牧场组子任务不一致")
+        project_type = "group_child"
+        metadata_extra = _group_child_metadata_extra(
+            existing_metadata,
+            selection,
+        )
     FileManager.save_project_metadata(
-        project_path, all_farms, data_source=data_source
+        project_path,
+        all_farms,
+        data_source=data_source,
+        project_type=project_type,
+        extra=metadata_extra,
     )
     FileManager.generate_merged_farms_info(project_path, all_farms)
     _emit(progress_callback, 100, "复合牧场数据合并完成")
+    return all_farms
+
+
+def finalize_breeding_only_project(
+    project_path: Path,
+    interface_farms: List[Dict],
+    data_source: str,
+    *,
+    ids_are_prefixed: bool = False,
+    progress_callback: Optional[Callable] = None,
+    dataset_selection: Optional[Dict] = None,
+) -> List[Dict]:
+    """提交仅含配种记录的数据子项目，不创建或伪造母牛数据。"""
+    project_path = Path(project_path)
+    selection = normalize_dataset_selection(dataset_selection)
+    if selection["herd"] or not selection["breeding"]:
+        raise ValueError("仅配种记录项目的数据集选择不一致")
+    if not interface_farms:
+        raise ValueError("仅配种记录项目没有接口牧场")
+
+    existing_metadata = FileManager.load_project_metadata(project_path)
+    _validate_existing_dataset_selection(
+        existing_metadata,
+        selection,
+    )
+    for relative in (
+        Path("raw_data") / "cow_data.xlsx",
+        Path("standardized_data") / "processed_cow_data.xlsx",
+    ):
+        (project_path / relative).unlink(missing_ok=True)
+    breeding_output = (
+        project_path / "standardized_data" / "processed_breeding_data.xlsx"
+    )
+    raw_receipt = project_path / BREEDING_RAW_RECEIPT
+    receipt = project_path / BREEDING_STANDARDIZED_RECEIPT
+    all_farms = [dict(farm) for farm in interface_farms]
+    breeding_counts: Dict[str, int] = {}
+
+    if breeding_output.is_file():
+        _emit(progress_callback, 30, "正在标记配种记录牧场归属...")
+        breeding = _annotate_interface_breeding(
+            _read_excel(breeding_output, _BREEDING_READ_DTYPES),
+            interface_farms,
+            ids_are_prefixed,
+            data_source,
+        )
+        _atomic_write_excel(breeding, breeding_output)
+        breeding_counts = {
+            str(code): int(count)
+            for code, count in breeding.groupby("farm_code").size().items()
+        }
+        raw_receipt.unlink(missing_ok=True)
+        receipt.unlink(missing_ok=True)
+    elif receipt.is_file():
+        validate_empty_breeding_receipt_pair(
+            raw_receipt,
+            receipt,
+            expected_data_source=data_source,
+            expected_farm_codes=[
+                str(farm.get("code") or farm.get("farmCode") or "")
+                for farm in interface_farms
+            ],
+        )
+        (
+            project_path / "raw_data" / "breeding_records.xlsx"
+        ).unlink(missing_ok=True)
+        _emit(progress_callback, 50, "配种记录接口已返回 0 条，正在保存回执...")
+    else:
+        raise FileNotFoundError(
+            "仅配种记录任务缺少标准化结果或 0 条回执"
+        )
+
+    for farm in all_farms:
+        breeding_count = int(
+            breeding_counts.get(str(farm.get("code") or ""), 0)
+        )
+        farm["cow_count"] = 0
+        farm["breeding_count"] = breeding_count
+        farm["has_breeding_records"] = breeding_count > 0
+        farm["source_kind"] = farm.get("source_kind", "api")
+        farm["source_system"] = farm.get("source_system", data_source)
+
+    project_type = None
+    metadata_extra = None
+    if existing_metadata.get("project_type") == "group_child":
+        if len(all_farms) != 1:
+            raise ValueError("牧场组子项目只能保存一个牧场")
+        expected_code = str(
+            existing_metadata.get("group_farm_code") or ""
+        ).strip()
+        actual_code = str(all_farms[0].get("code") or "").strip()
+        if expected_code and actual_code != expected_code:
+            raise ValueError("下载结果牧场编码与牧场组子任务不一致")
+        project_type = "group_child"
+        metadata_extra = _group_child_metadata_extra(
+            existing_metadata,
+            selection,
+        )
+
+    _emit(progress_callback, 80, "正在保存仅配种记录项目元数据...")
+    FileManager.save_project_metadata(
+        project_path,
+        all_farms,
+        data_source=data_source,
+        project_type=project_type,
+        extra=metadata_extra,
+    )
+    FileManager.generate_merged_farms_info(project_path, all_farms)
+    _emit(progress_callback, 100, "配种记录数据准备完成")
     return all_farms

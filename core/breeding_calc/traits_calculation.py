@@ -1,6 +1,8 @@
 # core/breeding_calc/traits_calculation.py
 
 from pathlib import Path
+from decimal import Decimal, InvalidOperation
+import hashlib
 import pandas as pd
 import numpy as np
 import datetime
@@ -15,9 +17,73 @@ from .base_calculation import BaseCowCalculation
 from utils.large_excel_writer import (
     ExcelSizeError,
     copy_file_atomic,
-    normalize_identifier,
+    normalize_identifier_key,
+    read_excel_identifier_safe,
     write_dataframe_atomic,
 )
+
+
+_GENOMIC_BINDING_COLUMNS = (
+    "cow_id",
+    "sire",
+    "dam",
+    "mgs",
+    "mgd",
+    "mmgs",
+    "birth_date",
+    "birth_date_dam",
+    "birth_date_mgd",
+    "API farmcode",
+    "api farmcode",
+    "farm_code",
+    "牧场编号",
+    "牧场名称",
+)
+
+
+def _normalize_genomic_cow_id(value) -> str:
+    """规范化牛号，同时保留有意义的前导零。"""
+    return normalize_identifier_key(value)
+
+
+def _canonical_genomic_trait_value(value):
+    """生成仅用于重复记录冲突检查的稳定性状值。"""
+    try:
+        if bool(pd.isna(value)):
+            return ("missing", "")
+    except (TypeError, ValueError):
+        pass
+
+    text_value = str(value).strip()
+    if not text_value or text_value.lower() in {"nan", "none", "null", "<na>"}:
+        return ("missing", "")
+
+    try:
+        numeric_value = Decimal(text_value)
+    except (InvalidOperation, ValueError):
+        return ("text", text_value)
+
+    if not numeric_value.is_finite():
+        return ("text", text_value)
+    if numeric_value == 0:
+        numeric_value = Decimal(0)
+    return ("number", numeric_value.normalize())
+
+
+def _genomic_binding_signature(df: pd.DataFrame):
+    """用摘要校验更新前后牛号、系谱和牧场字段没有换行或改值。"""
+    columns = [column for column in _GENOMIC_BINDING_COLUMNS if column in df.columns]
+    digest = hashlib.sha256()
+    digest.update(str(len(df)).encode("ascii"))
+    digest.update("\x1f".join(columns).encode("utf-8"))
+    for column in columns:
+        column_hashes = pd.util.hash_pandas_object(
+            df[column],
+            index=True,
+            categorize=False,
+        )
+        digest.update(column_hashes.to_numpy(dtype=np.uint64, copy=False).tobytes())
+    return len(df), tuple(columns), digest.digest()
 
 class TraitsCalculation(BaseCowCalculation):
     def __init__(self):
@@ -215,6 +281,9 @@ class TraitsCalculation(BaseCowCalculation):
                     apply_formatting=False,
                     pedigree_df=cow_df,
                 ):
+                    detail = getattr(self, "_last_genomic_error", None)
+                    if detail:
+                        return False, f"更新基因组数据失败：{detail}"
                     return False, "更新基因组数据失败"
                 print("基因组数据更新完成")
                 if progress_callback:
@@ -300,7 +369,7 @@ class TraitsCalculation(BaseCowCalculation):
         """处理年度关键性状数据"""
         try:
             # 读取详细数据
-            df = pd.read_excel(detail_path)
+            df = read_excel_identifier_safe(detail_path)
             
             # 检查birth_year列是否存在
             if 'birth_year' not in df.columns:
@@ -704,7 +773,7 @@ class TraitsCalculation(BaseCowCalculation):
             selected_traits: 选择的性状列表（用于确保生成所有性状的得分）
         """
         try:
-            df = pd.read_excel(detail_path)
+            df = read_excel_identifier_safe(detail_path)
 
             # 处理日期列
             date_columns = ['birth_date', 'birth_date_dam', 'birth_date_mgd']
@@ -719,7 +788,10 @@ class TraitsCalculation(BaseCowCalculation):
             yearly_data = {}
             with pd.ExcelFile(yearly_path) as xls:
                 for sheet in xls.sheet_names:
-                    yearly_data[sheet] = pd.read_excel(xls, sheet_name=sheet)
+                    yearly_data[sheet] = read_excel_identifier_safe(
+                        xls,
+                        sheet_name=sheet,
+                    )
                     yearly_data[sheet].set_index('birth_year', inplace=True)
 
             # 必需的性状（用于生成正态分布图）
@@ -830,7 +902,10 @@ class TraitsCalculation(BaseCowCalculation):
             yearly_data = {}
             with pd.ExcelFile(yearly_path) as xls:
                 for sheet in xls.sheet_names:
-                    yearly_data[sheet] = pd.read_excel(xls, sheet_name=sheet)
+                    yearly_data[sheet] = read_excel_identifier_safe(
+                        xls,
+                        sheet_name=sheet,
+                    )
                     yearly_data[sheet].set_index('birth_year', inplace=True)
 
             # 必需的性状（用于生成正态分布图）
@@ -976,109 +1051,198 @@ class TraitsCalculation(BaseCowCalculation):
         apply_formatting: bool = False,
         pedigree_df: pd.DataFrame = None,
     ) -> bool:
-        """用基因组数据更新关键性状得分 - 优化版本，使用向量化操作替代循环"""
+        """按唯一、非空牛号回填基因组性状，并保持系谱行绑定不变。"""
+        self._last_genomic_error = None
         try:
             # 1. 优先复用刚计算完成的系谱表，避免再次读取并复制大型 Excel。
             df_pedigree = (
                 pedigree_df
                 if pedigree_df is not None
-                else pd.read_excel(pedigree_path)
+                else read_excel_identifier_safe(pedigree_path)
             )
+            if "cow_id" not in df_pedigree.columns:
+                self._last_genomic_error = "系谱数据中缺少牛号列"
+                print(self._last_genomic_error)
+                return False
+            binding_signature = _genomic_binding_signature(df_pedigree)
 
-            # 2. 读取基因组数据
-            df_genomic = pd.read_excel(
-                genomic_path,
-                dtype={'cow_id': str},
-            )
-
-            # 打印基因组数据的列名以便调试
-            print(f"基因组数据列名: {df_genomic.columns.tolist()[:30]}...")  # 打印前30个
+            # 2. 读取基因组数据。
+            df_genomic = read_excel_identifier_safe(genomic_path)
+            print(f"基因组数据列名: {df_genomic.columns.tolist()[:30]}...")
             print(f"基因组数据行数: {len(df_genomic)}")
-
-            # 检查cow_id列是否存在
-            if 'cow_id' not in df_genomic.columns:
-                print("警告：基因组数据中缺少cow_id列")
+            if "cow_id" not in df_genomic.columns:
+                self._last_genomic_error = "基因组数据中缺少牛号列"
+                print(self._last_genomic_error)
                 return False
 
-            # 打印部分cow_id以验证
-            print(f"基因组数据中的前5个cow_id: {df_genomic['cow_id'].head().tolist()}")
-            print(f"系谱数据中的前5个cow_id: {df_pedigree['cow_id'].head().tolist()}")
-
-            # 3. 初始化数据来源标记
-            score_columns = [col for col in df_pedigree.columns if col.endswith('_score')]
-            for col in score_columns:
-                df_pedigree[f"{col}_source"] = "P"  # 默认标记为系谱来源
-
-            # 4. 更新得分和数据来源 - 使用向量化操作
-            traits = [col[:-6] for col in score_columns]  # 去掉 '_score' 后缀
+            # 3. 先完成键和重复记录校验，再修改系谱结果。
+            score_columns = [
+                column
+                for column in df_pedigree.columns
+                if column.endswith("_score")
+            ]
+            traits = [column[:-6] for column in score_columns]
             print(f"需要匹配的性状: {traits}")
-
-            # 检查基因组数据中存在哪些性状列
-            existing_traits = [trait for trait in traits if trait in df_genomic.columns]
+            existing_traits = [
+                trait for trait in traits if trait in df_genomic.columns
+            ]
             print(f"基因组数据中存在的性状: {existing_traits}")
 
-            # 统一 Excel 常见的 123 / 123.0 / " 123 " 表示，同时保留前导零。
-            df_pedigree['cow_id_str'] = df_pedigree['cow_id'].map(
-                normalize_identifier
+            pedigree_keys = df_pedigree["cow_id"].map(
+                _normalize_genomic_cow_id
             )
-            df_genomic['cow_id_str'] = df_genomic['cow_id'].map(
-                normalize_identifier
+            genomic_keys = df_genomic["cow_id"].map(
+                _normalize_genomic_cow_id
             )
 
-            # 为基因组数据设置索引以便快速查找
-            df_genomic_indexed = df_genomic.set_index('cow_id_str')
+            valid_genomic_mask = genomic_keys.ne("")
+            blank_genomic_rows = int((~valid_genomic_mask).sum())
+            if blank_genomic_rows:
+                print(
+                    "基因组数据中有 "
+                    f"{blank_genomic_rows} 行牛号为空，已排除且不会参与匹配"
+                )
 
-            # 找出在基因组数据中存在的母牛
-            matched_mask = df_pedigree['cow_id_str'].isin(df_genomic_indexed.index)
-            matched_cows = matched_mask.sum()
-            print(f"匹配到的母牛数: {matched_cows}")
+            duplicate_genomic_mask = (
+                valid_genomic_mask
+                & genomic_keys.duplicated(keep=False)
+            )
+            if duplicate_genomic_mask.any():
+                duplicate_rows = df_genomic.loc[
+                    duplicate_genomic_mask,
+                    existing_traits,
+                ].copy()
+                duplicate_rows.insert(
+                    0,
+                    "__normalized_cow_id",
+                    genomic_keys.loc[duplicate_genomic_mask].to_numpy(),
+                )
+                conflicting_groups = 0
+                for _, group in duplicate_rows.groupby(
+                    "__normalized_cow_id",
+                    sort=False,
+                    dropna=False,
+                ):
+                    signatures = {
+                        tuple(
+                            _canonical_genomic_trait_value(row[trait])
+                            for trait in existing_traits
+                        )
+                        for _, row in group.iterrows()
+                    }
+                    if len(signatures) > 1:
+                        conflicting_groups += 1
 
-            # 统计更新数量
+                if conflicting_groups:
+                    self._last_genomic_error = (
+                        "基因组数据中存在 "
+                        f"{conflicting_groups} 组牛号重复且性状值冲突，"
+                        "已停止回填以避免错配"
+                    )
+                    print(self._last_genomic_error)
+                    return False
+
+                duplicate_group_count = int(
+                    genomic_keys.loc[duplicate_genomic_mask].nunique()
+                )
+                print(
+                    "基因组数据中有 "
+                    f"{duplicate_group_count} 组完全相同的重复记录，"
+                    "已按首次出现记录确定性去重"
+                )
+
+            unique_genomic_mask = (
+                valid_genomic_mask
+                & ~genomic_keys.duplicated(keep="first")
+            )
+            df_genomic_indexed = df_genomic.loc[
+                unique_genomic_mask,
+                existing_traits,
+            ].copy()
+            df_genomic_indexed.index = genomic_keys.loc[
+                unique_genomic_mask
+            ].to_numpy()
+
+            valid_pedigree_mask = pedigree_keys.ne("")
+            duplicate_pedigree_mask = (
+                valid_pedigree_mask
+                & pedigree_keys.duplicated(keep=False)
+            )
+            if duplicate_pedigree_mask.any():
+                duplicate_pedigree_groups = int(
+                    pedigree_keys.loc[duplicate_pedigree_mask].nunique()
+                )
+                duplicate_pedigree_rows = int(duplicate_pedigree_mask.sum())
+                self._last_genomic_error = (
+                    "系谱数据中存在 "
+                    f"{duplicate_pedigree_groups} 组、"
+                    f"{duplicate_pedigree_rows} 行牛号重复，"
+                    "已停止回填以避免同一牛被重复计算"
+                )
+                print(self._last_genomic_error)
+                return False
+
+            matched_mask = (
+                valid_pedigree_mask
+                & pedigree_keys.isin(df_genomic_indexed.index)
+            )
+            print(f"匹配到的母牛数: {int(matched_mask.sum())}")
+
+            # 键校验通过后才初始化来源，冲突输入不会留下半成品状态。
+            for column in score_columns:
+                df_pedigree[f"{column}_source"] = "P"
+
             update_count = 0
-
-            # 对每个性状进行向量化更新
             for trait in existing_traits:
-                score_col = f'{trait}_score'
-                source_col = f'{trait}_score_source'
-
-                if score_col not in df_pedigree.columns:
-                    continue
-
-                # 创建cow_id到性状值的映射
-                trait_map = df_genomic_indexed[trait].to_dict()
-
-                # 获取匹配母牛的性状值
-                matched_ids = df_pedigree.loc[matched_mask, 'cow_id_str']
-                new_values = matched_ids.map(trait_map)
-
-                # 只更新有效值（非NaN）
-                valid_mask = matched_mask & new_values.reindex(df_pedigree.index).notna()
+                score_col = f"{trait}_score"
+                source_col = f"{trait}_score_source"
+                trait_map = df_genomic_indexed[trait]
+                new_values = pedigree_keys.map(trait_map)
+                valid_mask = (
+                    matched_mask
+                    & new_values.notna()
+                    & new_values.astype(str).str.strip().ne("")
+                )
                 if valid_mask.any():
-                    df_pedigree.loc[valid_mask, score_col] = new_values.reindex(df_pedigree.index)[valid_mask]
+                    df_pedigree.loc[valid_mask, score_col] = new_values[
+                        valid_mask
+                    ]
                     df_pedigree.loc[valid_mask, source_col] = "G"
-                    trait_update_count = valid_mask.sum()
-                    update_count += trait_update_count
+                    update_count += int(valid_mask.sum())
 
             print(f"总共更新了 {update_count} 个性状值")
 
-            # 清理临时列
-            df_pedigree.drop(columns=['cow_id_str'], inplace=True)
-
-            # 5. 添加基因组性状计数列 - 优化版本
-            source_cols = [col for col in df_pedigree.columns if col.endswith('_score_source')]
+            source_cols = [
+                column
+                for column in df_pedigree.columns
+                if column.endswith("_score_source")
+            ]
             if source_cols:
-                # 使用向量化操作计算每行的 "G" 数量
-                df_pedigree['genomic_traits_count'] = (df_pedigree[source_cols] == "G").sum(axis=1)
+                df_pedigree["genomic_traits_count"] = (
+                    df_pedigree[source_cols] == "G"
+                ).sum(axis=1)
             else:
-                df_pedigree['genomic_traits_count'] = 0
+                df_pedigree["genomic_traits_count"] = 0
 
-            # 6. 保存结果
-            return self.save_results_with_retry(df_pedigree, output_path, apply_formatting=apply_formatting)
+            if _genomic_binding_signature(df_pedigree) != binding_signature:
+                self._last_genomic_error = (
+                    "基因组回填后检测到系谱行绑定发生变化，已停止保存"
+                )
+                print(self._last_genomic_error)
+                return False
 
-        except Exception as e:
-            print(f"更新基因组数据时发生错误: {e}")
-            import traceback
-            traceback.print_exc()
+            return self.save_results_with_retry(
+                df_pedigree,
+                output_path,
+                apply_formatting=apply_formatting,
+            )
+
+        except Exception as error:
+            self._last_genomic_error = (
+                "更新基因组数据时发生内部错误"
+                f"（{type(error).__name__}）"
+            )
+            print(self._last_genomic_error)
             return False
 
     def get_bull_traits_batch(self, bull_ids: list, selected_traits: list) -> dict:
@@ -1203,7 +1367,7 @@ class TraitsCalculation(BaseCowCalculation):
             df_pedigree = (
                 pedigree_df
                 if pedigree_df is not None
-                else pd.read_excel(pedigree_path)
+                else read_excel_identifier_safe(pedigree_path)
             )
 
             # 如果没有source列，添加它们
@@ -1241,7 +1405,11 @@ class TraitsCalculation(BaseCowCalculation):
             with pd.ExcelFile(yearly_data_path) as xlsx:
                 for trait in selected_traits:
                     if trait in xlsx.sheet_names:
-                        yearly_df = pd.read_excel(xlsx, sheet_name=trait, index_col='birth_year')
+                        yearly_df = read_excel_identifier_safe(
+                            xlsx,
+                            sheet_name=trait,
+                            index_col='birth_year',
+                        )
                         yearly_mean_maps[trait] = yearly_df['mean'].to_dict()
 
             # 获取默认值（999HO99999的值）

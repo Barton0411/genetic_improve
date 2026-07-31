@@ -179,7 +179,20 @@ class BullKeyTraitsPage(QWidget):
         if not main_window:
             QMessageBox.warning(self, "警告", "无法获取主窗口")
             return
-            
+
+        selected_traits = self.get_selected_traits()
+        if not selected_traits:
+            QMessageBox.warning(self, "警告", "请至少选择一个性状")
+            return
+
+        if getattr(main_window, "is_group_project", False):
+            main_window.start_group_feature_analysis(
+                operation="bull_traits",
+                parameters={"traits": selected_traits},
+                title="备选公牛关键育种性状分析",
+            )
+            return
+
         if not main_window.selected_project_path:
             QMessageBox.warning(self, "警告", "请先选择一个项目")
             return
@@ -196,12 +209,6 @@ class BullKeyTraitsPage(QWidget):
                 bull_df = pd.read_excel(bull_data_path)
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"读取备选公牛数据文件失败：{str(e)}")
-                return
-
-            # 获取选中的性状列表
-            selected_traits = self.get_selected_traits()
-            if not selected_traits:
-                QMessageBox.warning(self, "警告", "请至少选择一个性状")
                 return
 
             # 检查数据库是否存在，如果不存在则自动下载

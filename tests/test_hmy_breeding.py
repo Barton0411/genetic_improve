@@ -148,7 +148,8 @@ class HMYBreedingConverterTests(unittest.TestCase):
                         "11001100021001",
                     ],
                     "sire": ["001HO10001", "001HO10002"],
-                    "牧场编号": ["1100110001", "1100110002"],
+                    "API farmcode": ["1100110001", "1100110002"],
+                    "牧场编号": ["0101001", "0101002"],
                     "牧场名称": ["测试一牧", "测试二牧"],
                 }
             ).to_excel(
@@ -182,8 +183,12 @@ class HMYBreedingConverterTests(unittest.TestCase):
             ["11001100011001", "11001100021001"],
         )
         self.assertEqual(
-            processed["牧场编号"].tolist(),
+            processed["API farmcode"].tolist(),
             ["1100110001", "1100110002"],
+        )
+        self.assertEqual(
+            processed["牧场编号"].tolist(),
+            ["0101001", "0101002"],
         )
         self.assertEqual(
             processed["牧场名称"].tolist(),

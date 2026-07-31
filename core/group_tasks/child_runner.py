@@ -62,6 +62,7 @@ class ValidatedChildRequest:
     project_path: Path
     parent_group_path: Path
     data_source: str
+    dataset_selection: Dict[str, bool]
     stages: tuple[str, ...]
     service_staff: str
 
@@ -312,6 +313,60 @@ def validate_request(payload: Dict[str, Any]) -> ValidatedChildRequest:
     if not data_source:
         raise ChildRequestError("子项目缺少数据源描述")
 
+    from core.group_tasks.dataset_plan import (
+        normalize_dataset_selection,
+    )
+
+    task_mode = str(parent_metadata.get("task_mode") or "analysis")
+    is_local = str(task.get("source_kind") or "api") == "local"
+    parent_selection_explicit = bool(
+        parent_metadata.get(
+            "dataset_selection_explicit",
+            "dataset_selection" in parent_metadata,
+        )
+    )
+    task_metadata = task.get("metadata") or {}
+    task_selection_explicit = bool(
+        task_metadata.get(
+            "dataset_selection_explicit",
+            "dataset_selection" in task_metadata,
+        )
+    )
+    child_selection_explicit = bool(
+        child_metadata.get(
+            "dataset_selection_explicit",
+            "dataset_selection" in child_metadata,
+        )
+    )
+    if not (
+        parent_selection_explicit
+        == task_selection_explicit
+        == child_selection_explicit
+    ):
+        raise ChildRequestError("父任务、子任务与子项目的数据集选择标记不一致")
+    try:
+        parent_selection = normalize_dataset_selection(
+            parent_metadata.get("dataset_selection"),
+            task_mode=task_mode,
+            has_local_farms=is_local,
+        )
+        task_selection = normalize_dataset_selection(
+            task_metadata.get("dataset_selection"),
+            task_mode=task_mode,
+            has_local_farms=is_local,
+        )
+        child_selection = normalize_dataset_selection(
+            child_metadata.get("dataset_selection"),
+            task_mode=task_mode,
+            has_local_farms=is_local,
+        )
+    except ValueError as exc:
+        raise ChildRequestError("牧场组数据集选择无效") from exc
+    if not (
+        parent_selection == task_selection == child_selection
+    ):
+        raise ChildRequestError("父任务、子任务与子项目的数据集选择不一致")
+
     return ValidatedChildRequest(
         task_id=task_id,
         farm_code=farm_code,
@@ -323,6 +378,7 @@ def validate_request(payload: Dict[str, Any]) -> ValidatedChildRequest:
         project_path=project_path,
         parent_group_path=parent_path,
         data_source=data_source,
+        dataset_selection=parent_selection,
         stages=_normalized_stages(payload.get("stages")),
         service_staff=service_staff,
     )
@@ -455,6 +511,8 @@ def execute_request(
                 data_source=request.data_source,
                 local_farms=[],
                 reliability_mode=True,
+                group_batch_mode=True,
+                dataset_selection=request.dataset_selection,
             )
 
             def relay(

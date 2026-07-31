@@ -2,6 +2,54 @@ import sys
 import os
 from pathlib import Path
 
+
+def _macos_parent_process_name() -> str:
+    """Best-effort lookup of the direct parent process on macOS."""
+    if sys.platform != "darwin":
+        return ""
+    try:
+        import ctypes
+
+        libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+        proc_name = libproc.proc_name
+        proc_name.argtypes = [
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        ]
+        proc_name.restype = ctypes.c_int
+        buffer = ctypes.create_string_buffer(1024)
+        length = proc_name(os.getppid(), buffer, len(buffer))
+        if length > 0:
+            return buffer.value.decode("utf-8", errors="replace")
+    except (AttributeError, OSError, ValueError):
+        pass
+    return ""
+
+
+def _macos_gui_launch_block_reason(parent_name=None) -> str:
+    """Explain an unsafe macOS GUI launch before AppKit can call abort()."""
+    if sys.platform != "darwin":
+        return ""
+    if os.environ.get("QT_QPA_PLATFORM", "").strip().lower() in {
+        "offscreen",
+        "minimal",
+    }:
+        return ""
+    parent = (
+        _macos_parent_process_name()
+        if parent_name is None
+        else str(parent_name)
+    ).strip().lower()
+    if parent != "codex":
+        return ""
+    return (
+        "macOS 不允许当前 Codex 子进程直接注册图形应用。"
+        "请双击项目根目录中的“启动开发版.command”，"
+        "或从访达正常打开已安装的应用。"
+    )
+
+
 # 延迟导入重量级模块
 def lazy_import():
     global MainWindow, LoginDialog, VideoSplashScreen
@@ -49,10 +97,61 @@ def dispatch_group_child_runner(argv=None):
             protocol_stream.close()
 
 
+def dispatch_group_feature_runner(argv=None):
+    """识别页面功能的隐藏子进程入口；其它启动返回 ``None``。"""
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if not arguments or arguments[0] != "--group-feature-runner":
+        return None
+
+    os.environ["GENETIC_IMPROVE_ROOT"] = str(Path(__file__).parent)
+    from core.group_tasks.feature_runner import main as feature_runner_main
+
+    protocol_stream, should_close = _open_child_protocol_stdout()
+    if protocol_stream is None:
+        return 74
+    try:
+        return feature_runner_main(
+            arguments[1:],
+            output_stream=protocol_stream,
+        )
+    finally:
+        if should_close:
+            protocol_stream.close()
+
+
+def _create_gui_application(arguments):
+    """创建或复用 GUI 应用，拒绝把 QCoreApplication 升级为 GUI。
+
+    Qt 不支持在同一进程中先创建 ``QCoreApplication``，再升级成
+    ``QApplication``。如果继续构造 QDialog/QWidget，Qt 会直接调用
+    ``abort()``，Python 无法捕获。这里在首个窗口创建前主动拦截，
+    将系统级崩溃转换成可诊断的 Python 错误。
+    """
+    from PyQt6.QtCore import QCoreApplication
+    from PyQt6.QtWidgets import QApplication
+
+    existing = QCoreApplication.instance()
+    if existing is not None:
+        if not isinstance(existing, QApplication):
+            raise RuntimeError(
+                "当前进程已经创建了 QCoreApplication，不能继续启动图形界面。"
+                "请使用新的独立进程运行 main.py。"
+            )
+        return existing
+    return QApplication(arguments)
+
+
 def main(argv=None):
-    child_exit_code = dispatch_group_child_runner(argv)
+    child_exit_code = dispatch_group_feature_runner(argv)
+    if child_exit_code is None:
+        child_exit_code = dispatch_group_child_runner(argv)
     if child_exit_code is not None:
         return child_exit_code
+
+    launch_block_reason = _macos_gui_launch_block_reason()
+    if launch_block_reason:
+        print(launch_block_reason, file=sys.stderr)
+        return 78
 
     # 必须晚于隐藏子任务分流；子进程不创建任何 GUI 对象。
     from PyQt6.QtWidgets import QApplication, QDialog
@@ -117,7 +216,9 @@ def main(argv=None):
     root_dir = Path(__file__).parent
     os.environ['GENETIC_IMPROVE_ROOT'] = str(root_dir)
 
-    app = QApplication(sys.argv if argv is None else [sys.argv[0], *argv])
+    app = _create_gui_application(
+        sys.argv if argv is None else [sys.argv[0], *argv]
+    )
 
     # 强制设置为浅色模式，不跟随系统深色模式
     light_palette = QPalette()

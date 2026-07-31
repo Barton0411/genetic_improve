@@ -9,6 +9,7 @@ import numpy as np
 import datetime
 
 from core.data.update_manager import LOCAL_DB_PATH
+from utils.large_excel_writer import read_excel_identifier_safe
 
 class BaseCowCalculation:
     def __init__(self):
@@ -56,7 +57,7 @@ class BaseCowCalculation:
             return False, f"未找到数据文件：{data_filename}"
         
         try:
-            df = pd.read_excel(data_path)
+            df = read_excel_identifier_safe(data_path)
             for col in self.required_columns:
                 if col not in df.columns:
                     return False, f"数据文件缺少必需的列：{col}"
@@ -68,7 +69,7 @@ class BaseCowCalculation:
         """读取数据文件"""
         try:
             data_path = project_path / "standardized_data" / data_filename
-            return pd.read_excel(data_path)
+            return read_excel_identifier_safe(data_path)
         except Exception as e:
             print(f"读取数据失败: {e}")
             return None

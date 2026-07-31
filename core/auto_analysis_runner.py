@@ -14,6 +14,11 @@ from typing import Dict, List, Set, Tuple, Optional
 import pandas as pd
 
 from core.data.update_manager import LOCAL_DB_PATH
+from core.inbreeding.analysis_scope import (
+    ORIGINAL_BULL_ID_COLUMN,
+    STANDARDIZED_BULL_ID_COLUMN,
+    build_inbreeding_analysis_scope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +62,13 @@ def run_cow_traits(project_path, selected_traits=None, progress_cb=None):
 
 # ============ 备选公牛性状分析 ============
 
-def run_bull_traits(project_path, selected_traits=None, progress_cb=None):
+def run_bull_traits(
+    project_path,
+    selected_traits=None,
+    progress_cb=None,
+    *,
+    allow_missing_bull_upload=True,
+):
     """
     备选公牛性状分析 - 无GUI版本
     从 processed_bull_data.xlsx 读取公牛ID，逐个查询本地数据库获取性状数据
@@ -131,7 +142,7 @@ def run_bull_traits(project_path, selected_traits=None, progress_cb=None):
             trait_data.append(bull_data)
 
     # 上传缺失公牛（静默处理）
-    if missing_bulls:
+    if missing_bulls and allow_missing_bull_upload:
         _upload_missing_bulls(missing_bulls, 'bull_key_traits')
 
     # 保存结果
@@ -235,7 +246,13 @@ def run_mated_bull_traits(project_path, selected_traits=None, progress_cb=None):
 
 # ============ 母牛指数排名 ============
 
-def run_cow_index(project_path, weight_name=None, progress_cb=None):
+def run_cow_index(
+    project_path,
+    weight_name=None,
+    progress_cb=None,
+    *,
+    weight_values=None,
+):
     """
     母牛指数排名 - 复用 IndexCalculation.process_cow_index()
     """
@@ -243,12 +260,24 @@ def run_cow_index(project_path, weight_name=None, progress_cb=None):
     calc = IndexCalculation()
     proxy = ProjectPathProxy(project_path)
     weight = weight_name or DEFAULT_WEIGHT
-    return calc.process_cow_index(proxy, weight, progress_cb)
+    return calc.process_cow_index(
+        proxy,
+        weight,
+        progress_cb,
+        weight_values=weight_values,
+    )
 
 
 # ============ 备选公牛指数排名 ============
 
-def run_bull_index(project_path, weight_name=None, progress_cb=None):
+def run_bull_index(
+    project_path,
+    weight_name=None,
+    progress_cb=None,
+    *,
+    weight_values=None,
+    allow_missing_bull_upload=True,
+):
     """
     备选公牛指数排名 - 复用 IndexCalculation.process_bull_index()
     """
@@ -256,12 +285,296 @@ def run_bull_index(project_path, weight_name=None, progress_cb=None):
     calc = IndexCalculation()
     proxy = ProjectPathProxy(project_path)
     weight = weight_name or DEFAULT_WEIGHT
-    return calc.process_bull_index(proxy, weight, progress_cb)
+    return calc.process_bull_index(
+        proxy,
+        weight,
+        progress_cb,
+        weight_values=weight_values,
+        allow_missing_bull_upload=allow_missing_bull_upload,
+    )
 
 
 # ============ 近交分析 ============
 
-def run_inbreeding_analysis(project_path, analysis_type, progress_cb=None):
+COW_SELF_INBREEDING_FILENAME = "母牛近交系数分析结果.xlsx"
+
+
+def run_cow_self_inbreeding_analysis(
+    project_path,
+    progress_cb=None,
+):
+    """在无 GUI 环境中执行母牛自身近交及父系隐性基因分析。
+
+    计算口径与 ``InbreedingPage.analyze_cow_self`` 保持一致：
+    母牛自身近交系数按其父号与母号的潜在后代近交系数计算；隐性
+    基因状态取母牛父系公牛记录。结果使用 UI 手工分析相同的固定
+    文件名，便于子项目完成后直接打开。
+    """
+    project_path = Path(project_path)
+
+    def emit_progress(pct, msg):
+        if progress_cb:
+            try:
+                progress_cb(pct, msg)
+            except Exception:
+                pass
+        logger.info("[母牛近交分析] %s%% - %s", pct, msg)
+
+    try:
+        cow_file = (
+            project_path
+            / "standardized_data"
+            / "processed_cow_data.xlsx"
+        )
+        if not cow_file.is_file():
+            return False, "未找到母牛数据文件"
+
+        emit_progress(5, "读取母牛数据...")
+        from config.breed_constants import filter_dairy_cows
+        from core.data.processor import add_farm_lineage_columns
+        from core.data.update_manager import get_pedigree_db
+        from core.inbreeding.path_inbreeding_calculator import (
+            PathInbreedingCalculator,
+        )
+        from utils.large_excel_writer import (
+            normalize_identifier_key,
+            read_excel_identifier_safe,
+        )
+
+        cow_df = read_excel_identifier_safe(cow_file)
+        cow_df = add_farm_lineage_columns(
+            cow_df,
+            project_path,
+            animal_id_column="cow_id",
+        )
+        cow_df = filter_dairy_cows(
+            cow_df,
+            log_prefix="母牛近交分析：",
+        )
+
+        emit_progress(10, "构建母牛系谱库...")
+        pedigree_db = get_pedigree_db()
+
+        def pedigree_progress(value, message):
+            try:
+                mapped = 10 + int(float(value) * 0.15)
+            except (TypeError, ValueError):
+                mapped = 10
+            emit_progress(max(10, min(mapped, 25)), message)
+
+        pedigree_db.build_cow_pedigree(
+            cow_file,
+            pedigree_progress,
+        )
+        calculator = PathInbreedingCalculator(max_generations=6)
+        emit_progress(25, "母牛系谱库构建完成")
+
+        columns = list(cow_df.columns)
+        rows_cache = []
+        sire_ids = set()
+        for row in cow_df.itertuples(index=False, name=None):
+            row_dict = dict(zip(columns, row))
+            cow_id = normalize_identifier_key(
+                row_dict.get("cow_id", "")
+            )
+            if not cow_id:
+                continue
+
+            original_sire = normalize_identifier_key(
+                row_dict.get("sire", "")
+            )
+            sire_id = (
+                normalize_identifier_key(
+                    pedigree_db.standardize_animal_id(
+                        original_sire,
+                        "bull",
+                    )
+                )
+                if original_sire
+                else ""
+            )
+            if sire_id:
+                sire_ids.add(sire_id)
+
+            standardized_cow_id = normalize_identifier_key(
+                pedigree_db.standardize_animal_id(cow_id, "cow")
+            )
+            cow_info = calculator.pedigree_db.pedigree.get(
+                standardized_cow_id or cow_id,
+                {},
+            )
+            dam_id = normalize_identifier_key(
+                cow_info.get("dam", "")
+            )
+            if not dam_id:
+                original_dam = normalize_identifier_key(
+                    row_dict.get("dam", "")
+                )
+                dam_id = (
+                    normalize_identifier_key(
+                        pedigree_db.standardize_animal_id(
+                            original_dam,
+                            "cow",
+                        )
+                    )
+                    if original_dam
+                    else ""
+                )
+
+            rows_cache.append(
+                (
+                    row_dict,
+                    cow_id,
+                    original_sire,
+                    sire_id,
+                    dam_id,
+                )
+            )
+
+        emit_progress(35, "查询母牛父系隐性基因...")
+        sire_genes_map, _ = _query_bull_genes(sire_ids)
+        results = []
+        total = len(rows_cache)
+
+        for index, (
+            row_dict,
+            cow_id,
+            original_sire,
+            sire_id,
+            dam_id,
+        ) in enumerate(rows_cache):
+            if index % 50 == 0:
+                progress = (
+                    40 + int(index / total * 45)
+                    if total
+                    else 85
+                )
+                emit_progress(
+                    progress,
+                    f"计算母牛近交系数 ({index + 1}/{total})",
+                )
+
+            try:
+                if sire_id and dam_id:
+                    f_val, contrib, paths = (
+                        calculator
+                        .calculate_potential_offspring_inbreeding(
+                            sire_id,
+                            dam_id,
+                        )
+                    )
+                    if math.isnan(f_val):
+                        f_val = 0.0
+                else:
+                    f_val, contrib, paths = 0.0, {}, {}
+            except Exception:
+                logger.exception("计算一头母牛的自身近交系数失败")
+                f_val, contrib, paths = 0.0, {}, {}
+
+            result = {
+                "牧场编号": row_dict.get("牧场编号", ""),
+                "牧场名称": row_dict.get("牧场名称", ""),
+                "母牛号": cow_id,
+                "父号": sire_id,
+                "原始父号": (
+                    original_sire
+                    if original_sire != sire_id
+                    else ""
+                ),
+                "母号": dam_id,
+                "出生日期": row_dict.get("birth_date", ""),
+                "胎次": row_dict.get("lac", ""),
+                "是否在场": row_dict.get("是否在场", ""),
+                "近交系数": f"{f_val:.3%}",
+                "近交详情": {
+                    "system": f_val,
+                    "common_ancestors": contrib,
+                    "paths": paths,
+                },
+            }
+
+            sire_genes = sire_genes_map.get(sire_id, {})
+            for gene in DEFECT_GENES:
+                gene_value = sire_genes.get(gene, "missing data")
+                if gene_value == "missing data":
+                    result[gene] = "缺少母牛父亲信息"
+                elif gene_value == "C":
+                    result[gene] = "仅母牛父亲携带"
+                elif gene_value == "F":
+                    result[gene] = "-"
+                else:
+                    result[gene] = gene_value
+                result[f"{gene}(父)"] = gene_value
+
+            results.append(result)
+
+        emit_progress(90, "收集异常与统计...")
+        abnormal_df, stats_df = _collect_cow_self_abnormal(results)
+        results_df = pd.DataFrame(results)
+        if results_df.empty:
+            results_df = pd.DataFrame(
+                columns=[
+                    "牧场编号",
+                    "牧场名称",
+                    "母牛号",
+                    "父号",
+                    "原始父号",
+                    "母号",
+                    "出生日期",
+                    "胎次",
+                    "是否在场",
+                    "近交系数",
+                    "近交详情",
+                    *DEFECT_GENES,
+                    *(f"{gene}(父)" for gene in DEFECT_GENES),
+                ]
+            )
+
+        output_dir = project_path / "analysis_results"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / COW_SELF_INBREEDING_FILENAME
+
+        emit_progress(95, "保存母牛近交分析结果...")
+        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+            results_df.to_excel(
+                writer,
+                sheet_name="配对明细表",
+                index=False,
+            )
+            if not abnormal_df.empty:
+                abnormal_df.to_excel(
+                    writer,
+                    sheet_name="异常明细表",
+                    index=False,
+                )
+            if not stats_df.empty:
+                stats_df.to_excel(
+                    writer,
+                    sheet_name="统计表",
+                    index=False,
+                )
+            farm_stats_df = _build_farm_abnormal_stats(abnormal_df)
+            if not farm_stats_df.empty:
+                farm_stats_df.to_excel(
+                    writer,
+                    sheet_name="分牧场统计表",
+                    index=False,
+                )
+
+        emit_progress(100, "母牛近交分析完成")
+        return True, f"母牛近交分析完成，共 {len(results)} 头母牛"
+    except Exception as exc:
+        logger.exception("母牛近交分析失败: %s", exc)
+        return False, f"母牛近交分析失败: {exc}"
+
+
+def run_inbreeding_analysis(
+    project_path,
+    analysis_type,
+    progress_cb=None,
+    *,
+    allow_missing_bull_upload=True,
+):
     """
     近交系数及隐性基因分析 - 无GUI版本
 
@@ -269,6 +582,9 @@ def run_inbreeding_analysis(project_path, analysis_type, progress_cb=None):
         project_path: 项目路径
         analysis_type: 'mated' 或 'candidate'
         progress_cb: 进度回调 (percent, message)
+        allow_missing_bull_upload: 是否将数据库缺失公牛上报服务端。
+            默认 True 保持现有自动分析行为；离线验收、重算和其它不得产生
+            外部写入的调用方必须显式传 False。
 
     Returns:
         Tuple[bool, str]: (成功, 消息)
@@ -314,7 +630,7 @@ def run_inbreeding_analysis(project_path, analysis_type, progress_cb=None):
         emit_progress(45, f"找到 {len(bull_genes)} 个公牛基因信息")
 
         # 5. 处理缺失公牛（静默上传）
-        if missing_bulls:
+        if missing_bulls and allow_missing_bull_upload:
             _upload_missing_bulls(missing_bulls, f'隐性基因筛查_{analysis_type}')
 
         # 6. 分析配对
@@ -381,12 +697,33 @@ def _collect_required_bulls(analysis_type, project_path, pedigree_db):
     bull_sources = {}
 
     cow_file = project_path / "standardized_data" / "processed_cow_data.xlsx"
-    cow_df = pd.read_excel(cow_file)
-    if analysis_type == 'candidate':
-        cow_df = cow_df[cow_df['是否在场'] == '是']
+    cow_df = pd.read_excel(cow_file, dtype={'cow_id': str, 'sire': str})
+
+    if analysis_type == 'mated':
+        breeding_file = project_path / "standardized_data" / "processed_breeding_data.xlsx"
+        breeding_df = pd.read_excel(
+            breeding_file,
+            dtype={'耳号': str, '父号': str, '冻精编号': str},
+        )
+        scope = build_inbreeding_analysis_scope(
+            analysis_type,
+            cow_df,
+            breeding_df=breeding_df,
+        )
+    else:
+        bull_file = project_path / "standardized_data" / "processed_bull_data.xlsx"
+        bull_df = pd.read_excel(bull_file, dtype={'bull_id': str})
+        scope = build_inbreeding_analysis_scope(
+            analysis_type,
+            cow_df,
+            candidate_bull_df=bull_df,
+            standardize_bull_id=lambda value: pedigree_db.standardize_animal_id(
+                value, 'bull'
+            ),
+        )
 
     # 收集母牛父号
-    sire_ids = cow_df['sire'].dropna().astype(str).unique()
+    sire_ids = scope.cows['sire'].dropna().astype(str).unique()
     for sire_id in sire_ids:
         if sire_id and sire_id.strip():
             standardized = pedigree_db.standardize_animal_id(sire_id, 'bull')
@@ -396,9 +733,9 @@ def _collect_required_bulls(analysis_type, project_path, pedigree_db):
 
     # 收集配种/备选公牛号
     if analysis_type == 'mated':
-        breeding_file = project_path / "standardized_data" / "processed_breeding_data.xlsx"
-        breeding_df = pd.read_excel(breeding_file, dtype={'耳号': str, '父号': str, '冻精编号': str})
-        bull_ids = breeding_df['冻精编号'].dropna().astype(str).unique()
+        bull_ids = (
+            scope.breeding_records['冻精编号'].dropna().astype(str).unique()
+        )
         for bull_id in bull_ids:
             if bull_id and bull_id.strip():
                 standardized = pedigree_db.standardize_animal_id(bull_id, 'bull')
@@ -406,15 +743,10 @@ def _collect_required_bulls(analysis_type, project_path, pedigree_db):
                     required_bulls.add(standardized)
                     bull_sources[standardized] = 'breeding'
     else:
-        bull_file = project_path / "standardized_data" / "processed_bull_data.xlsx"
-        bull_df = pd.read_excel(bull_file)
-        bull_ids = bull_df['bull_id'].dropna().astype(str).unique()
-        for bull_id in bull_ids:
-            if bull_id and bull_id.strip():
-                standardized = pedigree_db.standardize_animal_id(bull_id, 'bull')
-                if standardized:
-                    required_bulls.add(standardized)
-                    bull_sources[standardized] = 'candidate'
+        for standardized in scope.candidate_bulls[STANDARDIZED_BULL_ID_COLUMN]:
+            if standardized:
+                required_bulls.add(standardized)
+                bull_sources[standardized] = 'candidate'
 
     required_bulls = {b for b in required_bulls if b and b.strip()}
     return required_bulls, bull_sources
@@ -522,6 +854,14 @@ def _analyze_mated_pairs(project_path, bull_genes, pedigree_db, progress_cb=None
     df = add_farm_lineage_columns(
         df, project_path, animal_id_column='耳号'
     )
+    cow_file = project_path / "standardized_data" / "processed_cow_data.xlsx"
+    cow_df = pd.read_excel(cow_file, dtype={'cow_id': str, 'sire': str})
+    scope = build_inbreeding_analysis_scope(
+        'mated',
+        cow_df,
+        breeding_df=df,
+    )
+    df = scope.breeding_records
 
     missing_gene_default = {gene: 'missing data' for gene in DEFECT_GENES}
 
@@ -568,14 +908,23 @@ def _analyze_candidate_pairs(project_path, bull_genes, pedigree_db, progress_cb=
     cow_file = project_path / "standardized_data" / "processed_cow_data.xlsx"
     bull_file = project_path / "standardized_data" / "processed_bull_data.xlsx"
 
-    cow_df = pd.read_excel(cow_file)
+    cow_df = pd.read_excel(cow_file, dtype={'cow_id': str, 'sire': str})
     from core.data.processor import add_farm_lineage_columns
     cow_df = add_farm_lineage_columns(
         cow_df, project_path, animal_id_column='cow_id'
     )
-    bull_df = pd.read_excel(bull_file)
+    bull_df = pd.read_excel(bull_file, dtype={'bull_id': str})
 
-    cow_df = cow_df[cow_df['是否在场'] == '是']
+    scope = build_inbreeding_analysis_scope(
+        'candidate',
+        cow_df,
+        candidate_bull_df=bull_df,
+        standardize_bull_id=lambda value: pedigree_db.standardize_animal_id(
+            value, 'bull'
+        ),
+    )
+    cow_df = scope.cows
+    bull_df = scope.candidate_bulls
     missing_gene_default = {gene: 'missing data' for gene in DEFECT_GENES}
 
     for _, cow_row in cow_df.iterrows():
@@ -585,8 +934,8 @@ def _analyze_candidate_pairs(project_path, bull_genes, pedigree_db, progress_cb=
         cow_genes = bull_genes.get(sire_id, missing_gene_default)
 
         for _, bull_row in bull_df.iterrows():
-            original_bull_id = str(bull_row['bull_id'])
-            bull_id_std = pedigree_db.standardize_animal_id(original_bull_id, 'bull')
+            original_bull_id = str(bull_row[ORIGINAL_BULL_ID_COLUMN])
+            bull_id_std = str(bull_row[STANDARDIZED_BULL_ID_COLUMN])
             candidate_genes = bull_genes.get(bull_id_std, missing_gene_default)
 
             gene_results = _analyze_gene_safety(cow_genes, candidate_genes)
@@ -727,6 +1076,68 @@ def _collect_abnormal_pairs(results):
     return abnormal_df, stats_df
 
 
+def _collect_cow_self_abnormal(results):
+    """按 UI 母牛近交分析口径生成异常明细与统计。"""
+    abnormal_records = []
+    gene_stats = {gene: 0 for gene in DEFECT_GENES}
+    inbreeding_count = 0
+
+    for result in results:
+        for gene in DEFECT_GENES:
+            if result.get(gene) == "仅母牛父亲携带":
+                abnormal_records.append(
+                    {
+                        "牧场编号": result.get("牧场编号", ""),
+                        "牧场名称": result.get("牧场名称", ""),
+                        "母牛号": result["母牛号"],
+                        "父号": result["父号"],
+                        "公牛号": "",
+                        "异常类型": gene,
+                        "状态": "母牛父系携带隐性基因",
+                    }
+                )
+                gene_stats[gene] += 1
+
+        try:
+            value = (
+                float(
+                    str(result.get("近交系数", "0%"))
+                    .strip("%")
+                )
+                / 100
+            )
+        except (TypeError, ValueError):
+            continue
+        if value > 0.0625:
+            abnormal_records.append(
+                {
+                    "牧场编号": result.get("牧场编号", ""),
+                    "牧场名称": result.get("牧场名称", ""),
+                    "母牛号": result["母牛号"],
+                    "父号": result["父号"],
+                    "公牛号": "",
+                    "异常类型": "近交系数过高",
+                    "状态": f"{value:.3%}",
+                }
+            )
+            inbreeding_count += 1
+
+    abnormal_df = pd.DataFrame(abnormal_records)
+    stats_records = [
+        {"异常类型": gene, "数量": count}
+        for gene, count in gene_stats.items()
+        if count > 0
+    ]
+    if inbreeding_count > 0:
+        stats_records.append(
+            {
+                "异常类型": "近交系数过高",
+                "数量": inbreeding_count,
+            }
+        )
+    return abnormal_df, pd.DataFrame(stats_records)
+
+
 def _build_farm_abnormal_stats(abnormal_df):
     required = ['牧场编号', '牧场名称', '异常类型']
     if abnormal_df.empty or not all(column in abnormal_df.columns for column in required):
@@ -769,13 +1180,15 @@ def run_excel_report(
     service_staff=None,
     farm_name=None,
     max_workers=6,
+    include_mating=True,
 ):
     """生成Excel综合报告"""
     from core.excel_report.generator import ExcelReportGenerator
     gen = ExcelReportGenerator(project_path, service_staff=service_staff,
                                 progress_callback=progress_cb,
                                 farm_name=farm_name,
-                                max_workers=max_workers)
+                                max_workers=max_workers,
+                                include_mating=include_mating)
     return gen.generate()
 
 

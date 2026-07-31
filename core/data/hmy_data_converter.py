@@ -12,6 +12,32 @@ import pandas as pd
 class HMYDataConverter:
     """将慧牧云 API 牛群和配种字段转换为现有导入格式。"""
 
+    SEX_ENUM_MAPPING = {
+        "0": "母",
+        "0.0": "母",
+        "母": "母",
+        "female": "母",
+        "1": "公",
+        "1.0": "公",
+        "公": "公",
+        "male": "公",
+    }
+    ACTIVE_ENUM_MAPPING = {
+        "1": "是",
+        "1.0": "是",
+        "是": "是",
+        "true": "是",
+        "yes": "是",
+        "active": "是",
+        "0": "否",
+        "0.0": "否",
+        "否": "否",
+        "false": "否",
+        "no": "否",
+        "inactive": "否",
+    }
+    EMPTY_ENUM_VALUES = {"", "nan", "none", "null", "nat", "<na>"}
+
     FIELDS_NEED_PREFIX = ("cowId", "dam")
     BREEDING_FIELDS_NEED_PREFIX = ("cowId",)
     API_FARM_CODE_COLUMN = "API farmcode"
@@ -66,6 +92,78 @@ class HMYDataConverter:
             return False
         text = str(value).strip()
         return bool(text) and text.lower() not in {"nan", "none", "null"}
+
+    @classmethod
+    def _normalize_enum_value(
+        cls,
+        value,
+        mapping: dict[str, str],
+        *,
+        allow_boolean: bool,
+    ) -> tuple[str, bool]:
+        """规范化接口枚举，返回（规范值，是否为未知非空值）。"""
+        if value is None:
+            return "", False
+        try:
+            if bool(pd.isna(value)):
+                return "", False
+        except (TypeError, ValueError):
+            pass
+        if isinstance(value, bool) and not allow_boolean:
+            return "", True
+        if isinstance(value, bool):
+            text = "1" if value else "0"
+        else:
+            text = str(value).strip()
+        token = text.casefold()
+        if token in cls.EMPTY_ENUM_VALUES:
+            return "", False
+        normalized = mapping.get(token)
+        if normalized is None:
+            return "", True
+        return normalized, False
+
+    @classmethod
+    def _normalize_herd_enums(cls, frame: pd.DataFrame) -> pd.DataFrame:
+        """在写入 Excel 前校验并规范化慧牧云牛群枚举。"""
+        enum_fields = (
+            ("sex", cls.SEX_ENUM_MAPPING, False),
+            ("isAct", cls.ACTIVE_ENUM_MAPPING, True),
+        )
+        unknown_counts: dict[str, int] = {}
+        normalized_columns: dict[str, list[str]] = {}
+        for field, mapping, allow_boolean in enum_fields:
+            if field not in frame.columns:
+                continue
+            normalized_values = []
+            unknown_count = 0
+            for value in frame[field]:
+                normalized, is_unknown = cls._normalize_enum_value(
+                    value,
+                    mapping,
+                    allow_boolean=allow_boolean,
+                )
+                normalized_values.append(normalized)
+                unknown_count += int(is_unknown)
+            normalized_columns[field] = normalized_values
+            if unknown_count:
+                unknown_counts[field] = unknown_count
+
+        if unknown_counts:
+            details = "、".join(
+                f"{field} 字段 {unknown_counts[field]} 条"
+                for field in ("sex", "isAct")
+                if field in unknown_counts
+            )
+            raise ValueError(
+                "慧牧云牛群接口包含无法识别的非空枚举值："
+                + details
+            )
+
+        result = frame.copy()
+        for field, values in normalized_columns.items():
+            result[field] = values
+        return result
 
     @classmethod
     def split_farm_name(cls, value) -> tuple[str, str]:
@@ -159,7 +257,9 @@ class HMYDataConverter:
         if not records:
             raise ValueError("慧牧云接口返回的牛群数据为空")
 
-        frame = pd.DataFrame(records).rename(columns=cls.FIELD_MAPPING)
+        frame = cls._normalize_herd_enums(
+            pd.DataFrame(records)
+        ).rename(columns=cls.FIELD_MAPPING)
         if cls.API_FARM_CODE_COLUMN not in frame.columns:
             frame[cls.API_FARM_CODE_COLUMN] = ""
 

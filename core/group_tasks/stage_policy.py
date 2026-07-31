@@ -14,6 +14,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 
+from core.group_tasks.dataset_plan import (
+    BREEDING_RAW_RECEIPT,
+    BREEDING_STANDARDIZED_RECEIPT,
+    normalize_dataset_selection,
+    validate_empty_breeding_receipt_pair,
+)
 from core.group_tasks.stage_manifest import (
     commit_stage_manifest,
     validate_stage_manifest,
@@ -22,8 +28,8 @@ from core.group_tasks.stage_manifest import (
 
 STAGE_ORDER = ("data", "analysis", "child_excel")
 STAGE_POLICY_REVISIONS = {
-    "data": 1,
-    "analysis": 1,
+    "data": 2,
+    "analysis": 2,
     "child_excel": 1,
 }
 STAGE_MANIFEST_DIRECTORY = Path("group_store") / "stage_manifests"
@@ -46,9 +52,15 @@ RAW_DATA_FILES = (
     Path("raw_data") / "body_conformation.xlsx",
 )
 REGENERATED_RAW_DATA_FILES = RAW_DATA_FILES[:3]
+DATASET_RAW_DATA_FILES = (
+    Path("raw_data") / "cow_data.xlsx",
+    Path("raw_data") / "breeding_records.xlsx",
+    BREEDING_RAW_RECEIPT,
+)
 STANDARDIZED_DATA_FILES = (
     Path("standardized_data") / "processed_cow_data.xlsx",
     Path("standardized_data") / "processed_breeding_data.xlsx",
+    BREEDING_STANDARDIZED_RECEIPT,
     Path("standardized_data") / "processed_bull_data.xlsx",
     Path("standardized_data") / "processed_body_conformation_data.xlsx",
     Path("standardized_data") / "processed_genomic_data.xlsx",
@@ -109,15 +121,38 @@ def _existing(root: Path, relative_paths: Iterable[Path]) -> list[Path]:
     ]
 
 
-def _local_bundle_inputs(root: Path) -> list[Path]:
+def _local_bundle_inputs(
+    root: Path,
+    dataset_selection: Optional[Mapping[str, Any]] = None,
+) -> list[Path]:
     bundle = root / "raw_data" / "input_bundle"
     if not bundle.is_dir():
         return []
+    selection = (
+        normalize_dataset_selection(dataset_selection)
+        if dataset_selection is not None
+        else None
+    )
+    excluded_names = set()
+    if selection is not None and not selection["breeding"]:
+        excluded_names = {
+            "raw_data/breeding_records.xlsx",
+            "standardized_data/processed_breeding_data.xlsx",
+        }
     return sorted(
         (
             path
             for path in bundle.rglob("*")
             if _is_managed_file(path)
+            and path.relative_to(bundle).as_posix()
+            not in excluded_names
+            and not (
+                selection is not None
+                and not selection["breeding"]
+                and path.relative_to(bundle).as_posix().startswith(
+                    "input_sources/breeding_original"
+                )
+            )
         ),
         key=lambda path: path.relative_to(root).as_posix(),
     )
@@ -137,10 +172,26 @@ def _genomic_raw_inputs(root: Path) -> list[Path]:
     )
 
 
-def _analysis_outputs(root: Path) -> list[Path]:
+def _analysis_outputs(
+    root: Path,
+    *,
+    allow_breeding: bool = True,
+) -> list[Path]:
     outputs = _existing(root, ANALYSIS_FIXED_FILES)
+    if not allow_breeding:
+        breeding_dependent = {
+            root
+            / "analysis_results"
+            / "processed_mated_bull_traits.xlsx",
+        }
+        outputs = [
+            path for path in outputs
+            if path not in breeding_dependent
+        ]
     directory = root / "analysis_results"
     for pattern in ANALYSIS_LATEST_PATTERNS:
+        if not allow_breeding and pattern.startswith("已配公牛_"):
+            continue
         candidates = [
             path
             for path in directory.glob(pattern)
@@ -156,18 +207,42 @@ def _analysis_outputs(root: Path) -> list[Path]:
     )
 
 
-def _data_outputs(root: Path, source_kind: str) -> list[Path]:
-    relative_paths = [
-        Path("standardized_data") / "processed_cow_data.xlsx"
-    ]
-    if (root / "raw_data" / "breeding_records.xlsx").is_file():
-        relative_paths.append(
-            Path("standardized_data") / "processed_breeding_data.xlsx"
-        )
-    if (root / "raw_data" / "semen_inventory.xlsx").is_file():
-        relative_paths.append(
-            Path("standardized_data") / "processed_bull_data.xlsx"
-        )
+def _data_outputs(
+    root: Path,
+    source_kind: str,
+    dataset_selection: Optional[Mapping[str, Any]] = None,
+) -> list[Path]:
+    if dataset_selection is None:
+        # 旧清单沿用原始能力推断，保证没有 dataset_selection 的既有
+        # 项目仍可校验和断点续用。
+        relative_paths = [
+            Path("standardized_data") / "processed_cow_data.xlsx"
+        ]
+        if (root / "raw_data" / "breeding_records.xlsx").is_file():
+            relative_paths.append(
+                Path("standardized_data") / "processed_breeding_data.xlsx"
+            )
+        if (root / "raw_data" / "semen_inventory.xlsx").is_file():
+            relative_paths.append(
+                Path("standardized_data") / "processed_bull_data.xlsx"
+            )
+    else:
+        selected = normalize_dataset_selection(dataset_selection)
+        relative_paths = []
+        if selected["herd"]:
+            relative_paths.append(
+                Path("standardized_data") / "processed_cow_data.xlsx"
+            )
+        if selected["breeding"]:
+            breeding_file = (
+                Path("standardized_data")
+                / "processed_breeding_data.xlsx"
+            )
+            receipt_file = BREEDING_STANDARDIZED_RECEIPT
+            if (root / breeding_file).is_file():
+                relative_paths.append(breeding_file)
+            elif (root / receipt_file).is_file():
+                relative_paths.append(receipt_file)
     if source_kind == "local":
         relative_paths.append(
             Path("standardized_data") / "local_data_commit.json"
@@ -221,7 +296,7 @@ def _relative_names(root: Path, paths: Iterable[Path]) -> list[str]:
     ]
 
 
-def _load_child_identity(root: Path) -> Dict[str, str]:
+def _load_child_identity(root: Path) -> Dict[str, Any]:
     metadata_path = root / "project_metadata.json"
     try:
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -232,6 +307,19 @@ def _load_child_identity(root: Path) -> Dict[str, str]:
     farms = metadata.get("farms")
     if not isinstance(farms, list) or len(farms) != 1:
         raise StagePolicyError("牧场组子项目必须且只能包含一个牧场")
+    selection_explicit = bool(
+        metadata.get(
+            "dataset_selection_explicit",
+            "dataset_selection" in metadata,
+        )
+    )
+    source_kind = str(
+        farms[0].get("source_kind") or "api"
+    ).strip()
+    selection = normalize_dataset_selection(
+        metadata.get("dataset_selection"),
+        has_local_farms=source_kind == "local",
+    )
     return {
         "task_id": str(metadata.get("group_task_id") or "").strip(),
         "farm_code": str(
@@ -246,9 +334,9 @@ def _load_child_identity(root: Path) -> Dict[str, str]:
             or farms[0].get("source_system")
             or ""
         ).strip(),
-        "source_kind": str(
-            farms[0].get("source_kind") or "api"
-        ).strip(),
+        "source_kind": source_kind,
+        "dataset_selection": selection,
+        "dataset_selection_explicit": selection_explicit,
     }
 
 
@@ -302,33 +390,161 @@ def _definition(
     stage: str,
     *,
     report_path: Optional[Path] = None,
+    verification: str = "full",
 ) -> Dict[str, Any]:
     root = Path(root_path).resolve()
+    if verification not in {"full", "stat"}:
+        raise ValueError("verification 只能是 'full' 或 'stat'")
     identity = _load_child_identity(root)
     if stage not in STAGE_ORDER:
         raise ValueError(f"不支持的牧场组阶段: {stage}")
 
-    raw_files = (
-        _existing(root, REGENERATED_RAW_DATA_FILES)
-        + _local_bundle_inputs(root)
-    )
+    if identity["dataset_selection_explicit"]:
+        selected_raw = []
+        if identity["dataset_selection"]["herd"]:
+            selected_raw.append(Path("raw_data") / "cow_data.xlsx")
+        if identity["dataset_selection"]["breeding"]:
+            if (root / "raw_data" / "breeding_records.xlsx").is_file():
+                selected_raw.append(
+                    Path("raw_data") / "breeding_records.xlsx"
+                )
+            elif (root / BREEDING_RAW_RECEIPT).is_file():
+                selected_raw.append(BREEDING_RAW_RECEIPT)
+        raw_files = _existing(root, selected_raw) + _local_bundle_inputs(
+            root,
+            identity["dataset_selection"],
+        )
+    else:
+        raw_files = (
+            _existing(root, REGENERATED_RAW_DATA_FILES)
+            + _local_bundle_inputs(root)
+        )
     standardized_files = _existing(root, STANDARDIZED_DATA_FILES)
-    analysis_files = _analysis_outputs(root)
+    if identity["dataset_selection_explicit"]:
+        excluded_standardized = set()
+        if not identity["dataset_selection"]["herd"]:
+            excluded_standardized.add(
+                root / "standardized_data" / "processed_cow_data.xlsx"
+            )
+        if not identity["dataset_selection"]["breeding"]:
+            excluded_standardized.update(
+                {
+                    root
+                    / "standardized_data"
+                    / "processed_breeding_data.xlsx",
+                    root / BREEDING_STANDARDIZED_RECEIPT,
+                }
+            )
+        standardized_files = [
+            path
+            for path in standardized_files
+            if path not in excluded_standardized
+        ]
+    analysis_files = _analysis_outputs(
+        root,
+        allow_breeding=(
+            identity["dataset_selection"]["breeding"]
+            if identity["dataset_selection_explicit"]
+            else True
+        ),
+    )
 
     if stage == "data":
         inputs = raw_files
-        outputs = _data_outputs(root, identity["source_kind"])
-        required = root / "standardized_data" / "processed_cow_data.xlsx"
-        if required not in outputs:
+        outputs = _data_outputs(
+            root,
+            identity["source_kind"],
+            (
+                identity["dataset_selection"]
+                if identity["dataset_selection_explicit"]
+                else None
+            ),
+        )
+        selection = identity["dataset_selection"]
+        cow_output = (
+            root / "standardized_data" / "processed_cow_data.xlsx"
+        )
+        breeding_output = (
+            root
+            / "standardized_data"
+            / "processed_breeding_data.xlsx"
+        )
+        breeding_receipt = root / BREEDING_STANDARDIZED_RECEIPT
+        if (
+            (selection["herd"] or not identity["dataset_selection_explicit"])
+            and cow_output not in outputs
+        ):
             raise StagePolicyError("数据阶段缺少 processed_cow_data.xlsx")
+        if (
+            identity["dataset_selection_explicit"]
+            and selection["herd"]
+            and (root / "raw_data" / "cow_data.xlsx") not in inputs
+        ):
+            raise StagePolicyError("牛群数据阶段缺少本轮原始 cow_data.xlsx")
+        if (
+            identity["dataset_selection_explicit"]
+            and selection["breeding"]
+        ):
+            breeding_artifacts = [
+                path
+                for path in (breeding_output, breeding_receipt)
+                if path in outputs
+            ]
+            if len(breeding_artifacts) != 1:
+                raise StagePolicyError(
+                    "配种数据阶段必须生成标准化结果或 0 条回执（二选一）"
+                )
+            raw_breeding = root / "raw_data" / "breeding_records.xlsx"
+            raw_receipt = root / BREEDING_RAW_RECEIPT
+            if breeding_output in breeding_artifacts:
+                if raw_breeding not in inputs:
+                    raise StagePolicyError(
+                        "配种数据阶段缺少本轮原始 breeding_records.xlsx"
+                    )
+            else:
+                if raw_receipt not in inputs:
+                    raise StagePolicyError(
+                        "配种数据阶段缺少本轮原始 0 条回执"
+                    )
+                validate_empty_breeding_receipt_pair(
+                    raw_receipt,
+                    breeding_receipt,
+                    expected_data_source=identity["data_source"],
+                    expected_farm_codes=[identity["farm_code"]],
+                )
+        policy_revision = (
+            STAGE_POLICY_REVISIONS[stage]
+            if identity["dataset_selection_explicit"]
+            else 1
+        )
         config: Dict[str, Any] = {
-            "policy_revision": STAGE_POLICY_REVISIONS[stage],
+            "policy_revision": policy_revision,
             "data_source": identity["data_source"],
             "source_kind": identity["source_kind"],
             "raw_input_set": _relative_names(root, inputs),
             "standardized_output_set": _relative_names(root, outputs),
         }
+        if identity["dataset_selection_explicit"]:
+            config["dataset_selection"] = dict(selection)
     elif stage == "analysis":
+        if not identity["dataset_selection"]["herd"]:
+            raise StagePolicyError("未选择牛群/系谱数据，不能提交分析阶段")
+        data_definition = _definition(
+            root,
+            "data",
+            verification=verification,
+        )
+        data_validation = validate_stage_manifest(
+            root,
+            stage_manifest_path("data"),
+            expected_task_id=identity["task_id"],
+            expected_farm_code=identity["farm_code"],
+            expected_stage="data",
+            expected_config=data_definition["config"],
+            verification=verification,
+        )
+        if not data_validation.get("valid"):
+            raise StagePolicyError("分析阶段缺少有效且包含牛群数据的数据清单")
         inputs = standardized_files
         outputs = analysis_files
         missing = [
@@ -341,13 +557,28 @@ def _definition(
                 "分析阶段缺少核心结果: " + "、".join(missing)
             )
         config = {
-            "policy_revision": STAGE_POLICY_REVISIONS[stage],
+            "policy_revision": (
+                STAGE_POLICY_REVISIONS[stage]
+                if identity["dataset_selection_explicit"]
+                else 1
+            ),
             "data_source": identity["data_source"],
             "standardized_input_set": _relative_names(root, inputs),
             "analysis_output_set": _relative_names(root, outputs),
-            "capabilities": _capabilities(root),
+            "capabilities": _capabilities(
+                root,
+                (
+                    identity["dataset_selection"]
+                    if identity["dataset_selection_explicit"]
+                    else None
+                ),
+            ),
             **_analysis_configuration(),
         }
+        if identity["dataset_selection_explicit"]:
+            config["dataset_selection"] = dict(
+                identity["dataset_selection"]
+            )
     else:
         inputs = standardized_files + analysis_files
         selected_report = Path(report_path).resolve() if report_path else _latest_report(root)
@@ -369,7 +600,14 @@ def _definition(
             "report_relative_path": selected_report.relative_to(
                 root
             ).as_posix(),
-            "capabilities": _capabilities(root),
+            "capabilities": _capabilities(
+                root,
+                (
+                    identity["dataset_selection"]
+                    if identity["dataset_selection_explicit"]
+                    else None
+                ),
+            ),
         }
 
     if not inputs:
@@ -402,10 +640,20 @@ def _definition(
     }
 
 
-def _capabilities(root: Path) -> Dict[str, bool]:
+def _capabilities(
+    root: Path,
+    dataset_selection: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, bool]:
     standardized = root / "standardized_data"
+    selection = (
+        normalize_dataset_selection(dataset_selection)
+        if dataset_selection is not None
+        else None
+    )
     return {
-        "breeding": (
+        "breeding": bool(
+            selection is None or selection["breeding"]
+        ) and (
             standardized / "processed_breeding_data.xlsx"
         ).is_file(),
         "candidate_bulls": (
@@ -460,7 +708,11 @@ def validate_child_stage(
     """验证当前阶段清单、输入、输出、身份和算法口径。"""
     root = Path(root_path).resolve()
     try:
-        definition = _definition(root, stage)
+        definition = _definition(
+            root,
+            stage,
+            verification=verification,
+        )
     except Exception as exc:
         return {
             "valid": False,
@@ -502,11 +754,29 @@ def invalidate_stage_and_downstream(
     # 先把本阶段上一轮产物移出正式目录。不能删除，也不能让本轮可选
     # 分析失败后继续拾取上一轮同名或时间戳结果。
     if stage == "data":
-        identity = _load_child_identity(root)
-        previous_outputs = _data_outputs(
+        # 不论本轮选择什么，都先隔离上一轮 cow/breeding 正式产物；
+        # 这样 herd-only 不会误拾旧配种记录，breeding-only 也不会
+        # 伪装成拥有母牛数据。全部移入历史目录，可恢复、不删除。
+        previous_outputs = _existing(
             root,
-            identity["source_kind"],
+            (
+                Path("standardized_data") / "processed_cow_data.xlsx",
+                Path("standardized_data")
+                / "processed_breeding_data.xlsx",
+                BREEDING_STANDARDIZED_RECEIPT,
+                Path("standardized_data") / "local_data_commit.json",
+            ),
         )
+        if (root / "raw_data" / "semen_inventory.xlsx").is_file():
+            previous_outputs.extend(
+                _existing(
+                    root,
+                    (
+                        Path("standardized_data")
+                        / "processed_bull_data.xlsx",
+                    ),
+                )
+            )
     elif stage == "analysis":
         previous_outputs = _all_analysis_managed_outputs(root)
     else:
@@ -526,7 +796,10 @@ def invalidate_stage_and_downstream(
         archived.append(target)
 
     if stage == "data":
-        for source in _existing(root, REGENERATED_RAW_DATA_FILES):
+        for source in _existing(
+            root,
+            REGENERATED_RAW_DATA_FILES + (BREEDING_RAW_RECEIPT,),
+        ):
             relative = source.relative_to(root)
             target = output_history / relative
             target.parent.mkdir(parents=True, exist_ok=True)

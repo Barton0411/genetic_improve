@@ -22,6 +22,7 @@ BREED_CORRECTIONS = {
 # 允许的品种代码集合，包括单字母和双字母
 ALLOWED_BREED_CODES = set(BREED_CORRECTIONS.values()) | {'H', 'J', 'B', 'W', 'X', 'A', 'M', 'G'}
 
+API_FARM_CODE_COLUMN = "API farmcode"
 FARM_CODE_COLUMN = "牧场编号"
 FARM_NAME_COLUMN = "牧场名称"
 
@@ -66,6 +67,11 @@ def add_farm_lineage_columns(
     farms = _load_project_farms(project_path)
     name_by_code = {farm["code"]: farm["name"] for farm in farms if farm["code"]}
 
+    if API_FARM_CODE_COLUMN in result.columns:
+        result[API_FARM_CODE_COLUMN] = result[API_FARM_CODE_COLUMN].map(
+            _normalize_farm_code
+        )
+
     if FARM_CODE_COLUMN not in result.columns:
         result[FARM_CODE_COLUMN] = ""
     result[FARM_CODE_COLUMN] = result[FARM_CODE_COLUMN].map(_normalize_farm_code)
@@ -94,7 +100,15 @@ def add_farm_lineage_columns(
     if len(farms) == 1:
         result.loc[result[FARM_NAME_COLUMN].eq(""), FARM_NAME_COLUMN] = farms[0]["name"]
 
-    lineage_columns = [FARM_CODE_COLUMN, FARM_NAME_COLUMN]
+    lineage_columns = [
+        column
+        for column in (
+            API_FARM_CODE_COLUMN,
+            FARM_CODE_COLUMN,
+            FARM_NAME_COLUMN,
+        )
+        if column in result.columns
+    ]
     other_columns = [column for column in result.columns if column not in lineage_columns]
     return result[other_columns + lineage_columns]
 
@@ -1171,11 +1185,39 @@ def preprocess_cow_data(cow_df, progress_callback=None, source_system: str = "�
             empty_str_count = (cow_df['是否在场'] == '').sum()
             total_empty = empty_in_herd_count + empty_str_count
             if total_empty > 0:
-                cow_df['是否在场'] = cow_df['是否在场'].replace('', np.nan).fillna('是')
-                print(f"[DEBUG-4.4] 是否在场字段有 {total_empty} 个空值，已默认填充为 '是'")
+                if source_system == "慧牧云":
+                    cow_df['是否在场'] = (
+                        cow_df['是否在场']
+                        .replace('', np.nan)
+                        .fillna('')
+                    )
+                    print(
+                        f"[DEBUG-4.4] 慧牧云是否在场字段有 "
+                        f"{total_empty} 个空值，保持为未确定状态"
+                    )
+                else:
+                    cow_df['是否在场'] = (
+                        cow_df['是否在场']
+                        .replace('', np.nan)
+                        .fillna('是')
+                    )
+                    print(
+                        f"[DEBUG-4.4] 是否在场字段有 {total_empty} "
+                        "个空值，已默认填充为 '是'"
+                    )
         else:
-            cow_df['是否在场'] = '是'
-            print("[DEBUG-4.4] 是否在场字段不存在，已创建并填充为 '是'")
+            if source_system == "慧牧云":
+                cow_df['是否在场'] = ''
+                print(
+                    "[DEBUG-4.4] 慧牧云是否在场字段不存在，"
+                    "已创建为空的未确定状态"
+                )
+            else:
+                cow_df['是否在场'] = '是'
+                print(
+                    "[DEBUG-4.4] 是否在场字段不存在，"
+                    "已创建并填充为 '是'"
+                )
 
         # 处理 age（月龄）字段：从 days_of_age 或 birth_date 计算
         if 'age' not in cow_df.columns:
@@ -1211,8 +1253,11 @@ def preprocess_cow_data(cow_df, progress_callback=None, source_system: str = "�
             "cow_id", "breed", "sex", "sire", "dam", "mgs", "mgd", "mmgs",
             "lac", "calving_date", "birth_date", "birth_date_dam", "birth_date_mgd", "age",
             "services_time", "DIM", "peak_milk", "milk_305", "repro_status",
-            "group", "是否在场", FARM_CODE_COLUMN, FARM_NAME_COLUMN
+            "group", "是否在场",
         ]
+        if API_FARM_CODE_COLUMN in cow_df.columns:
+            columns_to_keep.append(API_FARM_CODE_COLUMN)
+        columns_to_keep.extend([FARM_CODE_COLUMN, FARM_NAME_COLUMN])
 
         # 先添加dam相关的派生列（移到前面，在调整列顺序之前）
         print("[DEBUG-6] 添加dam相关派生列...")
@@ -1399,12 +1444,13 @@ def preprocess_cow_data(cow_df, progress_callback=None, source_system: str = "�
 
         # 检查重复的cow_id
         print("[DEBUG-13] 检查重复的cow_id...")
+        duplicate_lineage_needs_rebuild = False
         try:
             duplicate_cows = cow_df[cow_df.duplicated(subset=['cow_id'], keep=False)]
             if not duplicate_cows.empty:
                 duplicate_count = len(duplicate_cows['cow_id'].unique())
                 print(f"  - 发现{duplicate_count}个重复的母牛号")
-                msg = f"发现{duplicate_count}个重复的母牛号。将按以下优先级保留记录：\n1. 性别为母牛\n2. 在群状态\n3. 出生日期最近\n4. 胎次最小\n5. 随机选择"
+                msg = f"发现{duplicate_count}个重复的母牛号。将按以下优先级保留记录：\n1. 性别为母牛\n2. 在群状态\n3. 出生日期最近\n4. 胎次最小\n5. 原始顺序第一条"
                 if progress_callback:
                     progress_callback(msg)
 
@@ -1430,9 +1476,10 @@ def preprocess_cow_data(cow_df, progress_callback=None, source_system: str = "�
                         elif group['lac'].notna().any():
                             return group.loc[group['lac'].idxmin()]
 
-                        # 5. 如果以上条件都不满足，随机选择一条记录
+                        # 5. 如果以上条件都不满足，保留原始顺序第一条，
+                        # 避免相同输入在不同运行中得到不同结果。
                         else:
-                            return group.sample(n=1).iloc[0]
+                            return group.iloc[0]
                     except Exception as e:
                         import logging
                         print(f"[DEBUG-ERROR] 选择要保留的记录时出错: {e}")
@@ -1443,7 +1490,18 @@ def preprocess_cow_data(cow_df, progress_callback=None, source_system: str = "�
                 # 按cow_id分组，应用选择函数
                 try:
                     print("  - 开始处理重复记录...")
-                    cow_df = cow_df.groupby('cow_id').apply(select_record).reset_index(drop=True)
+                    cow_df = cow_df.reset_index(drop=True)
+                    selected_indices = []
+                    for _, duplicate_group in cow_df.groupby(
+                        'cow_id',
+                        sort=False,
+                        dropna=False,
+                    ):
+                        selected_indices.append(
+                            select_record(duplicate_group).name
+                        )
+                    cow_df = cow_df.loc[selected_indices].reset_index(drop=True)
+                    duplicate_lineage_needs_rebuild = True
                     print(f"  - 处理后记录数: {len(cow_df)}")
                 except Exception as e:
                     import logging
@@ -1455,6 +1513,42 @@ def preprocess_cow_data(cow_df, progress_callback=None, source_system: str = "�
             import logging
             print(f"[DEBUG-ERROR] 检查重复的cow_id时出错: {e}")
             logging.error(f"检查重复的cow_id时出错: {e}")
+
+        # 上面的血缘映射最初基于去重前的全部记录建立；若同一牛号存在
+        # 不同出生日期或母号，映射中的最后一行可能不是最终保留行。
+        # 仅在实际完成去重后重建派生字段，避免改变无重复数据的现有流程。
+        if duplicate_lineage_needs_rebuild:
+            print("[DEBUG-13.1] 基于最终保留记录重建母系血缘派生字段...")
+            retained_birth_map = {}
+            retained_dam_map = {}
+            for _, row in cow_df.iterrows():
+                retained_cow_id = row['cow_id']
+                if pd.isna(retained_cow_id):
+                    continue
+                retained_birth_map[retained_cow_id] = row['birth_date']
+                retained_dam_map[retained_cow_id] = (
+                    row['dam'] if pd.notna(row['dam']) else None
+                )
+
+            def find_retained_birth_date(cow_id):
+                if pd.isna(cow_id):
+                    return pd.NaT
+                return retained_birth_map.get(cow_id, pd.NaT)
+
+            def find_retained_dam(cow_id):
+                if pd.isna(cow_id):
+                    return ''
+                retained_dam = retained_dam_map.get(cow_id)
+                return '' if pd.isna(retained_dam) else retained_dam
+
+            cow_df['birth_date_dam'] = cow_df['dam'].apply(
+                find_retained_birth_date
+            )
+            cow_df['mgd'] = cow_df['dam'].apply(find_retained_dam)
+            cow_df['birth_date_mgd'] = cow_df['mgd'].apply(
+                find_retained_birth_date
+            )
+            print("[DEBUG-13.1] 母系血缘派生字段重建完成")
 
         print("[DEBUG-14] 开始处理NAAB编号...")
         invalid_naab_numbers = set()
@@ -1563,7 +1657,9 @@ def process_cow_data_file(input_file: Path, project_path: Path, progress_callbac
         if source_system == "慧牧云":
             dtype_config = {
                 '耳号': str, '父号': str, '母号': str, '外祖父': str,
-                '外曾外祖父': str, FARM_CODE_COLUMN: str
+                '外曾外祖父': str,
+                API_FARM_CODE_COLUMN: str,
+                FARM_CODE_COLUMN: str,
             }
         elif source_system == "优源-DC305":
             dtype_config = {
@@ -1615,7 +1711,10 @@ def process_cow_data_file(input_file: Path, project_path: Path, progress_callbac
 
     # 确保所有ID列保持为字符串类型（保持原始格式）
     print("[DEBUG-FILE-7.1] 确保ID列保持原始字符串格式")
-    id_columns = ['cow_id', 'dam', 'sire', 'mgs', 'mgd', 'mmgs', FARM_CODE_COLUMN]
+    id_columns = [
+        'cow_id', 'dam', 'sire', 'mgs', 'mgd', 'mmgs',
+        API_FARM_CODE_COLUMN, FARM_CODE_COLUMN,
+    ]
     for col in id_columns:
         if col in df_cleaned.columns:
             # 先转为字符串
@@ -1982,13 +2081,25 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
         if input_file.suffix.lower() == '.csv':
             df_raw = pd.read_csv(
                 input_file,
-                dtype={'耳号': str, '母牛号': str, '冻精编号': str, FARM_CODE_COLUMN: str},
+                dtype={
+                    '耳号': str,
+                    '母牛号': str,
+                    '冻精编号': str,
+                    API_FARM_CODE_COLUMN: str,
+                    FARM_CODE_COLUMN: str,
+                },
             )
         else:
             # 🔧 关键修复：先读取，然后立即转换日期列为字符串
             df_raw = pd.read_excel(
                 input_file,
-                dtype={'耳号': str, '母牛号': str, '冻精编号': str, FARM_CODE_COLUMN: str},
+                dtype={
+                    '耳号': str,
+                    '母牛号': str,
+                    '冻精编号': str,
+                    API_FARM_CODE_COLUMN: str,
+                    FARM_CODE_COLUMN: str,
+                },
             )
         print(f"  ✓ 读取成功，原始数据形状: {df_raw.shape}")
         print(f"  ✓ 包含列: {', '.join(df_raw.columns)}")
@@ -2044,8 +2155,10 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
 
     # 慧牧云同时输出 API farmcode 与展示用牧场编号；内部归属必须使用
     # API farmcode，避免把七位展示编号误当作接口请求编码。
-    if 'API farmcode' in df_raw.columns:
-        df_raw[FARM_CODE_COLUMN] = df_raw['API farmcode']
+    if API_FARM_CODE_COLUMN in df_raw.columns:
+        df_raw[API_FARM_CODE_COLUMN] = df_raw[
+            API_FARM_CODE_COLUMN
+        ].map(_normalize_farm_code)
 
     for target_col, possible_names in column_mappings.items():
         if target_col not in df_raw.columns:
@@ -2292,7 +2405,12 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
     if cow_df is not None and not cow_df.empty and 'cow_id' in cow_df.columns:
         cow_lookup_columns = [
             column
-            for column in ['cow_id', FARM_CODE_COLUMN, FARM_NAME_COLUMN]
+            for column in [
+                'cow_id',
+                API_FARM_CODE_COLUMN,
+                FARM_CODE_COLUMN,
+                FARM_NAME_COLUMN,
+            ]
             if column in cow_df.columns
         ]
         if len(cow_lookup_columns) > 1:
@@ -2302,6 +2420,22 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
                 .set_index('cow_id')
             )
             ear_ids = df_cleaned['耳号'].fillna('').astype(str)
+            if API_FARM_CODE_COLUMN in cow_lineage.columns:
+                mapped_api_codes = ear_ids.map(
+                    cow_lineage[API_FARM_CODE_COLUMN]
+                )
+                if API_FARM_CODE_COLUMN not in df_cleaned.columns:
+                    df_cleaned[API_FARM_CODE_COLUMN] = mapped_api_codes
+                else:
+                    missing = df_cleaned[API_FARM_CODE_COLUMN].isna() | (
+                        df_cleaned[API_FARM_CODE_COLUMN]
+                        .astype(str)
+                        .str.strip()
+                        .eq("")
+                    )
+                    df_cleaned.loc[
+                        missing, API_FARM_CODE_COLUMN
+                    ] = mapped_api_codes[missing]
             if FARM_CODE_COLUMN in cow_lineage.columns:
                 mapped_codes = ear_ids.map(cow_lineage[FARM_CODE_COLUMN])
                 if FARM_CODE_COLUMN not in df_cleaned.columns:
@@ -2329,15 +2463,23 @@ def process_breeding_record_file(input_file: Path, project_path: Path, cow_df=No
     print(f"\n【步骤11】重新排列列顺序")
     columns_order = [
         '耳号', '父号', '冻精编号', '配种日期', '冻精类型',
-        FARM_CODE_COLUMN, FARM_NAME_COLUMN,
     ]
+    if API_FARM_CODE_COLUMN in df_cleaned.columns:
+        columns_order.append(API_FARM_CODE_COLUMN)
+    columns_order.extend([FARM_CODE_COLUMN, FARM_NAME_COLUMN])
     df_final = df_cleaned[columns_order].copy()
     print(f"  ✓ 列顺序: {' | '.join(columns_order)}")
 
     # ========== 第12步: 保存文件 ==========
     print(f"\n【步骤12】保存标准化文件")
     # 强制ID列为字符串类型，避免xlsx读出后被pandas推断为float（"241215" → 241215.0）
-    id_cols = ['耳号', '父号', '冻精编号', FARM_CODE_COLUMN]
+    id_cols = [
+        '耳号',
+        '父号',
+        '冻精编号',
+        API_FARM_CODE_COLUMN,
+        FARM_CODE_COLUMN,
+    ]
     for col in id_cols:
         if col in df_final.columns:
             df_final[col] = df_final[col].astype(str).replace({'nan': '', 'None': ''})

@@ -13,7 +13,14 @@ from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from core.group_tasks.dataset_plan import normalize_dataset_selection
 from core.group_tasks.lease_heartbeat import GroupLeaseHeartbeat
+from core.group_tasks.memory_guard import (
+    AdaptiveMemoryGuard,
+    ResourcePressureError,
+    boundary_pause_message,
+    runtime_pause_message,
+)
 from utils.file_manager import FileManager
 
 
@@ -27,6 +34,13 @@ CHILD_TERMINATION_GRACE_SECONDS = 3.0
 
 class ChildProcessInterrupted(RuntimeError):
     """单牧场子进程被系统终止，已提交阶段仍可继续复用。"""
+
+
+class MemoryPressureInterrupted(
+    ChildProcessInterrupted,
+    ResourcePressureError,
+):
+    """内存压力触发的安全暂停；应停止本批次并保留断点。"""
 
 
 class MultiFarmTaskWorker(QThread):
@@ -46,6 +60,8 @@ class MultiFarmTaskWorker(QThread):
         data_source: str,
         service_staff: str = "",
         full_analysis: bool = False,
+        memory_guard: AdaptiveMemoryGuard | None = None,
+        dataset_selection: dict | None = None,
     ):
         super().__init__()
         self.api_client = api_client
@@ -54,9 +70,137 @@ class MultiFarmTaskWorker(QThread):
         self.data_source = data_source
         self.service_staff = service_staff
         self.full_analysis = full_analysis
+        task_mode = "analysis" if full_analysis else "data_only"
+        has_local_farms = any(
+            str(farm.get("source_kind") or "api") == "local"
+            for farm in self.farms
+        )
+        self._requested_dataset_selection = (
+            None
+            if dataset_selection is None
+            else normalize_dataset_selection(
+                dataset_selection,
+                task_mode=task_mode,
+                has_local_farms=has_local_farms,
+            )
+        )
+        self.dataset_selection = normalize_dataset_selection(
+            dataset_selection,
+            task_mode=task_mode,
+            has_local_farms=has_local_farms,
+        )
         self._last_saved_progress = {}
         self._lease_store = None
         self._lease_heartbeat = None
+        self._memory_guard = memory_guard or AdaptiveMemoryGuard()
+
+    def _load_and_validate_dataset_selection(self) -> dict:
+        """从父任务恢复不可变选择，并核对 SQLite/子项目副本。"""
+        metadata = FileManager.load_project_metadata(self.project_path)
+        task_mode = str(metadata.get("task_mode") or "analysis")
+        expected_mode = "analysis" if self.full_analysis else "data_only"
+        if task_mode != expected_mode:
+            raise RuntimeError(
+                f"任务模式不一致：项目为 {task_mode}，"
+                f"本次运行请求为 {expected_mode}"
+            )
+        tasks = metadata.get("group_tasks") or []
+        has_local_farms = any(
+            str(task.get("source_kind") or "api") == "local"
+            for task in tasks
+        )
+        parent_explicit = bool(
+            metadata.get(
+                "dataset_selection_explicit",
+                "dataset_selection" in metadata,
+            )
+        )
+        persisted = normalize_dataset_selection(
+            metadata.get("dataset_selection"),
+            task_mode=task_mode,
+            has_local_farms=has_local_farms,
+        )
+        if (
+            self._requested_dataset_selection is not None
+            and self._requested_dataset_selection != persisted
+        ):
+            raise RuntimeError(
+                "本次数据集选择与项目创建时不一致，不能改变断点任务口径"
+            )
+
+        for task in tasks:
+            task_metadata = task.get("metadata") or {}
+            task_explicit = bool(
+                task_metadata.get(
+                    "dataset_selection_explicit",
+                    "dataset_selection" in task_metadata,
+                )
+            )
+            if task_explicit != parent_explicit:
+                raise RuntimeError("父任务与子任务的数据集选择标记不一致")
+            task_selection = normalize_dataset_selection(
+                task_metadata.get("dataset_selection"),
+                task_mode=task_mode,
+                has_local_farms=(
+                    str(task.get("source_kind") or "api") == "local"
+                ),
+            )
+            if task_selection != persisted:
+                raise RuntimeError("父任务与子任务的数据集选择不一致")
+
+            child_path = (
+                self.project_path / str(task.get("relative_path") or "")
+            )
+            child_metadata = FileManager.load_project_metadata(child_path)
+            child_explicit = bool(
+                child_metadata.get(
+                    "dataset_selection_explicit",
+                    "dataset_selection" in child_metadata,
+                )
+            )
+            if child_explicit != parent_explicit:
+                raise RuntimeError("父任务与子项目的数据集选择标记不一致")
+            child_selection = normalize_dataset_selection(
+                child_metadata.get("dataset_selection"),
+                task_mode=task_mode,
+                has_local_farms=(
+                    str(task.get("source_kind") or "api") == "local"
+                ),
+            )
+            if child_selection != persisted:
+                raise RuntimeError("父任务与子项目的数据集选择不一致")
+
+        self.dataset_selection = persisted
+        return metadata
+
+    def _check_memory_boundary(self, progress_value: int = 0) -> None:
+        """在单牧场安全边界检查内存，不按机器配置或牧场数限流。"""
+        assessment = self._memory_guard.assess_boundary()
+        if not assessment.should_pause:
+            return
+        message = boundary_pause_message(assessment)
+        logger.warning("牧场组任务因内存安全余量不足暂停：%s", message)
+        self.progress.emit(
+            max(0, min(100, int(progress_value))),
+            message,
+        )
+        raise MemoryPressureInterrupted(message)
+
+    def _check_data_stage_resources(self) -> None:
+        """在数据下载/转换/标准化步骤之间检查持续内存压力。
+
+        数据阶段依赖桌面当前登录态，不能把凭据复制到分析子进程。
+        因此这一阶段仍在工作线程内执行，并在各个安全步骤边界暂停。
+        """
+        assessment = self._memory_guard.poll_runtime()
+        if not assessment.should_pause:
+            return
+        raise MemoryPressureInterrupted(
+            runtime_pause_message(assessment).replace(
+                "已安全终止当前牧场子进程；",
+                "已在当前牧场数据处理的安全步骤边界暂停；",
+            )
+        )
 
     def _acquire_batch_lease(self) -> None:
         store = FileManager._group_task_store(self.project_path)
@@ -147,6 +291,7 @@ class MultiFarmTaskWorker(QThread):
             farm,
             data_source=self.data_source,
             progress_callback=callback,
+            dataset_selection=self.dataset_selection,
         )
 
     def _stage_update(self, task_id: str, stage_name: str, status: str, **extra):
@@ -159,6 +304,30 @@ class MultiFarmTaskWorker(QThread):
                 stage_name,
                 status=status,
                 **extra,
+            )
+
+    def _finish_running_stages(
+        self,
+        task_id: str,
+        *,
+        status: str,
+        error: str,
+    ) -> None:
+        """任务异常退出时同步收尾仍为 running 的阶段。"""
+        store = self._lease_store or FileManager._group_task_store(
+            self.project_path
+        )
+        if store is None:
+            return
+        task = store.get_task(task_id, with_stages=True) or {}
+        for stage_name, stage in (task.get("stages") or {}).items():
+            if stage.get("status") != "running":
+                continue
+            self._stage_update(
+                task_id,
+                stage_name,
+                status,
+                error=error,
             )
 
     def _heartbeat_silent_child(
@@ -337,6 +506,7 @@ class MultiFarmTaskWorker(QThread):
 
                     validate_local_data_commit(
                         child_path,
+                        expected_dataset_selection=self.dataset_selection,
                         expected_farm_code=code,
                         expected_task_id=task_id,
                     )
@@ -349,7 +519,16 @@ class MultiFarmTaskWorker(QThread):
             invalidate_stage_and_downstream(child_path, "data")
             self._stage_update(task_id, "data", "running")
             if is_local:
-                normalized = self._prepare_local_child(child_path, farm, relay)
+                def local_relay(value, message=""):
+                    self._check_data_stage_resources()
+                    relay(value, message)
+
+                normalized = self._prepare_local_child(
+                    child_path,
+                    farm,
+                    local_relay,
+                )
+                self._check_data_stage_resources()
                 download = False
             else:
                 download = True
@@ -362,6 +541,9 @@ class MultiFarmTaskWorker(QThread):
                 data_source=self.data_source,
                 local_farms=[],
                 reliability_mode=True,
+                group_batch_mode=True,
+                resource_check=self._check_data_stage_resources,
+                dataset_selection=self.dataset_selection,
             )
             child.progress.connect(relay)
             results = child.execute(
@@ -410,6 +592,8 @@ class MultiFarmTaskWorker(QThread):
         if not self.full_analysis:
             clear_force_recompute()
             return results
+        if not self.dataset_selection["herd"]:
+            raise RuntimeError("未选择牛群/系谱数据，不能进入批量分析")
 
         analysis_ready = bool(stage_validation("analysis").get("valid"))
         child_excel_ready = bool(
@@ -490,6 +674,20 @@ class MultiFarmTaskWorker(QThread):
         warnings = []
 
         try:
+            # 数据下载/标准化也可能改变主进程的内存占用，因此在真正
+            # 启动分析子进程前再次检查。此处仍是安全边界，没有临时
+            # 分析产物需要清理。
+            assessment = self._memory_guard.assess_boundary()
+            if assessment.should_pause:
+                message = boundary_pause_message(assessment)
+                self._stage_update(
+                    task_id,
+                    current_stage,
+                    "interrupted",
+                    error=message,
+                )
+                raise MemoryPressureInterrupted(message)
+
             process = subprocess.Popen(
                 command,
                 cwd=str(Path(__file__).resolve().parents[1]),
@@ -526,6 +724,18 @@ class MultiFarmTaskWorker(QThread):
 
                 now = time.monotonic()
                 return_code = process.poll()
+                if return_code is None:
+                    memory_assessment = self._memory_guard.poll_runtime()
+                    if memory_assessment.should_pause:
+                        message = runtime_pause_message(memory_assessment)
+                        self._terminate_child_process(process)
+                        self._stage_update(
+                            task_id,
+                            current_stage,
+                            "interrupted",
+                            error=message,
+                        )
+                        raise MemoryPressureInterrupted(message)
                 if return_code is not None:
                     if process_exit_seen_at is None:
                         process_exit_seen_at = now
@@ -659,6 +869,28 @@ class MultiFarmTaskWorker(QThread):
                 )
                 raise RuntimeError(message)
             if return_code != 0 or not result_event:
+                # 137/-9 是 Unix 下常见的 SIGKILL/OOM 表现，
+                # STATUS_NO_MEMORY 是 Windows 的明确内存不足退出码。
+                # 即使无法确定是 OOM，也应停下批次，避免随后牧场继续
+                # 放大系统压力；已提交阶段仍可断点复用。
+                if return_code in {
+                    -9,
+                    137,
+                    -1073741801,
+                    3221225495,
+                }:
+                    message = (
+                        "单牧场子进程被操作系统终止，可能是系统内存不足。"
+                        f"已保留已提交阶段，可从 {current_stage} 阶段重试；"
+                        "请先关闭其他应用释放内存后继续处理。"
+                    )
+                    self._stage_update(
+                        task_id,
+                        current_stage,
+                        "interrupted",
+                        error=message,
+                    )
+                    raise MemoryPressureInterrupted(message)
                 message = (
                     f"单牧场子进程异常退出（代码 {return_code}），"
                     f"可从 {current_stage} 阶段继续"
@@ -723,10 +955,11 @@ class MultiFarmTaskWorker(QThread):
     def run(self):
         try:
             self._acquire_batch_lease()
+            self._load_and_validate_dataset_selection()
             # 不能仅信任上次保存的 completed：先核验实际产物，缺失或
             # 半成品会被降为 stale，再进入本轮可恢复队列。
             FileManager.refresh_group_task_statuses(self.project_path)
-            metadata = FileManager.load_project_metadata(self.project_path)
+            metadata = self._load_and_validate_dataset_selection()
             tasks = metadata.get("group_tasks", [])
             specs = [
                 {
@@ -744,6 +977,8 @@ class MultiFarmTaskWorker(QThread):
 
             completed = []
             failed = []
+            paused_for_memory = False
+            memory_pause_reason = ""
             runnable = []
             for farm in self.farms:
                 try:
@@ -802,6 +1037,9 @@ class MultiFarmTaskWorker(QThread):
                     )
                     if child_path is None:
                         raise RuntimeError(f"找不到牧场子项目：{code}")
+                    self._check_memory_boundary(
+                        int(index / max(total, 1) * 90)
+                    )
                     FileManager.update_group_task(
                         self.project_path,
                         task_id,
@@ -844,18 +1082,48 @@ class MultiFarmTaskWorker(QThread):
                     self.sub_task_progress.emit(task_id, 100)
                     self.sub_task_done.emit(task_id, True)
                 except Exception as exc:
+                    if isinstance(exc, MemoryError):
+                        exc = MemoryPressureInterrupted(
+                            "系统在处理当前牧场数据时无法继续分配内存，"
+                            "已完成牧场和已提交阶段均已保留，当前牧场可重试。"
+                            "请关闭其他应用释放内存后继续处理。"
+                        )
                     interrupted = isinstance(exc, ChildProcessInterrupted)
-                    logger.exception(
-                        "牧场子任务%s: %s",
-                        "中断" if interrupted else "失败",
-                        name,
+                    memory_pressure = isinstance(
+                        exc,
+                        MemoryPressureInterrupted,
                     )
+                    if memory_pressure:
+                        paused_for_memory = True
+                        memory_pause_reason = str(exc)
+                    terminal_status = (
+                        "interrupted" if interrupted else "failed"
+                    )
+                    self._finish_running_stages(
+                        task_id,
+                        status=terminal_status,
+                        error=str(exc),
+                    )
+                    if memory_pressure:
+                        logger.warning(
+                            "牧场子任务因内存保护暂停: %s - %s",
+                            name,
+                            exc,
+                        )
+                    else:
+                        logger.exception(
+                            "牧场子任务%s: %s",
+                            "中断" if interrupted else "失败",
+                            name,
+                        )
                     FileManager.update_group_task(
                         self.project_path,
                         task_id,
-                        status="interrupted" if interrupted else "failed",
+                        status=terminal_status,
                         stage=(
-                            "子进程中断，可继续"
+                            "内存不足，已暂停，可继续"
+                            if memory_pressure
+                            else "子进程中断，可继续"
                             if interrupted
                             else "处理失败"
                         ),
@@ -868,10 +1136,13 @@ class MultiFarmTaskWorker(QThread):
                             "path": str(child_path),
                             "error": str(exc),
                             "interrupted": interrupted,
+                            "memory_pressure": memory_pressure,
                         }
                     )
                     self.sub_task_done.emit(task_id, False)
-                    if interrupted and self.isInterruptionRequested():
+                    if memory_pressure or (
+                        interrupted and self.isInterruptionRequested()
+                    ):
                         break
                 finally:
                     try:
@@ -914,6 +1185,9 @@ class MultiFarmTaskWorker(QThread):
                     "excel_path": excel_path,
                     "ppt_path": None,
                     "full_analysis": self.full_analysis,
+                    "paused_for_memory": paused_for_memory,
+                    "memory_pause_reason": memory_pause_reason,
+                    "resume_available": paused_for_memory,
                 }
             )
         except Exception as exc:

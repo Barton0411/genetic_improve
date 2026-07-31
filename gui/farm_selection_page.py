@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QDialog, QListWidget, QProgressDialog, QGroupBox, QFrame,
     QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QHeaderView, QButtonGroup, QRadioButton, QListWidgetItem,
-    QAbstractItemView, QComboBox, QInputDialog
+    QAbstractItemView, QComboBox, QInputDialog, QDialogButtonBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QColor, QBrush
@@ -37,6 +37,146 @@ HMY_CLASSIFICATION_OPTIONS = (
     ("A2", "a2"),
     ("DHA", "dha"),
 )
+
+DEFAULT_GROUP_DATASET_SELECTION = {
+    "herd": True,
+    "breeding": True,
+}
+
+
+def group_dataset_selection_policy(
+    selection=None,
+    *,
+    full_analysis: bool,
+    has_local_farms: bool = False,
+) -> dict:
+    """校验牧场组下载范围，并返回 UI 可直接使用的说明。"""
+
+    raw = (
+        DEFAULT_GROUP_DATASET_SELECTION
+        if selection is None
+        else selection
+    )
+    if not isinstance(raw, dict):
+        raw = {}
+    normalized = {
+        "herd": bool(raw.get("herd", False)),
+        "breeding": bool(raw.get("breeding", False)),
+    }
+    if not any(normalized.values()):
+        error = "请至少选择“牛群/系谱数据”或“配种记录”中的一项。"
+    elif has_local_farms and not normalized["herd"]:
+        error = (
+            "包含本地补充牧场时，必须下载牛群/系谱数据；"
+            "本地补充牧场项目至少需要牛群/系谱文件。"
+        )
+    elif full_analysis and not normalized["herd"]:
+        error = "创建牧场组并批量分析时，必须下载牛群/系谱数据。"
+    else:
+        error = ""
+
+    selected_labels = []
+    if normalized["herd"]:
+        selected_labels.append("牛群/系谱数据")
+    if normalized["breeding"]:
+        selected_labels.append("配种记录")
+
+    notice = ""
+    if full_analysis and normalized["herd"] and not normalized["breeding"]:
+        notice = (
+            "未下载配种记录时，已配公牛性状、已配公牛近交系数及"
+            "隐性基因分析会自动跳过。"
+        )
+
+    return {
+        "selection": normalized,
+        "valid": not error,
+        "error": error,
+        "notice": notice,
+        "selected_text": "、".join(selected_labels),
+    }
+
+
+class GroupDatasetSelectionDialog(QDialog):
+    """牧场组开始下载前的数据范围选择。"""
+
+    def __init__(
+        self,
+        *,
+        full_analysis: bool,
+        has_local_farms: bool = False,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.full_analysis = bool(full_analysis)
+        self.has_local_farms = bool(has_local_farms)
+        self.setWindowTitle("选择下载数据")
+        self.setMinimumWidth(460)
+
+        layout = QVBoxLayout(self)
+        title = QLabel(
+            "请选择本次牧场组需要下载的数据："
+        )
+        title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        layout.addWidget(title)
+
+        self.herd_checkbox = QCheckBox("牛群/系谱数据")
+        self.herd_checkbox.setChecked(True)
+        self.herd_checkbox.setToolTip(
+            "用于母牛性状、指数、系谱及母牛近交等分析"
+        )
+        layout.addWidget(self.herd_checkbox)
+
+        self.breeding_checkbox = QCheckBox("配种记录")
+        self.breeding_checkbox.setChecked(True)
+        self.breeding_checkbox.setToolTip(
+            "用于已配公牛性状、近交系数及隐性基因分析"
+        )
+        layout.addWidget(self.breeding_checkbox)
+
+        if self.full_analysis or self.has_local_farms:
+            self.herd_checkbox.setEnabled(False)
+            self.herd_checkbox.setToolTip(
+                "批量分析或本地补充牧场必须包含牛群/系谱数据"
+            )
+
+        self.hint_label = QLabel()
+        self.hint_label.setWordWrap(True)
+        layout.addWidget(self.hint_label)
+
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+
+        self.herd_checkbox.toggled.connect(self._refresh_policy)
+        self.breeding_checkbox.toggled.connect(self._refresh_policy)
+        self._refresh_policy()
+
+    def dataset_selection(self) -> dict:
+        return {
+            "herd": self.herd_checkbox.isChecked(),
+            "breeding": self.breeding_checkbox.isChecked(),
+        }
+
+    def _refresh_policy(self):
+        policy = group_dataset_selection_policy(
+            self.dataset_selection(),
+            full_analysis=self.full_analysis,
+            has_local_farms=self.has_local_farms,
+        )
+        ok_button = self.buttons.button(
+            QDialogButtonBox.StandardButton.Ok
+        )
+        if ok_button is not None:
+            ok_button.setEnabled(policy["valid"])
+        message = policy["error"] or policy["notice"]
+        color = "#c0392b" if policy["error"] else "#8a6d3b"
+        self.hint_label.setText(message)
+        self.hint_label.setStyleSheet(f"color: {color};")
 
 
 def _category_name(value) -> str:
@@ -76,22 +216,101 @@ def farm_selection_action_policy(selected_count: int) -> dict:
     return {
         "preview_enabled": has_selection,
         "create_enabled": has_selection,
-        "auto_report_enabled": count == 1,
+        "auto_report_enabled": has_selection,
         "create_text": (
             "创建牧场组项目" if is_group else "创建牧场项目"
         ),
         "auto_report_text": (
-            "自动报告仅支持单牧场"
+            "创建牧场组并批量分析"
             if is_group
             else "创建项目并自动生成报告"
         ),
         "auto_report_tooltip": (
-            "多选仅创建牧场组项目；请在子项目中按需完成分析，"
-            "全部就绪后再生成最终汇总Excel"
+            "逐场下载并完成育种分析，最终生成牧场组汇总Excel；"
+            "不执行个体选配，不批量生成PPT"
             if is_group
             else ""
         ),
     }
+
+
+def build_group_task_completion_lines(result: dict) -> list[str]:
+    """构建牧场组完成提示，确保失败任务不会被描述为已保存成功。"""
+    completed = result.get("completed", [])
+    all_incomplete = result.get("failed", [])
+    paused = [
+        item for item in all_incomplete
+        if item.get("memory_pressure")
+    ]
+    failed = [
+        item for item in all_incomplete
+        if not item.get("memory_pressure")
+    ]
+    summary_error = str(result.get("summary_error") or "")
+    excel_path = result.get("excel_path")
+    full_analysis = bool(result.get("full_analysis"))
+
+    if paused:
+        summary_line = (
+            f"牧场组任务处理完成：成功 {len(completed)} 个，"
+            f"安全暂停 {len(paused)} 个，失败 {len(failed)} 个。"
+        )
+    else:
+        summary_line = (
+            f"牧场组任务处理完成：成功 {len(completed)} 个，"
+            f"失败 {len(failed)} 个。"
+        )
+    lines = [summary_line, ""]
+    if excel_path:
+        lines.append("✅ 已生成最终牧场组汇总Excel")
+        lines.append("ℹ️ 牧场组不生成PPT；PPT请按单牧场需要生成")
+    elif paused:
+        lines.append("⏸️ 检测到内存安全余量不足，批处理已安全暂停")
+        lines.append("已完成牧场和已提交阶段均已保留，不需要重新开始。")
+        lines.append(
+            "请先关闭其他应用释放内存，再点击“释放内存后继续处理”。"
+        )
+    elif full_analysis and failed:
+        lines.append("⚠️ 存在失败牧场，未生成牧场组汇总Excel")
+        lines.append("已完成牧场的子项目结果已保留。")
+        lines.append("请检查失败任务，重试或从汇总范围移除后再生成。")
+    elif full_analysis and summary_error:
+        lines.append("⚠️ 单牧场任务已完成，但最终汇总未发布")
+        lines.append(summary_error[:240])
+        lines.append("单牧场结果均已保留，可修复问题后仅重试最终汇总。")
+    elif full_analysis:
+        lines.append("⚠️ 单牧场任务已完成，但最终汇总Excel未生成")
+        lines.append("单牧场结果均已保留，请检查汇总任务状态后重试。")
+    elif completed and not failed:
+        lines.append("✅ 每个牧场的数据已保存到独立子项目目录")
+    elif completed:
+        lines.append(
+            f"✅ 已完成的 {len(completed)} 个牧场数据已保存到独立子项目目录"
+        )
+        lines.append(
+            f"⚠️ 另有 {len(failed)} 个牧场未完成，修复问题后可继续处理。"
+        )
+    else:
+        lines.append("⚠️ 本次没有牧场完成，未生成可用的子项目数据")
+        lines.append("请检查失败原因，修复后继续处理未完成任务。")
+
+    if paused:
+        lines.append("")
+        lines.append("暂停任务：")
+        for item in paused[:8]:
+            lines.append(
+                f"• {item.get('farm_name')}: {str(item.get('error', ''))[:80]}"
+            )
+
+    if failed:
+        lines.append("")
+        lines.append("失败任务：")
+        for item in failed[:8]:
+            lines.append(
+                f"• {item.get('farm_name')}: {str(item.get('error', ''))[:80]}"
+            )
+
+    return lines
 
 
 class DataDownloadWorker(QThread):
@@ -1215,7 +1434,8 @@ class FarmSelectionPage(QWidget):
 
         warning_items = [
             "· 牛号和母亲号将添加牧场站号前缀避免重号",
-            "· 分析功能将根据当前数据源和已上传数据动态开放"
+            "· 开始处理前可选择下载牛群/系谱数据、配种记录或两者",
+            "· 分析功能将根据本次下载的数据动态开放"
         ]
         for item in warning_items:
             item_label = QLabel(item)
@@ -2053,13 +2273,34 @@ class FarmSelectionPage(QWidget):
         if len(farm_list) >= 2:
             info_lines.append("\n⚠️ 多选模式注意：")
             info_lines.append("• 每个牧场将作为独立子项目处理")
-            info_lines.append("• 本入口只逐场下载并标准化数据，不自动分析")
-            info_lines.append("• 后续进入子项目按需分析并生成单场Excel")
-            info_lines.append("• 全部就绪后手动生成最终牧场组汇总Excel")
+            info_lines.append("• 绿色按钮只创建项目并逐场准备数据")
+            info_lines.append("• 橙色按钮会逐场完成育种分析并生成最终汇总Excel")
+            info_lines.append("• 批量分析不执行个体选配，也不批量生成PPT")
+            info_lines.append("• 个体选配需进入对应单牧场子项目单独执行")
             info_lines.append("• 不生成阶段性汇总Excel")
-            info_lines.append("• 牧场组管理PPT按需手动生成")
+            info_lines.append("• PPT请进入对应单牧场子项目按需生成")
 
         QMessageBox.information(self, "预览选中数据", "\n".join(info_lines))
+
+    def _choose_group_dataset_selection(
+        self,
+        *,
+        full_analysis: bool,
+        has_local_farms: bool,
+    ):
+        dialog = GroupDatasetSelectionDialog(
+            full_analysis=full_analysis,
+            has_local_farms=has_local_farms,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        policy = group_dataset_selection_policy(
+            dialog.dataset_selection(),
+            full_analysis=full_analysis,
+            has_local_farms=has_local_farms,
+        )
+        return policy["selection"] if policy["valid"] else None
 
     def on_create_project_clicked(self):
         """创建项目按钮点击"""
@@ -2077,6 +2318,20 @@ class FarmSelectionPage(QWidget):
             return
         farm_list = interface_farms + local_farms
         is_merged = len(farm_list) > 1
+        dataset_selection = None
+        dataset_policy = None
+        if is_merged:
+            dataset_selection = self._choose_group_dataset_selection(
+                full_analysis=False,
+                has_local_farms=bool(local_farms),
+            )
+            if dataset_selection is None:
+                return
+            dataset_policy = group_dataset_selection_policy(
+                dataset_selection,
+                full_analysis=False,
+                has_local_farms=bool(local_farms),
+            )
 
         # 确认对话框
         if is_merged:
@@ -2086,6 +2341,7 @@ class FarmSelectionPage(QWidget):
                 f"和 {len(local_farms)} 个本地补充牧场\n\n"
                 f"系统将为每个牧场创建独立子项目并分别下载、标准化数据，"
                 f"不会把所有牛只明细合并到一个超大文件。\n\n"
+                f"本次下载：{dataset_policy['selected_text']}。\n\n"
                 f"每个牧场完成后可立即打开对应子项目目录。\n\n"
                 f"是否继续?"
             )
@@ -2105,9 +2361,11 @@ class FarmSelectionPage(QWidget):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            self.create_farm_project()
+            self.create_farm_project(
+                dataset_selection=dataset_selection,
+            )
 
-    def create_farm_project(self):
+    def create_farm_project(self, dataset_selection=None):
         """创建牧场项目"""
         if self.data_source == "慧牧云" and not self.hmy_access_allowed:
             QMessageBox.warning(self, "未开通", "当前账号未开通慧牧云功能。")
@@ -2121,6 +2379,20 @@ class FarmSelectionPage(QWidget):
             return
         farms_info = interface_farms + local_farms
         is_merged = len(farms_info) > 1
+        if is_merged:
+            dataset_policy = group_dataset_selection_policy(
+                dataset_selection,
+                full_analysis=False,
+                has_local_farms=bool(local_farms),
+            )
+            if not dataset_policy["valid"]:
+                QMessageBox.warning(
+                    self,
+                    "下载数据选择无效",
+                    dataset_policy["error"],
+                )
+                return
+            dataset_selection = dataset_policy["selection"]
 
         try:
             # 创建项目文件夹
@@ -2134,6 +2406,7 @@ class FarmSelectionPage(QWidget):
                     farms_info,
                     data_source=self.data_source,
                     task_mode="data_only",
+                    dataset_selection=dataset_selection,
                 )
                 from core.data.composite_farm_manager import (
                     persist_group_local_input_bundles,
@@ -2157,6 +2430,7 @@ class FarmSelectionPage(QWidget):
                     project_path,
                     farms_info,
                     full_analysis=False,
+                    dataset_selection=dataset_selection,
                 )
                 return
 
@@ -2349,17 +2623,40 @@ class FarmSelectionPage(QWidget):
             return
 
         farms_info = interface_farms + local_farms
+        dataset_selection = None
+        dataset_policy = None
         if len(farms_info) > 1:
-            QMessageBox.information(
-                self,
-                "多选仅创建牧场组",
-                "多选牧场不执行一键自动报告。\n\n"
-                "请点击“创建牧场组项目”逐场准备数据；后续可进入各子项目"
-                "按需完成分析，全部就绪后再生成最终汇总Excel。",
+            dataset_selection = self._choose_group_dataset_selection(
+                full_analysis=True,
+                has_local_farms=bool(local_farms),
             )
-            return
-
-        if self.data_source == "慧牧云":
+            if dataset_selection is None:
+                return
+            dataset_policy = group_dataset_selection_policy(
+                dataset_selection,
+                full_analysis=True,
+                has_local_farms=bool(local_farms),
+            )
+            breeding_notice = (
+                f"\n注意：{dataset_policy['notice']}\n"
+                if dataset_policy["notice"]
+                else ""
+            )
+            confirm_msg = (
+                f"即将创建{self.data_source}牧场组并批量分析\n\n"
+                f"包含 {len(interface_farms)} 个接口牧场"
+                f"和 {len(local_farms)} 个本地补充牧场。\n\n"
+                f"本次下载：{dataset_policy['selected_text']}。\n\n"
+                "系统将按牧场逐个执行：\n"
+                "1. 下载并标准化本场数据\n"
+                "2. 完成本场可用的育种性状、指数及近交分析\n"
+                "3. 保存本场分析结果\n"
+                "4. 全部成功后生成最终牧场组汇总Excel\n\n"
+                "不会批量执行个体选配，也不会批量生成PPT。\n"
+                "个体选配请进入对应的单牧场子项目操作。\n\n"
+                f"{breeding_notice}\n是否继续？"
+            )
+        elif self.data_source == "慧牧云":
             confirm_msg = (
                 "即将创建慧牧云项目并自动生成当前可用报告\n\n"
                 "系统将自动执行:\n"
@@ -2399,9 +2696,11 @@ class FarmSelectionPage(QWidget):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            self._start_auto_report()
+            self._start_auto_report(
+                dataset_selection=dataset_selection,
+            )
 
-    def _start_auto_report(self):
+    def _start_auto_report(self, dataset_selection=None):
         """启动自动报告生成流程"""
         if self.data_source == "慧牧云" and not self.hmy_access_allowed:
             QMessageBox.warning(self, "未开通", "当前账号未开通慧牧云功能。")
@@ -2415,11 +2714,54 @@ class FarmSelectionPage(QWidget):
             return
         farms_info = interface_farms + local_farms
         if len(farms_info) > 1:
-            QMessageBox.information(
-                self,
-                "多选仅创建牧场组",
-                "多选牧场不执行一键自动报告，请使用“创建牧场组项目”。",
+            dataset_policy = group_dataset_selection_policy(
+                dataset_selection,
+                full_analysis=True,
+                has_local_farms=bool(local_farms),
             )
+            if not dataset_policy["valid"]:
+                QMessageBox.warning(
+                    self,
+                    "下载数据选择无效",
+                    dataset_policy["error"],
+                )
+                return
+            dataset_selection = dataset_policy["selection"]
+            try:
+                from config.settings import Settings
+                from core.data.composite_farm_manager import (
+                    persist_group_local_input_bundles,
+                )
+
+                base_path = Path(Settings().get_default_storage())
+                project_path = FileManager.create_group_project(
+                    base_path,
+                    farms_info,
+                    data_source=self.data_source,
+                    task_mode="analysis",
+                    dataset_selection=dataset_selection,
+                )
+                persist_group_local_input_bundles(
+                    project_path,
+                    farms_info,
+                )
+                self.logger.info(
+                    "牧场组批量分析项目已创建: %s",
+                    project_path,
+                )
+                self._start_group_tasks(
+                    project_path,
+                    farms_info,
+                    full_analysis=True,
+                    dataset_selection=dataset_selection,
+                )
+            except Exception as exc:
+                self.logger.exception("创建牧场组批量分析项目失败")
+                QMessageBox.critical(
+                    self,
+                    "创建失败",
+                    f"无法创建牧场组批量分析项目：\n{exc}",
+                )
             return
 
         try:
@@ -2516,7 +2858,13 @@ class FarmSelectionPage(QWidget):
                 f"无法创建项目文件夹:\n{str(e)}"
             )
 
-    def _start_group_tasks(self, project_path, farms_info, full_analysis):
+    def _start_group_tasks(
+        self,
+        project_path,
+        farms_info,
+        full_analysis,
+        dataset_selection=None,
+    ):
         """启动牧场组逐场处理；子项目完成后在进度窗口开放目录。"""
         from gui.multi_farm_task_worker import MultiFarmTaskWorker
         from gui.progress import ProgressDialog
@@ -2542,6 +2890,7 @@ class FarmSelectionPage(QWidget):
             data_source=self.data_source,
             service_staff=getattr(self, "login_user_name", None) or "",
             full_analysis=full_analysis,
+            dataset_selection=dataset_selection,
         )
         self.group_worker.progress.connect(
             lambda pct, msg: self._on_auto_report_progress(dialog, pct, msg)
@@ -2606,6 +2955,7 @@ class FarmSelectionPage(QWidget):
             project_path,
             farms_info,
             full_analysis=metadata.get("task_mode") == "analysis",
+            dataset_selection=metadata.get("dataset_selection"),
         )
 
     def _on_group_tasks_finished(self, dialog, project_path, result):
@@ -2613,33 +2963,8 @@ class FarmSelectionPage(QWidget):
         dialog.set_task_info("牧场组任务处理完成")
         dialog.close()
 
-        completed = result.get("completed", [])
-        failed = result.get("failed", [])
-        summary_error = str(result.get("summary_error") or "")
         excel_path = result.get("excel_path")
-        lines = [
-            f"牧场组任务处理完成：成功 {len(completed)} 个，失败 {len(failed)} 个。",
-            "",
-        ]
-        if excel_path:
-            lines.append("✅ 已生成最终牧场组汇总Excel")
-            lines.append("ℹ️ 牧场组PPT可在“自动化生成”页面按需生成")
-        elif result.get("full_analysis") and failed:
-            lines.append("⚠️ 存在失败牧场，未生成牧场组汇总Excel")
-            lines.append("请打开对应子项目检查，重试或从汇总范围移除后再生成。")
-        elif result.get("full_analysis") and summary_error:
-            lines.append("⚠️ 单牧场任务已完成，但最终汇总未发布")
-            lines.append(summary_error[:240])
-            lines.append("单牧场结果均已保留，可修复问题后仅重试最终汇总。")
-        else:
-            lines.append("✅ 每个牧场的数据已保存到独立子项目目录")
-        if failed:
-            lines.append("")
-            lines.append("失败任务：")
-            for item in failed[:8]:
-                lines.append(
-                    f"• {item.get('farm_name')}: {str(item.get('error', ''))[:80]}"
-                )
+        lines = build_group_task_completion_lines(result)
 
         message = QMessageBox(self)
         message.setWindowTitle("牧场组任务完成")
@@ -2649,12 +2974,24 @@ class FarmSelectionPage(QWidget):
             open_excel = message.addButton("打开汇总Excel", QMessageBox.ButtonRole.ActionRole)
         else:
             open_excel = None
+        if result.get("resume_available"):
+            resume_button = message.addButton(
+                "释放内存后继续处理",
+                QMessageBox.ButtonRole.ActionRole,
+            )
+        else:
+            resume_button = None
         message.addButton("关闭", QMessageBox.ButtonRole.AcceptRole)
         message.exec()
         if message.clickedButton() is open_group:
             self._open_path(str(project_path))
         elif open_excel is not None and message.clickedButton() is open_excel:
             self._open_file(excel_path)
+        elif (
+            resume_button is not None
+            and message.clickedButton() is resume_button
+        ):
+            self.continue_group_project(project_path)
 
         self.selected_farms.clear()
         self._clear_local_farms()

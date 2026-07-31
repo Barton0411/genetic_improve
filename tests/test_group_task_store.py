@@ -396,6 +396,39 @@ class GroupTaskStoreTests(unittest.TestCase):
             self.store.release_run_lease(second["lease_token"])
         )
 
+    def test_expired_matching_lease_can_resume_after_host_sleep(self):
+        start = datetime(2026, 7, 29, 10, 30, tzinfo=timezone.utc)
+        lease = self.store.acquire_run_lease(
+            "sleeping-worker",
+            run_kind="batch",
+            lease_seconds=30,
+            at=start,
+        )
+        self.assertIsNotNone(lease)
+        assert lease is not None
+
+        refreshed = self.store.refresh_run_lease(
+            lease["lease_token"],
+            lease_seconds=60,
+            at=start + timedelta(hours=2),
+        )
+
+        self.assertIsNotNone(refreshed)
+        assert refreshed is not None
+        self.assertEqual(
+            refreshed["lease_token"],
+            lease["lease_token"],
+        )
+        blocked = self.store.acquire_run_lease(
+            "replacement",
+            run_kind="summary",
+            at=start + timedelta(hours=2, seconds=1),
+        )
+        self.assertIsNone(blocked)
+        self.assertTrue(
+            self.store.release_run_lease(lease["lease_token"])
+        )
+
     def test_acquire_run_lease_rejects_stale_selection_revision(self):
         task_id = self.store.initialize_tasks(
             [{"farm_code": "6003", "farm_name": "版本校验牧场"}]

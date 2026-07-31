@@ -24,6 +24,7 @@ class ExcelReportGenerator:
         progress_callback=None,
         farm_name: str = None,
         max_workers: int = 6,
+        include_mating: bool = True,
     ):
         """
         初始化生成器
@@ -39,6 +40,7 @@ class ExcelReportGenerator:
         self.farm_name = farm_name
         self.progress_callback = progress_callback
         self.max_workers = max(1, int(max_workers or 1))
+        self.include_mating = bool(include_mating)
 
         # 初始化workbook
         self.wb = Workbook()
@@ -328,7 +330,11 @@ class ExcelReportGenerator:
             future_traits = executor.submit(collect_traits_data, self.analysis_folder, self.project_folder)
             future_cow_idx = executor.submit(collect_cow_index_data, self.analysis_folder, self.project_folder)
             future_bull_rank = executor.submit(collect_bull_ranking_data, self.analysis_folder)
-            future_mating = executor.submit(collect_mating_data, self.analysis_folder)
+            future_mating = (
+                executor.submit(collect_mating_data, self.analysis_folder)
+                if self.include_mating
+                else None
+            )
 
             # 收集组结果
             for name, future in [('A-配种', future_a), ('B-公牛', future_b), ('C-备选', future_c)]:
@@ -342,8 +348,13 @@ class ExcelReportGenerator:
             independent_futures = [
                 ('farm_info', future_farm), ('pedigree', future_pedigree),
                 ('traits', future_traits), ('cow_index', future_cow_idx),
-                ('bull_ranking', future_bull_rank), ('mating', future_mating),
+                ('bull_ranking', future_bull_rank),
             ]
+            if future_mating is not None:
+                independent_futures.append(('mating', future_mating))
+            else:
+                results["mating"] = {}
+                logger.info("牧场组批量报告不汇入个体选配结果")
             for key, future in independent_futures:
                 try:
                     results[key] = future.result()

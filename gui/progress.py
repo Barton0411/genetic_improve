@@ -218,7 +218,7 @@ class ProgressDialog(QDialog):
 
             # 任务名
             name_label = QLabel(name)
-            name_label.setFixedWidth(180 if path else 130)
+            name_label.setFixedWidth(220 if path else 160)
             name_label.setStyleSheet("font-size: 11px;")
             row_layout.addWidget(name_label)
 
@@ -246,7 +246,7 @@ class ProgressDialog(QDialog):
                 open_button = QPushButton("打开")
                 open_button.setFixedWidth(48)
                 open_button.setVisible(False)
-                open_button.setToolTip("打开已完成的牧场子项目目录")
+                open_button.setToolTip("打开已结束的牧场子项目目录")
                 open_button.clicked.connect(
                     lambda checked=False, target=path: QDesktopServices.openUrl(
                         QUrl.fromLocalFile(target)
@@ -259,6 +259,7 @@ class ProgressDialog(QDialog):
                 "icon": icon_label,
                 "bar": bar,
                 "name": name_label,
+                "base_name": name,
                 "open": open_button,
             }
 
@@ -280,6 +281,10 @@ class ProgressDialog(QDialog):
         if success:
             w["icon"].setText("\u2713")  # 对勾
             w["icon"].setStyleSheet("color: #27ae60; font-weight: bold;")
+            w["name"].setText(f"{w.get('base_name', '')}  已完成")
+            w["name"].setStyleSheet(
+                "font-size: 11px; color: #1e8449; font-weight: bold;"
+            )
             w["bar"].setValue(100)
             w["bar"].setStyleSheet("""
                 QProgressBar {
@@ -297,6 +302,10 @@ class ProgressDialog(QDialog):
         else:
             w["icon"].setText("\u2717")  # 叉号
             w["icon"].setStyleSheet("color: #e74c3c; font-weight: bold;")
+            w["name"].setText(f"{w.get('base_name', '')}  失败")
+            w["name"].setStyleSheet(
+                "font-size: 11px; color: #c0392b; font-weight: bold;"
+            )
             w["bar"].setStyleSheet("""
                 QProgressBar {
                     border: 1px solid #ccc;
@@ -308,6 +317,10 @@ class ProgressDialog(QDialog):
                     border-radius: 2px;
                 }
             """)
+            # 即使分析失败，子项目仍保留已下载数据、已提交阶段和错误
+            # 记录。允许用户立即打开目录检查或补充材料。
+            if w.get("open") is not None:
+                w["open"].setVisible(True)
 
     def hide_sub_tasks(self):
         """隐藏子任务区域"""
