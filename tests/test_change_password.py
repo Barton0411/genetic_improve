@@ -127,6 +127,14 @@ class ChangePasswordRouteTests(unittest.TestCase):
         token = self.auth_api.create_access_token(username)
         return {"Authorization": f"Bearer {token}"}
 
+    def _first_login_headers(self, username="local-user"):
+        token = self.auth_api.create_access_token(
+            username,
+            must_change_password=True,
+            auth_type="local",
+        )
+        return {"Authorization": f"Bearer {token}"}
+
     def test_changes_only_authenticated_users_own_password(self):
         engine = _FakeEngine(rowcount=1)
         with patch.object(
@@ -146,6 +154,37 @@ class ChangePasswordRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["success"])
         self.assertEqual(engine.connection.params["username"], "local-user")
+
+    def test_first_login_token_can_only_change_password(self):
+        headers = self._first_login_headers()
+        verify_response = self.client.post("/api/auth/verify", headers=headers)
+        self.assertEqual(verify_response.status_code, 403)
+        self.assertEqual(verify_response.json()["detail"], "必须先修改密码")
+
+        with patch.object(
+            self.auth_api,
+            "get_db_engine",
+            return_value=_FakeEngine(rowcount=1),
+        ):
+            change_response = self.client.post(
+                "/api/auth/change-password",
+                json={
+                    "current_password": "old-password",
+                    "new_password": "new-password",
+                },
+                headers=headers,
+            )
+
+        self.assertEqual(change_response.status_code, 200)
+        payload = change_response.json()
+        self.assertTrue(payload["success"])
+        self.assertFalse(payload["data"]["must_change_password"])
+        replacement = payload["data"]["token"]
+        verified = self.client.post(
+            "/api/auth/verify",
+            headers={"Authorization": f"Bearer {replacement}"},
+        )
+        self.assertEqual(verified.status_code, 200)
 
     def test_rejects_incorrect_current_password(self):
         with patch.object(
