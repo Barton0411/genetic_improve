@@ -827,7 +827,7 @@ class HMYAuthRouteTests(unittest.TestCase):
             TEST_YQN_CREDENTIAL,
         )
 
-    def test_yqn_exchange_rejects_non_whitelisted_user(self):
+    def test_yqn_exchange_allows_valid_non_whitelisted_user(self):
         with patch.object(
             self.auth_api,
             "verify_yqn_access_token",
@@ -840,7 +840,11 @@ class HMYAuthRouteTests(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["data"]["auth_type"], "yqn")
+        self.assertFalse(payload["data"]["must_change_password"])
 
     def test_yqn_exchange_rejects_invalid_yqn_token(self):
         with patch.object(

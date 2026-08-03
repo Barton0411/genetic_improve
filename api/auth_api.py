@@ -93,19 +93,26 @@ def get_db_engine():
     """获取数据库引擎"""
     return create_engine(DATABASE_URL, echo=False)
 
-def create_access_token(username: str) -> str:
+def create_access_token(
+    username: str,
+    *,
+    must_change_password: bool = False,
+    auth_type: str = "local",
+) -> str:
     """创建JWT访问令牌"""
     expire = datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS)
     to_encode = {
         "sub": username,
+        "must_change_password": bool(must_change_password),
+        "auth_type": auth_type,
         "exp": expire,
         "iat": datetime.utcnow()
     }
     encoded_jwt = jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return encoded_jwt
 
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-    """验证JWT令牌"""
+def _decode_token(credentials: HTTPAuthorizationCredentials) -> Dict[str, Any]:
+    """验证 JWT 并返回载荷，不记录令牌原文。"""
     try:
         token = credentials.credentials
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
@@ -115,17 +122,35 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) 
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="无效的令牌"
             )
-        return username
+        return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="令牌已过期"
         )
-    except jwt.JWTError:
+    except jwt.InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="无效的令牌"
         )
+
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+    """验证完整登录令牌；待改密账号不能访问普通受保护接口。"""
+    payload = _decode_token(credentials)
+    if payload.get("must_change_password") is True:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="必须先修改密码",
+        )
+    return str(payload["sub"])
+
+
+def verify_token_for_password_change(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> str:
+    """改密接口允许使用受限的首次登录令牌。"""
+    return str(_decode_token(credentials)["sub"])
 
 def hash_password(password: str) -> str:
     """简单密码哈希（与现有系统兼容）"""
@@ -151,7 +176,15 @@ async def login(request: LoginRequest):
         with engine.connect() as connection:
             # 验证用户名密码
             result = connection.execute(
-                text("SELECT ID, PW, name FROM `id-pw` WHERE ID=:username AND PW=:password"),
+                text(
+                    """
+                    SELECT p.ID, p.PW, p.name,
+                           COALESCE(s.must_change_password, 0)
+                    FROM `id-pw` AS p
+                    LEFT JOIN auth_password_state AS s ON s.user_id = p.ID
+                    WHERE p.ID=:username AND p.PW=:password
+                    """
+                ),
                 {"username": request.username, "password": request.password}
             ).fetchone()
 
@@ -163,7 +196,12 @@ async def login(request: LoginRequest):
                 )
 
             # 生成JWT令牌
-            token = create_access_token(request.username)
+            must_change_password = bool(result[3])
+            token = create_access_token(
+                request.username,
+                must_change_password=must_change_password,
+                auth_type="local",
+            )
 
             return APIResponse(
                 success=True,
@@ -172,16 +210,18 @@ async def login(request: LoginRequest):
                     "token": token,
                     "user_id": result[0],
                     "name": result[2] if len(result) > 2 else None,
-                    "expires_in": JWT_EXPIRE_HOURS * 3600
+                    "expires_in": JWT_EXPIRE_HOURS * 3600,
+                    "must_change_password": must_change_password,
+                    "auth_type": "local",
                 },
                 timestamp=int(datetime.utcnow().timestamp())
             )
 
     except Exception as e:
-        logger.error(f"登录失败: {e}")
+        logger.error("登录失败: error=%s", type(e).__name__)
         return APIResponse(
             success=False,
-            message=f"登录失败: {str(e)}",
+            message="登录失败，请稍后重试",
             timestamp=int(datetime.utcnow().timestamp())
         )
 
@@ -191,7 +231,7 @@ async def register(request: RegisterRequest):
     try:
         engine = get_db_engine()
 
-        with engine.connect() as connection:
+        with engine.begin() as connection:
             # 检查用户是否已存在
             result = connection.execute(
                 text("SELECT ID FROM `id-pw` WHERE ID=:employee_id"),
@@ -248,46 +288,50 @@ async def register(request: RegisterRequest):
                     timestamp=int(datetime.utcnow().timestamp())
                 )
 
-            # 开始事务
-            trans = connection.begin()
-            try:
-                # 创建用户
-                connection.execute(
-                    text("INSERT INTO `id-pw` (ID, PW, name) VALUES (:employee_id, :password, :name)"),
-                    {
-                        "employee_id": request.employee_id,
-                        "password": hash_password(request.password),
-                        "name": request.name
-                    }
-                )
+            # 创建用户。新用户已经自行设置密码，不需要再次强制改密。
+            connection.execute(
+                text("INSERT INTO `id-pw` (ID, PW, name) VALUES (:employee_id, :password, :name)"),
+                {
+                    "employee_id": request.employee_id,
+                    "password": hash_password(request.password),
+                    "name": request.name
+                }
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO auth_password_state
+                        (user_id, must_change_password, password_changed_at)
+                    VALUES (:employee_id, 0, NOW())
+                    ON DUPLICATE KEY UPDATE
+                        must_change_password=0,
+                        password_changed_at=NOW()
+                    """
+                ),
+                {"employee_id": request.employee_id},
+            )
 
-                # 更新邀请码使用次数
-                connection.execute(
-                    text("""
-                        UPDATE invitation_codes
-                        SET current_uses = current_uses + 1
-                        WHERE code = :invite_code
-                    """),
-                    {"invite_code": request.invite_code}
-                )
+            # 更新邀请码使用次数
+            connection.execute(
+                text("""
+                    UPDATE invitation_codes
+                    SET current_uses = current_uses + 1
+                    WHERE code = :invite_code
+                """),
+                {"invite_code": request.invite_code}
+            )
 
-                trans.commit()
-
-                return APIResponse(
-                    success=True,
-                    message="注册成功",
-                    timestamp=int(datetime.utcnow().timestamp())
-                )
-
-            except Exception as e:
-                trans.rollback()
-                raise e
+            return APIResponse(
+                success=True,
+                message="注册成功",
+                timestamp=int(datetime.utcnow().timestamp())
+            )
 
     except Exception as e:
-        logger.error(f"注册失败: {e}")
+        logger.error("注册失败: error=%s", type(e).__name__)
         return APIResponse(
             success=False,
-            message=f"注册失败: {str(e)}",
+            message="注册失败，请稍后重试",
             timestamp=int(datetime.utcnow().timestamp())
         )
 
@@ -332,7 +376,7 @@ async def get_profile(current_user: str = Depends(verify_token)):
 @app.post("/api/auth/change-password")
 async def change_password(
     request: ChangePasswordRequest,
-    current_user: str = Depends(verify_token),
+    current_user: str = Depends(verify_token_for_password_change),
 ):
     """由已登录的本地账号修改自己的密码。"""
     if request.current_password == request.new_password:
@@ -360,6 +404,21 @@ async def change_password(
                 },
             )
 
+            if result.rowcount == 1:
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO auth_password_state
+                            (user_id, must_change_password, password_changed_at)
+                        VALUES (:username, 0, NOW())
+                        ON DUPLICATE KEY UPDATE
+                            must_change_password=0,
+                            password_changed_at=NOW()
+                        """
+                    ),
+                    {"username": current_user},
+                )
+
         if result.rowcount != 1:
             return APIResponse(
                 success=False,
@@ -371,6 +430,16 @@ async def change_password(
         return APIResponse(
             success=True,
             message="密码修改成功",
+            data={
+                "token": create_access_token(
+                    current_user,
+                    must_change_password=False,
+                    auth_type="local",
+                ),
+                "must_change_password": False,
+                "auth_type": "local",
+                "expires_in": JWT_EXPIRE_HOURS * 3600,
+            },
             timestamp=int(datetime.utcnow().timestamp()),
         )
     except Exception as e:
@@ -386,7 +455,7 @@ async def change_password(
 def exchange_yqn_token(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
-    """核验伊起牛登录令牌，并为慧牧云代理签发本软件 JWT。"""
+    """核验伊起牛登录令牌，并签发通用软件 JWT。"""
     try:
         username = verify_yqn_access_token(credentials.credentials)
     except YQNAuthError as exc:
@@ -396,20 +465,20 @@ def exchange_yqn_token(
             detail="伊起牛登录状态已失效",
         ) from exc
 
-    if not is_hmy_user_allowed(username):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="当前账号未开通慧牧云功能",
-        )
-
-    token = create_access_token(username)
+    token = create_access_token(
+        username,
+        must_change_password=False,
+        auth_type="yqn",
+    )
     logger.info("伊起牛登录令牌换票成功: user=%s", username)
     return APIResponse(
         success=True,
-        message="慧牧云登录授权成功",
+        message="伊起牛登录授权成功",
         data={
             "token": token,
             "user_id": username,
+            "must_change_password": False,
+            "auth_type": "yqn",
             "expires_in": JWT_EXPIRE_HOURS * 3600,
         },
         timestamp=int(datetime.utcnow().timestamp()),
